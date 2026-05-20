@@ -1,0 +1,265 @@
+"""CDP로 기존 Chrome에 연결하여 보험료 납부확인서 발급 자동화"""
+import asyncio
+import sys
+import os
+import shutil
+import glob
+import subprocess
+import time
+from datetime import datetime
+from playwright.async_api import async_playwright
+
+if sys.platform == "win32":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
+
+CDP_URL = "http://localhost:9222"
+MINWON_URL = "https://www.nhis.or.kr/nhis/minwon/minwonServiceBoard.do"
+PDF_PASSWORD = "880718"
+
+# 프로젝트 루트 경로
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+sys.path.insert(0, PROJECT_ROOT)
+from src.utils.pdf_reader import postprocess_pdf
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+def is_valid_pdf(path):
+    """파일이 유효한 PDF인지 확인 (헤더가 %PDF로 시작)"""
+    try:
+        with open(path, "rb") as f:
+            header = f.read(5)
+            return header == b"%PDF-"
+    except Exception:
+        return False
+
+
+def find_chrome():
+    """Chrome 실행 파일 경로 찾기"""
+    paths = [
+        os.path.join(os.environ.get("PROGRAMFILES", ""), "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "Application", "chrome.exe"),
+    ]
+    for p in paths:
+        if os.path.exists(p):
+            return p
+    return None
+
+
+async def check_cdp_available():
+    """CDP 포트 9222가 활성인지 확인"""
+    try:
+        import urllib.request
+        with urllib.request.urlopen("http://localhost:9222/json/version", timeout=2) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+def kill_chrome():
+    """기존 Chrome 프로세스 종료"""
+    subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(3)
+
+
+async def run():
+    async with async_playwright() as p:
+        # ===== Chrome 연결 =====
+        log("Chrome 브라우저 연결 확인 중...")
+
+        if not await check_cdp_available():
+            chrome_path = find_chrome()
+            if not chrome_path:
+                log("Chrome 브라우저를 찾을 수 없습니다. Chrome을 설치해 주세요.")
+                return
+
+            log("기존 Chrome을 종료하고 디버깅 모드로 재실행합니다...")
+            kill_chrome()
+
+            subprocess.Popen([
+                chrome_path,
+                "--remote-debugging-port=9222",
+                "--user-data-dir=" + os.path.join(os.environ.get("TEMP", "/tmp"), "chrome-nhis"),
+                "--start-maximized",
+                "https://www.nhis.or.kr"
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            log("Chrome 실행 대기...")
+            for _ in range(30):
+                await asyncio.sleep(1)
+                if await check_cdp_available():
+                    log("Chrome 연결 성공!")
+                    break
+            else:
+                log("Chrome 실행 실패. 수동으로 실행해 주세요.")
+                return
+
+        # ===== CDP 연결 =====
+        try:
+            browser = await p.chromium.connect_over_cdp(CDP_URL)
+        except Exception as e:
+            log(f"연결 실패: {e}")
+            return
+
+        context = browser.contexts[0]
+        page = context.pages[0]
+
+        # 이전 팝업 탭 정리
+        for pg in context.pages[1:]:
+            try:
+                await pg.close()
+            except Exception:
+                pass
+
+        # ===== 로그인 확인 =====
+        await page.goto("https://www.nhis.or.kr/nhis/index.do", wait_until="domcontentloaded")
+        await asyncio.sleep(2)
+
+        if await page.locator("text=로그아웃").count() == 0:
+            log("\n브라우저에서 로그인을 진행해 주세요.")
+            log("로그인 완료 후 Enter를 누르세요.")
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, input)
+
+            if await page.locator("text=로그아웃").count() == 0:
+                log("로그인되지 않았습니다. 종료합니다.")
+                return
+
+        log("로그인 확인됨. 자동화 시작.\n")
+
+        # ===== [1/3] 민원 서비스 → 발급 페이지 =====
+        log("[1/3] 민원 서비스 → 보험료 납부확인서 발급 페이지 이동...")
+        await page.goto(MINWON_URL, wait_until="domcontentloaded")
+        await asyncio.sleep(3)
+
+        href = await page.evaluate("""() => {
+            const items = document.querySelectorAll('li');
+            for (const li of items) {
+                if (li.textContent.includes('보험료 납부확인서') && !li.textContent.includes('완납증명서')) {
+                    for (const a of li.querySelectorAll('a')) {
+                        if (a.textContent.trim().includes('발급하기')) return a.href;
+                    }
+                }
+            }
+            return null;
+        }""")
+
+        if not href:
+            log("  발급하기 버튼을 찾지 못했습니다.")
+            return
+
+        log(f"  발급 페이지 이동: {href}")
+        await page.goto(href, wait_until="domcontentloaded")
+        await asyncio.sleep(3)
+
+        # ===== [2/3] 출력 버튼 → 모달 확인 =====
+        log("[2/3] 출력 버튼 클릭 → 확인 모달 처리...")
+
+        download_future = asyncio.Future()
+
+        def on_dl(d):
+            if not download_future.done():
+                log(f"  [다운로드 감지] {d.suggested_filename}")
+                download_future.set_result(d)
+
+        page.on("download", on_dl)
+        context.on("page", lambda np: np.on("download", on_dl))
+
+        await page.evaluate("""() => {
+            const buttons = document.querySelectorAll('button');
+            for (const btn of buttons) {
+                if ((btn.textContent || '').trim() === '출력' && btn.offsetParent !== null) {
+                    const onclick = btn.getAttribute('onclick') || '';
+                    if (onclick.includes('fn_openPrint')) {
+                        eval(onclick);
+                        return;
+                    }
+                }
+            }
+        }""")
+
+        for _ in range(50):
+            if await page.evaluate("""() => {
+                const m = document.querySelector('#common-CONFIRM-modal');
+                return m && m.offsetParent !== null;
+            }"""):
+                break
+            await asyncio.sleep(0.2)
+
+        await page.evaluate("""() => {
+            const btn = document.querySelector('#modal-confirm');
+            if (btn) btn.click();
+        }""")
+        log("  모달 확인 클릭 완료.")
+
+        # ===== [3/3] PDF 다운로드 대기 =====
+        log("[3/3] PDF 다운로드 대기...")
+
+        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+        downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+        fname = f"{datetime.now().strftime('%Y%m%d')}_보험료납부확인서.pdf"
+        save_path = os.path.join(desktop, fname)
+
+        try:
+            download = await asyncio.wait_for(download_future, timeout=60.0)
+            log(f"  파일명: {download.suggested_filename}")
+
+            try:
+                await download.save_as(save_path)
+                if os.path.exists(save_path) and is_valid_pdf(save_path):
+                    log(f"\n  성공! PDF 저장: {save_path}")
+                else:
+                    raise Exception("invalid pdf")
+            except Exception:
+                log("  Downloads 폴더에서 실제 PDF 파일을 찾습니다...")
+                time.sleep(3)
+
+                pdf_files = sorted(
+                    glob.glob(os.path.join(downloads, "nhis-*.pdf")),
+                    key=os.path.getmtime,
+                    reverse=True
+                )
+
+                if pdf_files and is_valid_pdf(pdf_files[0]):
+                    shutil.copy2(pdf_files[0], save_path)
+                    log(f"\n  성공! PDF 저장: {save_path}")
+                else:
+                    log("  PDF 파일을 찾지 못했습니다.")
+
+        # ===== 후처리: 복호화 + 텍스트 추출 =====
+        if os.path.exists(save_path):
+            log("\n[후처리] PDF 복호화 및 텍스트 추출 중...")
+            try:
+                pdf_path, txt_path = postprocess_pdf(save_path, PDF_PASSWORD)
+                log(f"  완료! 복호화 PDF: {pdf_path}")
+                log(f"  완료! 텍스트 파일: {txt_path}")
+            except Exception as e:
+                log(f"  후처리 실패: {e}")
+
+        except asyncio.TimeoutError:
+            log("  다운로드 시간 초과. Downloads 폴더를 확인하세요.")
+
+        # ===== 정리 =====
+        await asyncio.sleep(2)
+        for pg in context.pages:
+            if pg != page:
+                try:
+                    await pg.close()
+                    log("  팝업 탭 닫음.")
+                except Exception:
+                    pass
+
+        await page.goto("https://www.nhis.or.kr/nhis/index.do", wait_until="domcontentloaded")
+        log("  메인 페이지로 복귀.")
+
+        log("\n완료.")
+
+
+if __name__ == "__main__":
+    asyncio.run(run())
