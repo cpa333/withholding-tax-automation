@@ -232,15 +232,15 @@ async def run():
                 else:
                     log("  PDF 파일을 찾지 못했습니다.")
 
-        # ===== 후처리: 복호화 + 텍스트 추출 =====
-        if os.path.exists(save_path):
-            log("\n[후처리] PDF 복호화 및 텍스트 추출 중...")
-            try:
-                pdf_path, txt_path = postprocess_pdf(save_path, PDF_PASSWORD)
-                log(f"  완료! 복호화 PDF: {pdf_path}")
-                log(f"  완료! 텍스트 파일: {txt_path}")
-            except Exception as e:
-                log(f"  후처리 실패: {e}")
+            # ===== 후처리: 복호화 + 텍스트 추출 =====
+            if os.path.exists(save_path):
+                log("\n[후처리] PDF 복호화 및 텍스트 추출 중...")
+                try:
+                    pdf_path, txt_path = postprocess_pdf(save_path, PDF_PASSWORD)
+                    log(f"  완료! 복호화 PDF: {pdf_path}")
+                    log(f"  완료! 텍스트 파일: {txt_path}")
+                except Exception as e:
+                    log(f"  후처리 실패: {e}")
 
         except asyncio.TimeoutError:
             log("  다운로드 시간 초과. Downloads 폴더를 확인하세요.")
