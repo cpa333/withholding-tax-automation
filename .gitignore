@@ -11,3 +11,21 @@ sample_excels/*.xlsx
 sample_excels/*.xls
 src/results/*.xlsx
 src/results/*.xls
+
+# Debug / temp scripts
+_check_*.py
+_controlled_browser.py
+_dom_deep_dump.py
+_file_input_audit.py
+_resolution_*.py
+_timing_audit*.py
+debug_page_content.html
+_test_*.py
+_run_wehago.py
+src/automation/wehago/_*.py
+
+# Results
+results/
+
+# Claude memory
+.claude/
