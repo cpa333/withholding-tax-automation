@@ -229,6 +229,29 @@ async def select_dropdown(page, dropdown_index, option_text):
     log(f"드롭다운 선택: {value}")
 
 
+async def _click_modal_text(page, text_fragment, action):
+    """특정 텍스트가 포함된 모달에서 action(확인/취소) 버튼 클릭"""
+    for _ in range(20):
+        result = await page.evaluate("""(args) => {
+            const all = document.querySelectorAll('*');
+            for (const el of all) {
+                if (!el.textContent.includes(args.fragment)) continue;
+                const btns = el.querySelectorAll('button');
+                for (const btn of btns) {
+                    if (btn.textContent.trim() === args.action && btn.offsetWidth > 0) {
+                        btn.click();
+                        return args.action;
+                    }
+                }
+            }
+            return null;
+        }""", {"fragment": text_fragment, "action": action})
+        if result:
+            return True
+        await asyncio.sleep(0.5)
+    return False
+
+
 async def click_dialog_button(page, button_text):
     """현재 떠 있는 모달/다이얼로그에서 지정된 텍스트의 버튼 클릭"""
     await page.evaluate("""(btnText) => {
@@ -438,32 +461,27 @@ async def upload_excel(page, file_path, dry_run=True):
     await asyncio.sleep(3)
 
     # ① 엑셀내역 테이블에서 헤더 행(행1) 선택
+    # JS element.click() 사용 — CDP 좌표는 DPR/배율에 따라 빗나감
     log("[엑셀 업로드] ① 헤더 행 선택...")
-    cdp = await page.context.new_cdp_session(page)
-    pos = await page.evaluate("""() => {
+    clicked = await page.evaluate("""() => {
         const tables = document.querySelectorAll('table');
         for (const table of tables) {
+            if (table.offsetParent === null) continue;
             const trs = table.querySelectorAll('tr');
             if (trs.length > 2) {
                 const th = trs[1].querySelector('th');
                 if (th && th.textContent.trim() === '1') {
-                    const rect = th.getBoundingClientRect();
-                    return {x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2)};
+                    th.click();
+                    return true;
                 }
             }
         }
-        return null;
+        return false;
     }""")
-    if pos:
-        await cdp.send('Input.dispatchMouseEvent', {
-            'type': 'mousePressed', 'x': pos['x'], 'y': pos['y'],
-            'button': 'left', 'clickCount': 1
-        })
-        await cdp.send('Input.dispatchMouseEvent', {
-            'type': 'mouseReleased', 'x': pos['x'], 'y': pos['y'],
-            'button': 'left', 'clickCount': 1
-        })
+    if clicked:
         log("  행1 클릭 완료")
+    else:
+        log("  행1 요소를 찾지 못함")
     await asyncio.sleep(1)
 
     # ② 엑셀제목설정 버튼 클릭
@@ -478,38 +496,57 @@ async def upload_excel(page, file_path, dry_run=True):
         }
     }""")
     await asyncio.sleep(2)
-    log("  제목설정 확인 완료")
 
-    # 확인 버튼 클릭 (모달 하단)
+    # ② 엑셀제목설정 확인 모달
+    log("[엑셀 업로드] ② 제목설정 확인...")
+    await _click_modal_text(page, "엑셀제목", "확인")
+    await asyncio.sleep(2)
+
+    # 확인 버튼 클릭 (현재 표시 중인 다이얼로그 내부의 버튼)
     log("[엑셀 업로드] 확인 버튼 클릭...")
     await page.evaluate("""() => {
-        const btns = document.querySelectorAll('button.WSC_LUXButton');
-        for (const btn of btns) {
-            if (btn.textContent.trim() === '확인') {
-                const rect = btn.getBoundingClientRect();
-                if (rect.top > 700) { btn.click(); return; }
+        const selectors = ['._isDialog', '.LUX_basic_dialog'];
+        for (const sel of selectors) {
+            for (const dialog of document.querySelectorAll(sel)) {
+                if (dialog.style.display === 'none' || dialog.offsetParent === null) continue;
+                const btns = dialog.querySelectorAll('button.WSC_LUXButton');
+                for (const btn of btns) {
+                    if (btn.textContent.trim() === '확인') {
+                        btn.click();
+                        return;
+                    }
+                }
             }
         }
     }""")
     await asyncio.sleep(5)
 
-    # 후속 모달 1: 데이터 저장 확인 (항상 확인, #confirm 셀렉터 사용)
-    log("[엑셀 업로드] 후속 모달 1/3 → #confirm 확인 클릭...")
+    # 후속 모달 1: 데이터 저장 확인 (#confirm)
+    log("[엑셀 업로드] 후속 모달 1/5 → #confirm 확인...")
     await page.evaluate("""() => {
         const btn = document.querySelector('#confirm');
         if (btn) btn.click();
     }""")
     await asyncio.sleep(3)
 
-    # 후속 모달 2: 재계산 여부 (dry_run=True → 취소, False → 확인)
-    action = "취소" if dry_run else "확인"
-    log(f"[엑셀 업로드] 후속 모달 2/3 → {action} 클릭...")
-    await click_dialog_button(page, action)
+    # 후속 모달 2: 연결되지 않은 사원 안내
+    log("[엑셀 업로드] 후속 모달 2/5 → '연결되지 않은 사원' 확인...")
+    await _click_modal_text(page, "연결되지 않은 사원", "확인")
     await asyncio.sleep(3)
 
-    # 후속 모달 3: 완료 확인 (항상 확인)
-    log("[엑셀 업로드] 후속 모달 3/3 → 확인 클릭...")
-    await click_dialog_button(page, "확인")
+    # 후속 모달 3: 삭제후 업로드 안내 (dry_run=True → 취소, False → 확인)
+    action = "취소" if dry_run else "확인"
+    log(f"[엑셀 업로드] 후속 모달 3/5 → '삭제후 업로드' {action}...")
+    await _click_modal_text(page, "삭제후 업로드", action)
+    await asyncio.sleep(3)
+
+    # 후속 모달 4: 변환 취소/완료 안내
+    if dry_run:
+        log("[엑셀 업로드] 후속 모달 4/5 → '변환이 취소' 확인...")
+        await _click_modal_text(page, "변환이 취소", "확인")
+    else:
+        log("[엑셀 업로드] 후속 모달 4/5 → 완료 확인...")
+        await click_dialog_button(page, "확인")
     await asyncio.sleep(2)
 
     # 업로드 후 에러 감지
@@ -565,6 +602,24 @@ async def run(dry_run=True):
         # ===== [4] 급여자료입력 메뉴 이동 =====
         log("[4/10] 급여자료입력 메뉴 이동...")
         await click_menu(page, "SWSA0101")
+        await asyncio.sleep(3)
+
+        # 간이세액 개정 안내 모달 닫기 (X 버튼)
+        log("[4-1] 간이세액 안내 모달 닫기...")
+        await page.evaluate("""() => {
+            const all = document.querySelectorAll('*');
+            for (const el of all) {
+                const cs = window.getComputedStyle(el);
+                if (cs.position !== 'fixed' || cs.display === 'none' ||
+                    parseInt(cs.zIndex) <= 100 || el.offsetWidth <= 100) continue;
+                if (!el.textContent.includes('간이세액')) continue;
+                const btns = el.querySelectorAll('button.WSC_LUXButton');
+                for (const btn of btns) {
+                    if (!btn.textContent.trim() && btn.offsetWidth > 0) { btn.click(); return; }
+                }
+            }
+        }""")
+        await asyncio.sleep(1)
         await dismiss_dialogs(page)
 
         # ===== [5] 구분 드롭다운: 급여+상여 선택 =====
