@@ -43,9 +43,7 @@ async def dismiss_modals(ht):
         closed = await ht.evaluate("""() => {
             const modals = document.querySelectorAll('.w2popup_window');
             for (const modal of modals) {
-                if (modal.style.display === 'none') continue;
-                const rect = modal.getBoundingClientRect();
-                if (rect.width === 0) continue;
+                if (modal.style.display === 'none' || modal.offsetParent === null) continue;
                 const btns = modal.querySelectorAll('input[type=button]');
                 for (const b of btns) {
                     if (b.id && b.id.includes('btn_confirm')) {
@@ -63,6 +61,16 @@ async def dismiss_modals(ht):
             break
 
 
+async def wait_element(ht, selector, timeout=30000, label=""):
+    """요소가 DOM에 나타날 때까지 대기"""
+    try:
+        await ht.wait_for_selector(selector, timeout=timeout, state="attached")
+        return True
+    except Exception:
+        log(f"  대기 실패: {label or selector}")
+        return False
+
+
 async def goto_withholding_tax(ht):
     """원천세 신고 > 일반신고 메뉴로 이동"""
     log("[1] 원천세 신고 > 일반신고 이동...")
@@ -70,31 +78,37 @@ async def goto_withholding_tax(ht):
         const a = document.querySelector('#menuAtag_4106010000');
         if (a) a.click();
     }""")
-    await asyncio.sleep(5)
+    if not await wait_element(ht, '[id*="btn_cbcMediRtn"]', timeout=30000, label="btn_cbcMediRtn"):
+        return False
     log(f"  이동 완료: {await ht.title()}")
+    return True
 
 
 async def goto_file_convert(ht):
     """파일변환신고 버튼 클릭하여 이동"""
     log("[2] 파일변환신고 이동...")
-    await ht.evaluate("""() => { window.scrollTo(0, 400); }""")
+    await ht.evaluate("""() => {
+        const a = document.querySelector('[id*="btn_cbcMediRtn"]');
+        if (a) { a.scrollIntoView({block: 'center'}); }
+    }""")
     await asyncio.sleep(1)
     await ht.evaluate("""() => {
         const a = document.querySelector('[id*="btn_cbcMediRtn"]');
         if (a) a.click();
     }""")
-    await asyncio.sleep(5)
     await dismiss_modals(ht)
+    if not await wait_element(ht, '[id*="btn_cenSts"]', timeout=30000, label="btn_cenSts"):
+        return False
     log("  파일변환신고 페이지 로드")
+    return True
 
 
 async def select_file(ht, file_path):
-    """파일변환신고 화면에서 파일 선택 (hidden file input 직접 설정)
+    """파일변환신고 화면에서 파일 선택 (Raon K Uploader iframe 내 hidden file input)
 
-    홈택스 WebSquare 프레임워크는 <input type="file">을 iframe에 숨겨둠.
-    파일선택 버튼 클릭 시 네이티브 파일 다이얼로그가 열려 제어 불가하므로,
-    iframe 내 hidden input에 직접 set_input_files()로 파일 설정.
-    iframe이 로드될 때까지 최대 30초 대기.
+    Raon K Uploader가 raonkuploader_frame_fileList iframe에
+    <input type="file">을 동적으로 생성함.
+    파일 설정 후 change 이벤트를 발생시켜 컴포넌트가 파일을 인식하도록 함.
     """
     log(f"[3] 파일 선택: {os.path.basename(file_path)}")
     for _ in range(15):
@@ -102,6 +116,13 @@ async def select_file(ht, file_path):
             file_input = frame.locator('input[type="file"]')
             if await file_input.count() > 0:
                 await file_input.set_input_files(file_path)
+                try:
+                    await frame.evaluate("""() => {
+                        const fi = document.querySelector('input[type="file"]');
+                        if (fi) fi.dispatchEvent(new Event('change', {bubbles: true}));
+                    }""")
+                except Exception:
+                    pass
                 log("  파일 설정 완료")
                 await asyncio.sleep(2)
                 return True
@@ -141,8 +162,18 @@ async def run(file_path, dry_run=True):
         browser, context, ht = await connect_browser(p)
         log(f"현재: {await ht.title()}\n")
 
-        await goto_withholding_tax(ht)
-        await goto_file_convert(ht)
+        # Raon K Uploader 파일 설정 시 JS dialog 자동 처리
+        def _dismiss_dialog(dialog):
+            try:
+                asyncio.get_event_loop().create_task(dialog.dismiss())
+            except Exception:
+                pass
+        ht.on("dialog", _dismiss_dialog)
+
+        if not await goto_withholding_tax(ht):
+            return
+        if not await goto_file_convert(ht):
+            return
         if not await select_file(ht, file_path):
             return
         if not await verify_file(ht):
