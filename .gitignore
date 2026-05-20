@@ -7,3 +7,7 @@ debug/
 *.egg-info/
 .env
 .env.*
+sample_excels/*.xlsx
+sample_excels/*.xls
+src/results/*.xlsx
+src/results/*.xls
