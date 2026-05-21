@@ -34,6 +34,14 @@
 - `dismiss_modals()`: WebSquare `.w2popup_window` 내 `btn_confirm` 버튼 순차 클릭
 - 페이지 진입 시 알림 모달, 파일검증 후 확인 모달 모두 동일 로직으로 처리
 
+## 세션 연장
+- `auto_session_extend(page)`: 20분 주기로 세션 자동 연장 (백그라운드 태스크)
+- 홈택스는 **24분 비활동 시 UTXPPABB27 세션 연장 팝업**, **30분 시 강제 로그아웃** 처리
+- 팝업 대기 대신 JS 함수 직접 호출로 **사전 예방** 방식 사용:
+  - `$c.pp.sessionXtn($p)`: TXPP/TECR/TEET/TEHT/TEWF/TEYS 다중 서버에 JSONP 세션 연장 요청
+  - `sessionTimer("Y")`: 24분 팝업 타이머 + 30분 로그아웃 타이머 재시작
+- `trigger_session_popup_soon(page, seconds)`: 개발용, 세션 타이머 단축하여 연장 팝업 강제 트리거
+
 ## 미구현 (TODO)
 - 비밀번호 입력 단계
 - 제출 단계 (이동 → 검증결과확인 → 제출)
@@ -44,6 +52,8 @@
 
 | 함수 | 용도 |
 |------|------|
+| `auto_session_extend(page)` | 20분 주기 세션 연장 (백그라운드) |
+| `trigger_session_popup_soon(page, seconds)` | 개발용: 세션 팝업 강제 트리거 |
 | `connect_browser(playwright)` | CDP 연결, 홈택스 탭 반환 |
 | `dismiss_modals(ht)` | 팝업 모달 자동 닫기 (범용) |
 | `goto_withholding_tax(ht)` | 원천세 신고 > 일반신고 메뉴 이동 |
