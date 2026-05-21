@@ -75,23 +75,37 @@ async def auto_session_extend(page):
     """세션 연장 팝업을 주기적으로 감지하여 자동 클릭
 
     공단 포털은 약 25분 비활동 후 '로그인 상태 연장' 팝업을 표시함.
-    30초 간격으로 팝업을 감시하고 '연장' 버튼을 자동 클릭하여 세션 유지.
+    팝업 내 연장 버튼 또는 .modal-dialog 내 확인 버튼을 자동 클릭.
+    또한 세션 타이머 만료 시 doLoginSessionExtend() 로 세션 연장.
     """
     while True:
         try:
             clicked = await page.evaluate("""() => {
+                // 1) '연장' 텍스트 버튼 클릭 (세션 연장 팝업)
                 const selectors = ['button', 'a', 'input[type=button]'];
-                const keywords = ['연장', '시간연장'];
                 for (const sel of selectors) {
                     const els = document.querySelectorAll(sel);
                     for (const el of els) {
                         if (el.offsetParent === null) continue;
                         const t = (el.textContent || el.value || '').trim();
-                        for (const kw of keywords) {
-                            if (t === kw || t.includes('연장하기')) {
-                                el.click();
-                                return t;
-                            }
+                        if (t === '연장' || t === '시간연장' || t === '연장하기') {
+                            el.click();
+                            return t;
+                        }
+                    }
+                }
+                // 2) .modal-dialog 내 '확인' 버튼 (연장 완료 안내 모달)
+                const dialogs = document.querySelectorAll('.modal-dialog');
+                for (const d of dialogs) {
+                    if (d.offsetParent === null) continue;
+                    const text = d.textContent || '';
+                    if (!text.includes('연장') && !text.includes('로그인')) continue;
+                    const btns = d.querySelectorAll('button, a');
+                    for (const btn of btns) {
+                        const t = (btn.textContent || '').trim();
+                        if (t === '확인') {
+                            btn.click();
+                            return 'modal 확인 (' + text.trim().substring(0, 30) + ')';
                         }
                     }
                 }
@@ -107,31 +121,30 @@ async def auto_session_extend(page):
 async def trigger_session_popup_soon(page, seconds=10):
     """개발용: 세션 만료 팝업을 지정된 초 후에 강제 트리거
 
-    공단 포털의 세션 체크 타이머를 단축하여 팝업을 빠르게 유발.
+    공단 포털(nhis.or.kr)의 세션 타이머를 단축하여 연장 팝업을 빠르게 유발.
+    실제 발견된 글로벌 함수: doLoginSessionExtend, initLoginExtend, doExtendLogin
     테스트 시에만 사용. 프로덕션에서는 호출하지 않음.
+
+    Usage:
+        await trigger_session_popup_soon(page, seconds=5)  # 5초 후 팝업 등장
     """
-    log(f"[DEV] {seconds}초 후 세션 만료 팝업 강제 트리거...")
-    await page.evaluate("""(sec) => {
-        // 방법 1: eXBuilder6 confirmExtensionTimerCallback 직접 호출
-        if (typeof scwin !== 'undefined' && typeof scwin.confirmExtensionTimerCallback === 'function') {
-            setTimeout(() => scwin.confirmExtensionTimerCallback(), sec * 1000);
-            return 'confirmExtensionTimerCallback';
+    log(f"[DEV] {seconds}초 후 세션 연장 팝업 강제 트리거...")
+    result = await page.evaluate("""(sec) => {
+        // extendTimerPrd 를 짧게 설정하여 initLoginExtend 가 빠르게 트리거되도록 함
+        window.extendTimerPrd = sec * 1000;
+        clearTimeout(window.extendTimer);
+        if (typeof initLoginExtend === 'function') {
+            initLoginExtend();
+            return 'initLoginExtend called with period=' + (sec * 1000) + 'ms';
         }
-        // 방법 2: comLib.checkSession 호출
-        if (typeof comLib !== 'undefined' && typeof comLib.checkSession === 'function') {
-            setTimeout(() => comLib.checkSession(), sec * 1000);
-            return 'comLib.checkSession';
-        }
-        // 방법 3: 글로벌 세션 관련 함수 검색
-        const candidates = ['checkSession', 'sessionCheck', 'confirmExtension', 'sessionExtend'];
-        for (const name of candidates) {
-            if (typeof window[name] === 'function') {
-                setTimeout(() => window[name](), sec * 1000);
-                return name;
-            }
+        // fallback: doLoginSessionExtend 직접 호출
+        if (typeof doLoginSessionExtend === 'function') {
+            setTimeout(() => doLoginSessionExtend(), sec * 1000);
+            return 'doLoginSessionExtend scheduled';
         }
         return 'no_handler_found';
     }""", seconds)
+    log(f"[DEV] {result}")
 
 
 async def run():
