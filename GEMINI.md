@@ -83,3 +83,27 @@ browser = await playwright.chromium.launch(headless=False, args=["--remote-debug
 | rect.top > 700 실패 | `wehago_auto_cdp.py` | `rect.top > 700` → 다이얼로그 내부에서만 '확인' 탐색 |
 | 하드코딩 스크롤 | `hometax_auto_cdp.py` | `scrollTo(0, 400)` → `scrollIntoView({block: 'center'})` |
 | 모달 가시성 | `hometax_auto_cdp.py` | `rect.width === 0` → `offsetParent === null` |
+
+## NHIS Session Extension Handling
+
+공단 포털(medicare.nhis.or.kr)은 약 30분 비활동 시 세션 만료, **5분 전** "로그인 상태 연장" 팝업 등장.
+
+### 자동 처리 (`auto_session_extend`)
+- `nhis_auto_cdp.py`의 `run()` 실행 시 **백그라운드 태스크**로 30초 간격 팝업 감시
+- "연장"/"시간연장" 텍스트 버튼 감지 시 자동 클릭 → 세션 유지
+- 자동화 완료 후 태스크 취소
+
+### 개발 테스트 (`trigger_session_popup_soon`)
+세션 만료를 기다릴 필요 없이 팝업을 강제 트리거하여 테스트 가능:
+```python
+# CDP로 연결 후 호출
+await trigger_session_popup_soon(page, seconds=10)  # 10초 후 팝업 등장
+```
+동작 방식: eXBuilder6의 `confirmExtensionTimerCallback()` 또는 `comLib.checkSession()` 을 setTimeout으로 지정 초 후 호출.
+
+| 이슈 | 파일 | 수정 |
+|------|------|------|
+| CDP 좌표 빗나감 | `wehago_auto_cdp.py` | `Input.dispatchMouseEvent` → `offsetParent` + `th.click()` |
+| rect.top > 700 실패 | `wehago_auto_cdp.py` | `rect.top > 700` → 다이얼로그 내부에서만 '확인' 탐색 |
+| 하드코딩 스크롤 | `hometax_auto_cdp.py` | `scrollTo(0, 400)` → `scrollIntoView({block: 'center'})` |
+| 모달 가시성 | `hometax_auto_cdp.py` | `rect.width === 0` → `offsetParent === null` |

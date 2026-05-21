@@ -68,6 +68,72 @@ def kill_chrome():
     time.sleep(3)
 
 
+_session_extend_cancel = None
+
+
+async def auto_session_extend(page):
+    """세션 연장 팝업을 주기적으로 감지하여 자동 클릭
+
+    공단 포털은 약 25분 비활동 후 '로그인 상태 연장' 팝업을 표시함.
+    30초 간격으로 팝업을 감시하고 '연장' 버튼을 자동 클릭하여 세션 유지.
+    """
+    while True:
+        try:
+            clicked = await page.evaluate("""() => {
+                const selectors = ['button', 'a', 'input[type=button]'];
+                const keywords = ['연장', '시간연장'];
+                for (const sel of selectors) {
+                    const els = document.querySelectorAll(sel);
+                    for (const el of els) {
+                        if (el.offsetParent === null) continue;
+                        const t = (el.textContent || el.value || '').trim();
+                        for (const kw of keywords) {
+                            if (t === kw || t.includes('연장하기')) {
+                                el.click();
+                                return t;
+                            }
+                        }
+                    }
+                }
+                return null;
+            }""")
+            if clicked:
+                log(f"  [세션 연장] '{clicked}' 클릭")
+        except Exception:
+            pass
+        await asyncio.sleep(30)
+
+
+async def trigger_session_popup_soon(page, seconds=10):
+    """개발용: 세션 만료 팝업을 지정된 초 후에 강제 트리거
+
+    공단 포털의 세션 체크 타이머를 단축하여 팝업을 빠르게 유발.
+    테스트 시에만 사용. 프로덕션에서는 호출하지 않음.
+    """
+    log(f"[DEV] {seconds}초 후 세션 만료 팝업 강제 트리거...")
+    await page.evaluate("""(sec) => {
+        // 방법 1: eXBuilder6 confirmExtensionTimerCallback 직접 호출
+        if (typeof scwin !== 'undefined' && typeof scwin.confirmExtensionTimerCallback === 'function') {
+            setTimeout(() => scwin.confirmExtensionTimerCallback(), sec * 1000);
+            return 'confirmExtensionTimerCallback';
+        }
+        // 방법 2: comLib.checkSession 호출
+        if (typeof comLib !== 'undefined' && typeof comLib.checkSession === 'function') {
+            setTimeout(() => comLib.checkSession(), sec * 1000);
+            return 'comLib.checkSession';
+        }
+        // 방법 3: 글로벌 세션 관련 함수 검색
+        const candidates = ['checkSession', 'sessionCheck', 'confirmExtension', 'sessionExtend'];
+        for (const name of candidates) {
+            if (typeof window[name] === 'function') {
+                setTimeout(() => window[name](), sec * 1000);
+                return name;
+            }
+        }
+        return 'no_handler_found';
+    }""", seconds)
+
+
 async def run():
     async with async_playwright() as p:
         # ===== Chrome 연결 =====
@@ -132,6 +198,11 @@ async def run():
                 return
 
         log("로그인 확인됨. 자동화 시작.\n")
+
+        # 세션 연장 자동 처리 (백그라운드)
+        global _session_extend_cancel
+        session_task = asyncio.create_task(auto_session_extend(page))
+        _session_extend_cancel = session_task
 
         # ===== [1/3] 민원 서비스 → 발급 페이지 =====
         log("[1/3] 민원 서비스 → 보험료 납부확인서 발급 페이지 이동...")
@@ -246,6 +317,7 @@ async def run():
             log("  다운로드 시간 초과. Downloads 폴더를 확인하세요.")
 
         # ===== 정리 =====
+        session_task.cancel()
         await asyncio.sleep(2)
         for pg in context.pages:
             if pg != page:
