@@ -6,13 +6,17 @@ import subprocess
 import time
 from playwright.async_api import async_playwright
 import openpyxl
+if sys.platform == "win32":
+    from pywinauto import Desktop as WinDesktop
+    import pywinauto.actionlogger
+    pywinauto.actionlogger.ActionLogger.logger.handlers = []
 
 if sys.platform == "win32":
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
 
-CDP_URL = "http://localhost:9222"
+CDP_URL = "http://localhost:9223"
 WEHAGO_URL = "https://www.wehago.com/"
 SMARTA_BASE = "https://smarta.wehago.com"
 
@@ -35,10 +39,10 @@ def find_chrome():
 
 
 async def check_cdp_available():
-    """CDP 포트 9222가 활성인지 확인"""
+    """CDP 포트 9223이 활성인지 확인"""
     try:
         import urllib.request
-        with urllib.request.urlopen("http://localhost:9222/json/version", timeout=2) as resp:
+        with urllib.request.urlopen("http://localhost:9223/json/version", timeout=2) as resp:
             return resp.status == 200
     except Exception:
         return False
@@ -52,7 +56,7 @@ def kill_chrome():
 
 
 async def launch_chrome():
-    """Chrome을 디버깅 모드로 실행"""
+    """Chrome을 디버깅 모드로 실행 (사용자 프로필 사용)"""
     if await check_cdp_available():
         log("CDP 포트 이미 활성. 기존 Chrome에 연결합니다.")
         return True
@@ -65,10 +69,14 @@ async def launch_chrome():
     log("기존 Chrome을 종료하고 디버깅 모드로 재실행합니다...")
     kill_chrome()
 
+    user_data = os.path.join(os.environ.get("LOCALAPPDATA", ""),
+                             "Google", "Chrome", "User Data")
+
     subprocess.Popen([
         chrome_path,
-        "--remote-debugging-port=9222",
-        "--user-data-dir=" + os.path.join(os.environ.get("TEMP", "/tmp"), "chrome-wehago"),
+        "--remote-debugging-port=9223",
+        "--user-data-dir=" + user_data,
+        "--profile-directory=Profile 2",
         "--start-maximized",
         WEHAGO_URL,
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -104,17 +112,23 @@ async def wait_for_login(page):
 
     log("\n브라우저에서 WEHAGO 로그인을 진행해 주세요.")
     log("로그인 완료 후 Enter를 누르세요.")
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, input)
 
-    # 로그인 재확인
-    await page.reload(wait_until="domcontentloaded")
-    await asyncio.sleep(2)
-    if await page.locator("text=나의 수임처").count() > 0:
-        log("로그인 확인됨.")
-        return True
+    # 로그인 대기: 수임처 리스트가 나타날 때까지 폴링
+    for _ in range(120):
+        await asyncio.sleep(5)
+        try:
+            if await page.locator("text=나의 수임처").count() > 0:
+                log("로그인 확인됨.")
+                return True
+            await page.reload(wait_until="domcontentloaded")
+            await asyncio.sleep(2)
+            if await page.locator("text=나의 수임처").count() > 0:
+                log("로그인 확인됨.")
+                return True
+        except Exception:
+            pass
 
-    log("로그인되지 않았습니다.")
+    log("로그인 대기 시간 초과 (10분).")
     return False
 
 
@@ -176,7 +190,16 @@ async def goto_salary_page(page, company_name):
 
     log(f"SmartA 급여 URL: {url}")
     await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-    await asyncio.sleep(3)
+
+    # SPA 로드 완료 대기: 사이드 메뉴가 나타날 때까지
+    for i in range(15):
+        await asyncio.sleep(2)
+        if await page.locator("a.text_link").count() > 0:
+            break
+    else:
+        log("  SmartA 페이지 로드 타임아웃")
+        return False
+
     log(f"페이지 이동 완료: {await page.title()}")
     return True
 
@@ -573,6 +596,207 @@ async def upload_excel(page, file_path, dry_run=True):
     return True
 
 
+# ===== PDF 다운로드 (OS-level PrintDialog 제어) =====
+
+PRINT_DIALOG_TITLE = "Duzon - PrintDialog"
+PRINT_DIALOG_CLASS = "WindowsForms10.Window.8.app.0.141b42a_r8_ad1"
+SAVE_DIALOG_CLASS = "#32770"
+DEFAULT_PRINT_FORMAT = "급여명세(사원당 한장)"
+
+
+async def open_print_dialog(page):
+    """브라우저에서 #print 버튼 → 일괄출력 메뉴 클릭하여 PrintDialog 실행"""
+    log("[PDF] #print 버튼 클릭...")
+    await page.evaluate("""() => {
+        const btn = document.querySelector('#print');
+        if (btn) btn.click();
+    }""")
+    await asyncio.sleep(1)
+
+    log("[PDF] 일괄출력 메뉴 클릭...")
+    await click_menu_item(page, "일괄출력")
+
+    # PrintDialog가 열릴 때까지 대기 (최대 30초)
+    if sys.platform != "win32":
+        log("  Windows 전용 기능입니다.")
+        return False
+
+    log("[PDF] PrintDialog 대기...")
+    for i in range(15):
+        await asyncio.sleep(2)
+        if _print_dialog_exists():
+            log("  PrintDialog 열림 확인")
+            return True
+        if i % 3 == 2:
+            log(f"  대기 중... {(i+1)*2}초")
+
+    log("  PrintDialog 열림 타임아웃")
+    return False
+
+
+def _find_print_dialog():
+    """OS 레벨에서 PrintDialog 창 찾기 (pywinauto, auto_id 기반)"""
+    desktop = WinDesktop(backend='uia')
+    return desktop.window(title_re=PRINT_DIALOG_TITLE, class_name=PRINT_DIALOG_CLASS)
+
+
+def _print_dialog_exists():
+    """PrintDialog가 현재 떠 있는지 확인"""
+    try:
+        dlg = _find_print_dialog()
+        return dlg.exists(timeout=1)
+    except Exception:
+        return False
+
+
+def _close_existing_print_dialog():
+    """기존 PrintDialog가 떠 있으면 종료 + '이미 인쇄함이 있습니다' 모달 처리
+
+    PrintDialog가 열려 있는 상태에서 다시 출력을 시도하면
+    '이미 셸함수에 있는 인쇄함이 있습니다' 경고 모달이 나타남.
+    이 모달의 '확인' 버튼을 누르고 기존 PrintDialog를 종료.
+    """
+    if not _print_dialog_exists():
+        return
+
+    log("  기존 PrintDialog 감지. 정리 중...")
+
+    # 1) 경고 모달(WindowsForms 모달) 처리: "확인" 버튼 클릭
+    try:
+        dlg = _find_print_dialog()
+        for btn in dlg.descendants(control_type='Button'):
+            name = btn.element_info.element.CurrentName
+            if name and name == '확인':
+                btn.click_input()
+                log("  경고 모달 '확인' 클릭")
+                time.sleep(1)
+                break
+    except Exception:
+        pass
+
+    # 2) 기존 PrintDialog 종료
+    try:
+        time.sleep(1)
+        dlg = _find_print_dialog()
+        dlg.child_window(auto_id='btnClose', control_type='Button').click_input()
+        log("  기존 PrintDialog 종료")
+        time.sleep(2)
+    except Exception:
+        pass
+
+
+def _select_print_format(target_text):
+    """PrintDialog의 인쇄형태 드롭다운에서 항목 선택 (auto_id + CurrentName 기반)"""
+    dlg = _find_print_dialog()
+    dlg.set_focus()
+    time.sleep(0.5)
+
+    cb = dlg.child_window(auto_id='cbContents', control_type='ComboBox')
+
+    # 열기 버튼: cb 자식 중 첫 번째 Button
+    open_btn = cb.children(control_type='Button')[0]
+    open_btn.click_input()
+    time.sleep(1.5)
+
+    # ListItem 탐색 후 CurrentName으로 매치
+    items = cb.descendants(control_type='ListItem')
+    for item in items:
+        name = item.element_info.element.CurrentName
+        if name and target_text in name:
+            item.click_input()
+            log(f"  인쇄형태 선택: {name}")
+            time.sleep(2)
+            return True
+
+    log(f"  인쇄형태 '{target_text}' 항목을 찾지 못함")
+    return False
+
+
+def _click_save_pdf():
+    """PrintDialog에서 PDF 저장 버튼 클릭"""
+    dlg = _find_print_dialog()
+    btn = dlg.child_window(auto_id='btnSavePDF', control_type='Button')
+    btn.click_input()
+    log("  PDF 저장 버튼 클릭")
+    time.sleep(3)
+
+
+def _handle_save_dialog(save_path):
+    """Windows '다른 이름으로 저장' 대화상자에서 경로 입력 후 저장"""
+    desktop = WinDesktop(backend='win32')
+    dlg = desktop.window(title='다른 이름으로 저장', class_name=SAVE_DIALOG_CLASS)
+
+    # 파일명 Edit에 경로 입력
+    edit = dlg.child_window(class_name='Edit')
+    edit.set_edit_text(save_path)
+    time.sleep(1)
+
+    # 저장 버튼 클릭
+    save_btn = dlg.child_window(title='저장(&S)', class_name='Button')
+    save_btn.click_input()
+    time.sleep(3)
+
+    if os.path.exists(save_path) and os.path.getsize(save_path) > 0:
+        log(f"  PDF 저장 완료: {save_path} ({os.path.getsize(save_path):,} bytes)")
+        return True
+
+    log("  PDF 파일 저장 실패")
+    return False
+
+
+def _close_print_dialog():
+    """PrintDialog 종료 (btnClose 버튼)"""
+    dlg = _find_print_dialog()
+    dlg.child_window(auto_id='btnClose', control_type='Button').click_input()
+    log("  PrintDialog 종료")
+
+
+async def download_pdf(page, save_dir, print_format=DEFAULT_PRINT_FORMAT):
+    """PrintDialog를 통해 PDF 다운로드
+
+    브라우저 #print 버튼 → 일괄출력 → OS PrintDialog →
+    인쇄형태 선택 → PDF 저장 → Windows 저장 대화상자 → PrintDialog 종료
+
+    Args:
+        page: Playwright page 객체
+        save_dir: PDF 저장 디렉토리
+        print_format: 인쇄형태 드롭다운에서 선택할 항목 텍스트 (부분 매치)
+    """
+    if sys.platform != "win32":
+        log("  PDF 다운로드는 Windows 전용 기능입니다.")
+        return None
+
+    # 0. 기존 PrintDialog 정리 (떠 있으면 경고 모달 처리 후 종료)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _close_existing_print_dialog)
+
+    # 1. 브라우저에서 PrintDialog 실행
+    if not await open_print_dialog(page):
+        return None
+
+    # 2. 인쇄형태 선택
+    selected = await loop.run_in_executor(None, _select_print_format, print_format)
+    if not selected:
+        return None
+
+    # 3. PDF 버튼 클릭
+    await loop.run_in_executor(None, _click_save_pdf)
+
+    # 4. Windows 저장 대화상자 처리
+    os.makedirs(save_dir, exist_ok=True)
+    filename = f"{time.strftime('%Y%m%d_%H%M%S')}_{print_format.split('(')[0]}.pdf"
+    save_path = os.path.join(save_dir, filename)
+
+    saved = await loop.run_in_executor(None, _handle_save_dialog, save_path)
+    if not saved:
+        return None
+
+    # 5. PrintDialog 종료
+    await loop.run_in_executor(None, _close_print_dialog)
+
+    return os.path.abspath(save_path)
+
+
 async def run(dry_run=True):
     """전체 자동화 실행
 
@@ -581,26 +805,26 @@ async def run(dry_run=True):
     """
     async with async_playwright() as p:
         # ===== [1] Chrome 실행 =====
-        log("[1/10] Chrome 실행...")
+        log("[1/14] Chrome 실행...")
         if not await launch_chrome():
             return
 
         # ===== [2] 연결, 로그인, 팝업 닫기 =====
-        log("[2/10] Chrome 연결 및 로그인 확인...")
+        log("[2/14] Chrome 연결 및 로그인 확인...")
         browser, context, page = await connect_browser(p)
         if not await wait_for_login(page):
             return
         await dismiss_dialogs(page)
 
         # ===== [3] 수임처 급여 페이지 이동 =====
-        log("[3/10] 수임처 급여 페이지 이동...")
-        company_name = "근린커피 상암"
+        log("[3/14] 수임처 급여 페이지 이동...")
+        company_name = "[테스트] (주)리틀치프코리아"
         if not await goto_salary_page(page, company_name):
             return
         await dismiss_dialogs(page)
 
         # ===== [4] 급여자료입력 메뉴 이동 =====
-        log("[4/10] 급여자료입력 메뉴 이동...")
+        log("[4/14] 급여자료입력 메뉴 이동...")
         await click_menu(page, "SWSA0101")
         await asyncio.sleep(3)
 
@@ -623,11 +847,10 @@ async def run(dry_run=True):
         await dismiss_dialogs(page)
 
         # ===== [5] 구분 드롭다운: 급여+상여 선택 =====
-        log("[5/10] 구분 드롭다운 → 급여+상여 선택...")
+        log("[5/14] 구분 드롭다운 → 급여+상여 선택...")
         await select_dropdown(page, 0, "급여+상여")
 
         # ===== [6-7] 복사후 재계산 모달 (조건부) =====
-        # 구분 변경 시 모달이 뜨는 경우만 처리, 없으면 스킵
         await asyncio.sleep(1)
         has_modal = await page.evaluate("""() => {
             const selectors = ['._isDialog', '.LUX_basic_dialog'];
@@ -639,29 +862,28 @@ async def run(dry_run=True):
             return false;
         }""")
         if has_modal:
-            log("[6/10] 복사후 재계산 버튼 클릭...")
+            log("[6/14] 복사후 재계산 버튼 클릭...")
             await click_dialog_button(page, "복사후 재계산")
             await asyncio.sleep(1)
 
-            log("[7/10] 확인 모달 → 취소 클릭...")
+            log("[7/14] 확인 모달 → 취소 클릭...")
             await click_dialog_button(page, "취소")
         else:
-            log("[6-7/10] 모달 없음 - 스킵")
+            log("[6-7/14] 모달 없음 - 스킵")
 
         # ===== [8] 엑셀 다운로드 =====
-        log("[8/10] 엑셀 다운로드...")
+        log("[8/14] 엑셀 다운로드...")
         save_dir = os.path.dirname(os.path.abspath(__file__))
-        # 프로젝트 루트의 results 디렉토리 사용
         save_dir = os.path.abspath(os.path.join(save_dir, "..", "..", "results"))
         os.makedirs(save_dir, exist_ok=True)
         download_path = await download_excel(page, save_dir)
 
         # ===== [9] 업로드 양식 변환 =====
-        log("[9/10] 업로드 양식 변환...")
+        log("[9/14] 업로드 양식 변환...")
         upload_path = convert_for_upload(download_path)
 
         # ===== [10] 엑셀 업로드 =====
-        log("[10/10] 엑셀 업로드...")
+        log("[10/14] 엑셀 업로드...")
         success = await upload_excel(page, upload_path, dry_run=dry_run)
 
         if success:
@@ -669,6 +891,18 @@ async def run(dry_run=True):
         else:
             log(f"\n'{company_name}' 업로드 중 에러 발생. 화면을 확인하세요.")
         log(f"URL: {page.url}")
+
+        # ===== [11-14] PDF 다운로드 =====
+        log("[11/14] #print 버튼 → 일괄출력 클릭...")
+        log("[12/14] 인쇄형태 선택...")
+        log("[13/14] PDF 저장...")
+        log("[14/14] PrintDialog 종료...")
+        pdf_path = await download_pdf(page, save_dir)
+
+        if pdf_path:
+            log(f"\nPDF 다운로드 완료: {pdf_path}")
+        else:
+            log("\nPDF 다운로드 실패.")
 
 
 if __name__ == "__main__":
