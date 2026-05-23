@@ -239,113 +239,153 @@ async def goto_menu_page(page, menu_id):
 
 
 async def get_report_period_type(page):
-    """원천징수이행상황신고서의 매월/반기 라디오 상태 반환"""
-    return await page.evaluate("""() => {
+    """원천징수이행상황신고서의 매월/반기 라디오 상태 반환
+
+    매월/반기 라디오를 찾아 checked 상태를 반환.
+    둘 다 체크 안 되어 있으면 기본값으로 매월을 선택 후 반환.
+    """
+    result = await page.evaluate("""() => {
         const radios = document.querySelectorAll('input.LSinput[type=radio]');
+        const monthlyRadios = [];
         for (const r of radios) {
             const label = r.closest('label')?.querySelector('.label_text')?.textContent?.trim();
-            if (r.checked) return label;
+            if (label === '매월' || label === '반기') {
+                monthlyRadios.push({radio: r, label, checked: r.checked});
+            }
+        }
+        // 이미 체크된 것 반환
+        const checked = monthlyRadios.find(r => r.checked);
+        if (checked) return checked.label;
+        // 체크된 게 없으면 매월 선택
+        const monthly = monthlyRadios.find(r => r.label === '매월');
+        if (monthly) {
+            monthly.radio.click();
+            return '매월';
         }
         return null;
     }""")
+    return result
 
 
 async def set_period_fields(page, year, start_month, end_month):
-    """귀속기간/지급기간 설정 (#SearchMain 내 .item[0]=귀속기간, .item[1]=지급기간)
+    """지급기간/귀속기간 설정 (#SearchMain 내 .item)
 
     각 기간 항목: div[tabindex=0] × 4 (시작년도, 시작월표시, 종료년도, 종료월표시)
-    연도: 클릭 → Ctrl+A → 타이핑
+    연도: triple-click → 타이핑 → Enter (WSC_LUXAlert 차단 주의)
     월: 화살표 버튼 클릭 → 드롭다운에서 li 선택
     """
-    search_main = await page.query_selector('#SearchMain')
-    if not search_main:
-        log("  #SearchMain 없음")
-        return False
+    # WSC_LUXAlert 오버레이가 클릭 차단하므로 먼저 닫기
+    await page.evaluate("""() => {
+        document.querySelectorAll('.WSC_LUXAlert').forEach(a => {
+            const btn = a.querySelector('button.WSC_LUXButton');
+            if (btn) btn.click();
+            a.style.display = 'none';
+        });
+    }""")
 
     period_labels = ['귀속기간', '지급기간']
-    items = await search_main.query_selector_all('.item')
 
-    for idx in [0, 1]:
-        if idx >= len(items):
-            break
-        item = items[idx]
-        label = period_labels[idx]
+    # JS에서 직접 rect를 가져와서 좌표 클릭 (JSHandle 불안정 회피)
+    # 기간 항목만 필터링: title에 '기간' 포함 + tabindex div 4개 + sprite 버튼 2개
+    rects = await page.evaluate("""() => {
+        const results = [];
+        const items = document.querySelectorAll('#SearchMain .item');
+        items.forEach((item, idx) => {
+            const title = item.querySelector('.item_title, strong');
+            const titleText = title ? title.textContent.trim() : '';
+            if (!titleText.includes('기간')) return;
+            const inputDivs = item.querySelectorAll('div[tabindex="0"]');
+            const spriteBtns = item.querySelectorAll('button .WSC_LUXSpriteIcon');
+            if (inputDivs.length < 4 || spriteBtns.length < 2) return;
+            const entry = {idx, title: titleText, years: [], months: []};
+            inputDivs.forEach((d, i) => {
+                const r = d.getBoundingClientRect();
+                entry.years.push({i, text: d.textContent.trim(), x: r.x, y: r.y, w: r.width, h: r.height});
+            });
+            spriteBtns.forEach((s, i) => {
+                const btn = s.closest('button');
+                const r = btn.getBoundingClientRect();
+                entry.months.push({i, x: r.x, y: r.y, w: r.width, h: r.height});
+            });
+            results.push(entry);
+        });
+        return results;
+    }""")
+
+    for idx, rect in enumerate(rects):
+        label = rect['title'] if rect['title'] else (period_labels[idx] if idx < 2 else f'항목{idx}')
         log(f"  {label}: {year}년 {start_month:02d}월 ~ {year}년 {end_month:02d}월")
 
-        input_divs = await item.query_selector_all('div[tabindex="0"]')
-        sprite_btns = await item.query_selector_all('button .WSC_LUXSpriteIcon')
-
-        # Set start year (div[0])
-        if len(input_divs) > 0:
-            box = await input_divs[0].bounding_box()
-            await page.mouse.click(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
-            await asyncio.sleep(0.2)
-            await page.keyboard.press('Control+a')
-            await asyncio.sleep(0.1)
-            await page.keyboard.press('Delete')
-            await asyncio.sleep(0.1)
+        # 시작 연도 (triple-click으로 텍스트 전체 선택)
+        if len(rect['years']) > 0:
+            y = rect['years'][0]
+            await page.mouse.click(y['x'] + y['w'] / 2, y['y'] + y['h'] / 2, click_count=3)
+            await asyncio.sleep(0.3)
             await page.keyboard.type(str(year))
             await page.keyboard.press('Enter')
             await asyncio.sleep(0.3)
 
-        # Set start month: click arrow button → select from dropdown
-        if len(sprite_btns) > 0:
-            btn = sprite_btns[0]
-            btn_parent = await btn.evaluate_handle('el => el.closest("button")')
-            box = await btn_parent.as_element().bounding_box()
-            await page.mouse.click(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+        # 시작 월
+        if len(rect['months']) > 0:
+            m = rect['months'][0]
+            await page.mouse.click(m['x'] + m['w'] / 2, m['y'] + m['h'] / 2)
             await asyncio.sleep(0.5)
-
-            # Find and click the target month in the dropdown
             target_text = f"{start_month:02d}"
             clicked = await page.evaluate(f"""() => {{
                 const lis = document.querySelectorAll('div[style*="position: fixed"] li div');
                 for (const li of lis) {{
                     if (li.textContent.trim() === '{target_text}') {{
-                        li.click();
-                        return true;
+                        li.click(); return true;
                     }}
                 }}
                 return false;
             }}""")
             if not clicked:
-                log(f"    월 {target_text} 선택 실패")
+                log(f"    시작월 {target_text} 선택 실패")
             await asyncio.sleep(0.3)
 
-        # Set end year (div[2])
-        if len(input_divs) > 2:
-            box = await input_divs[2].bounding_box()
-            await page.mouse.click(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
-            await asyncio.sleep(0.2)
-            await page.keyboard.press('Control+a')
-            await asyncio.sleep(0.1)
-            await page.keyboard.press('Delete')
-            await asyncio.sleep(0.1)
+        # 종료 연도
+        if len(rect['years']) > 2:
+            y = rect['years'][2]
+            await page.mouse.click(y['x'] + y['w'] / 2, y['y'] + y['h'] / 2, click_count=3)
+            await asyncio.sleep(0.3)
             await page.keyboard.type(str(year))
             await page.keyboard.press('Enter')
             await asyncio.sleep(0.3)
 
-        # Set end month
-        if len(sprite_btns) > 1:
-            btn = sprite_btns[1]
-            btn_parent = await btn.evaluate_handle('el => el.closest("button")')
-            box = await btn_parent.as_element().bounding_box()
-            await page.mouse.click(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+        # 종료 월
+        if len(rect['months']) > 1:
+            m = rect['months'][1]
+            await page.mouse.click(m['x'] + m['w'] / 2, m['y'] + m['h'] / 2)
             await asyncio.sleep(0.5)
-
             target_text = f"{end_month:02d}"
             clicked = await page.evaluate(f"""() => {{
                 const lis = document.querySelectorAll('div[style*="position: fixed"] li div');
                 for (const li of lis) {{
                     if (li.textContent.trim() === '{target_text}') {{
-                        li.click();
-                        return true;
+                        li.click(); return true;
                     }}
                 }}
                 return false;
             }}""")
             if not clicked:
-                log(f"    월 {target_text} 선택 실패")
+                log(f"    종료월 {target_text} 선택 실패")
+            await asyncio.sleep(0.3)
+
+        # 연도 검증 및 재시도
+        verify = await page.evaluate(f"""() => {{
+            const items = document.querySelectorAll('#SearchMain .item');
+            if (!items[{idx}]) return null;
+            const divs = items[{idx}].querySelectorAll('div[tabindex="0"]');
+            return Array.from(divs).map(d => d.textContent.trim());
+        }}""")
+        if verify and verify[0] != str(year):
+            log(f"    시작 연도 재시도 ({verify[0]} -> {year})...")
+            y = rect['years'][0]
+            await page.mouse.click(y['x'] + y['w'] / 2, y['y'] + y['h'] / 2, click_count=3)
+            await asyncio.sleep(0.3)
+            await page.keyboard.type(str(year))
+            await page.keyboard.press('Enter')
             await asyncio.sleep(0.3)
 
     return True
@@ -434,20 +474,39 @@ async def dismiss_dialogs(page):
     """표시 중인 팝업/다이얼로그가 있으면 모두 닫기
 
     WEHAGO/SmartA의 다이얼로그를 탐지하여 닫습니다.
-    대상: _isDialog, LUX_basic_dialog
+    대상: _isDialog, LUX_basic_dialog + z-index >= 1000 fixed 오버레이
     1) '닫기' 텍스트 버튼 → 2) X 버튼 → 3) '확인' 버튼 → 4) '취소' 버튼 순으로 닫습니다.
     팝업이 없으면 아무것도 하지 않으며, 중첩 시 모두 사라질 때까지 반복합니다.
     """
     for _ in range(20):
         closed = await page.evaluate("""() => {
+            // 1) 명시적 다이얼로그 탐색 (display/visibility)
             const selectors = ['._isDialog', '.LUX_basic_dialog'];
             let target = null;
             for (const sel of selectors) {
                 for (const d of document.querySelectorAll(sel)) {
-                    if (d.style.display !== 'none') { target = d; break; }
+                    const cs = window.getComputedStyle(d);
+                    if (cs.display !== 'none' && cs.visibility !== 'hidden'
+                        && d.offsetParent !== null && d.offsetWidth > 0) {
+                        target = d; break;
+                    }
                 }
                 if (target) break;
             }
+
+            // 2) z-index >= 1000 fixed 오버레이 (텍스트 있는 것만, Snackbar 제외)
+            if (!target) {
+                const all = document.querySelectorAll('*');
+                for (const el of all) {
+                    const cs = window.getComputedStyle(el);
+                    if (cs.position !== 'fixed' || cs.display === 'none'
+                        || parseInt(cs.zIndex) < 1000 || el.offsetWidth < 100) continue;
+                    if (el.classList.contains('WSC_LUXSnackbar')) continue;
+                    if (el.textContent.trim().length === 0) continue;
+                    target = el; break;
+                }
+            }
+
             if (!target) return null;
 
             const allBtns = target.querySelectorAll('button, a');
@@ -466,7 +525,9 @@ async def dismiss_dialogs(page):
             if (confirmBtn) { confirmBtn.click(); return '확인(btnbx)'; }
             // 4) 확인
             for (const btn of allBtns) {
-                if (btn.textContent.trim() === '확인') { btn.click(); return '확인'; }
+                if (btn.textContent.trim() === '확인' && btn.offsetWidth > 0) {
+                    btn.click(); return '확인';
+                }
             }
             // 5) 취소
             for (const btn of allBtns) {
@@ -1041,7 +1102,10 @@ async def run(dry_run=True):
         # ===== [15] 원천징수이행상황신고서 페이지 이동 =====
         log("[15/15] 원천징수이행상황신고서(SWTA0101) 이동...")
         await goto_menu_page(page, "SWTA0101")
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
+
+        # 모달 확인 후 닫기
+        await dismiss_dialogs(page)
 
         # ===== [15-1] 매월/반기 확인 → 귀속기간/지급기간 설정 =====
         from datetime import datetime
@@ -1082,16 +1146,20 @@ async def run(dry_run=True):
 
         # ===== [15-3] 마감/마감해제 버튼 처리 =====
         btn_text = await page.evaluate("""() => {
-            const menu = document.querySelector('.sao_head_menu');
-            if (!menu) return null;
-            const btn = menu.querySelector('button.WSC_LUXButton');
-            return btn ? btn.textContent.trim() : null;
+            const btns = document.querySelectorAll('.WSC_LUXTooltip button.WSC_LUXButton');
+            for (const btn of btns) {
+                const text = btn.textContent.trim();
+                if (text === '마감' || text === '마감해제') return text;
+            }
+            return null;
         }""")
         if btn_text == "마감":
             log("  마감 버튼 클릭 (마감해제)...")
             await page.evaluate("""() => {
-                const btn = document.querySelector('.sao_head_menu button.WSC_LUXButton');
-                if (btn) btn.click();
+                const btns = document.querySelectorAll('.WSC_LUXTooltip button.WSC_LUXButton');
+                for (const btn of btns) {
+                    if (btn.textContent.trim() === '마감') { btn.click(); return; }
+                }
             }""")
             await asyncio.sleep(1)
         elif btn_text == "마감해제":
