@@ -1172,9 +1172,97 @@ async def run(dry_run=True):
         await goto_menu_page(page, "SWER0101")
         await asyncio.sleep(3)
 
-        # 모달 확인 후 닫기
+        # 모달 확인 후 닫기 (제출자등록 안내 등)
         log("  모달 확인...")
         await dismiss_dialogs(page)
+
+        # ===== [17] 지급기간 설정 =====
+        log("[17] 지급기간 설정...")
+        if now.month == 1:
+            target_year = now.year - 1
+            target_month = 12
+        else:
+            target_year = now.year
+            target_month = now.month - 1
+        log(f"  지급기간: {target_year}년 {target_month:02d}월")
+        await set_period_fields(page, target_year, target_month, target_month)
+
+        # ===== [18] 수임처 아이콘 클릭 → 확인 =====
+        log("[18] 수임처 아이콘 클릭...")
+        await page.evaluate("""() => {
+            const items = document.querySelectorAll('#SearchMain .item');
+            for (const item of items) {
+                const title = item.querySelector('.item_title, strong');
+                if (!title || !title.textContent.includes('수임처')) continue;
+                const btns = item.querySelectorAll('button.WSC_LUXButton');
+                for (const btn of btns) {
+                    const r = btn.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0 && !btn.textContent.trim()) {
+                        btn.click(); return;
+                    }
+                }
+            }
+        }""")
+        await asyncio.sleep(2)
+
+        # 회사 코드도움 모달에서 확인(enter) 클릭
+        log("  회사 코드도움 확인 클릭...")
+        for frame in page.frames:
+            try:
+                await frame.evaluate("""() => {
+                    const all = document.querySelectorAll('*');
+                    for (const el of all) {
+                        try {
+                            const cs = window.getComputedStyle(el);
+                            const z = parseInt(cs.zIndex) || 0;
+                            if (z < 1000 || cs.display === 'none' || el.offsetWidth < 100) continue;
+                            if (!el.textContent.includes('코드도움')) continue;
+                            const btns = el.querySelectorAll('button');
+                            for (const btn of btns) {
+                                if (btn.textContent.trim() === '확인(enter)' && btn.offsetWidth > 0) {
+                                    btn.click(); return;
+                                }
+                            }
+                        } catch(e) {}
+                    }
+                }""")
+            except Exception:
+                pass
+        await asyncio.sleep(2)
+
+        # ===== [19] 제작(F4) 버튼 클릭 =====
+        log("[19] 제작(F4) 버튼 클릭...")
+        await page.evaluate("""() => {
+            const all = document.querySelectorAll('button.WSC_LUXButton');
+            for (const btn of all) {
+                if (btn.textContent.trim() === '제작(F4)') {
+                    const r = btn.getBoundingClientRect();
+                    if (r.y < 100) { btn.click(); return; }
+                }
+            }
+        }""")
+        await asyncio.sleep(2)
+
+        # 제작제외 참고사항 모달 닫기 (iframe 내부 _isDialog에서 확인 클릭)
+        log("  제작제외 참고사항 모달 닫기...")
+        for frame in page.frames:
+            try:
+                await frame.evaluate("""() => {
+                    const dialogs = document.querySelectorAll('._isDialog');
+                    for (const d of dialogs) {
+                        if (!d.textContent.includes('참고사항')) continue;
+                        const btns = d.querySelectorAll('button');
+                        for (const btn of btns) {
+                            const txt = btn.textContent.trim();
+                            if ((txt === '확인(enter)' || txt === '확인') && btn.offsetWidth > 0) {
+                                btn.click(); return;
+                            }
+                        }
+                    }
+                }""")
+            except Exception:
+                pass
+        await asyncio.sleep(2)
 
 
 if __name__ == "__main__":
