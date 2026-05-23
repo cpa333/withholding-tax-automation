@@ -7,7 +7,7 @@
 
 ## 기술 스택
 - **Playwright + CDP** (Chrome DevTools Protocol)
-- Chrome을 `--remote-debugging-port=9222`로 실행 후 Playwright로 연결
+- Chrome을 `--remote-debugging-port=9223`로 실행 후 Playwright로 연결
 - **openpyxl** — 엑셀 파일 다운로드/업로드 양식 변환
 - **pywinauto** — WEHAGO PrintDialog (OS 레벨 Windows Forms 앱) 제어
 - **Human-in-the-loop**: 복잡한 인증은 사용자가 수동 로그인, 이후 자동화가 제어권 이어받음
@@ -19,42 +19,42 @@
 | 근린커피 | company_5599115 | |
 | 근린커피 상암 | company_5603395 | cNum=5603395, **현재 타겟** |
 
-## 자동화된 프로세스 (14단계)
+## 자동화된 프로세스 (15단계)
 
-### [1/14] Chrome 디버깅 모드 실행
-- `launch_chrome()`: Chrome을 `--remote-debugging-port=9222` + 전용 user-data-dir로 실행
+### [1/15] Chrome 디버깅 모드 실행
+- `launch_chrome()`: Chrome을 `--remote-debugging-port=9223` + 전용 user-data-dir로 실행
 - 이미 CDP 포트가 열려있으면 기존 Chrome에 연결
 
-### [2/14] 로그인 + 랜딩 팝업 닫기
+### [2/15] 로그인 + 랜딩 팝업 닫기
 - `wait_for_login()`: 수동 로그인 대기 (Enter 입력)
 - `dismiss_dialogs()`: `_isDialog`, `LUX_basic_dialog` 타입 팝업 자동 탐지 후 닫기
   - 닫기 순서: 닫기 → X → 확인(btnbx) → 확인 → 취소
 
-### [3/14] 수임처 급여(SmartA) 페이지 이동
+### [3/15] 수임처 급여(SmartA) 페이지 이동
 - `goto_salary_page()`: window.open 인터셉트 방식으로 URL 캡처 후 이동
 - **핵심 트릭**: Playwright click이 타임아웃되므로 `window.open`을 가로채서 URL만 가져온 뒤 `page.goto()`로 직접 이동
 - 카드 구조: `company_[id]` → 3단계 상위 = `divtbl_bx` (카드 하나의 범위)
 
-### [4/14] 급여자료입력 메뉴 이동
+### [4/15] 급여자료입력 메뉴 이동
 - `click_menu("SWSA0101")`: 사이드 메뉴의 `a#SWSA0101.text_link` 클릭
 - SPA 내부 라우팅 (페이지 리로드 없이 URL 해시 변경)
 
-### [5/14] 구분 드롭다운 → 급여+상여 선택
+### [5/15] 구분 드롭다운 → 급여+상여 선택
 - `select_dropdown(0, "급여+상여")`: 커스텀 드롭다운(LS_ngh_select2) 조작
   - `.LSbutton` 클릭으로 열기 → `.LSselectResult li`에서 텍스트 매치 후 클릭
   - 드롭다운 인덱스 0 = 첫 번째 드롭다운 (구분)
 
-### [6-7/14] 복사후 재계산 모달 (조건부)
+### [6-7/15] 복사후 재계산 모달 (조건부)
 - 구분 변경 시 모달이 뜨는지 먼저 감지
 - **모달 있으면**: "복사후 재계산" 클릭 → "취소" 클릭
 - **모달 없으면**: 스킵하고 다음 단계로
 
-### [8/14] 엑셀 다운로드
+### [8/15] 엑셀 다운로드
 - `download_excel()`: `#collect` 버튼 → 드롭다운 → "엑셀 내려받기" 클릭
 - 다운로드된 파일을 `results/` 디렉토리에 저장
 - 파일명 예: `근린커피 상암-202605.xlsx`
 
-### [9/14] 업로드 양식 변환
+### [9/15] 업로드 양식 변환
 - `convert_for_upload()`: 다운로드 파일을 WEHAGO 업로드 양식으로 변환
 - 변환 규칙:
   1. 행1(대분류) + 행2(세부항목) 헤더를 단일 행으로 평탄화 (행2 우선, 없으면 행1)
@@ -63,7 +63,7 @@
   4. 사원코드: 4자리 0-pad 문자열 (예: `"0005"`)
 - 출력 파일: `{원본명}_업로드.xlsx`
 
-### [10/14] 엑셀 업로드
+### [10/15] 엑셀 업로드
 - `upload_excel()`: `#collect` 버튼 → 드롭다운 → "엑셀 불러오기" → file chooser로 파일 선택
 - 업로드 후 모달 6단계 처리:
   1. **① 엑셀내역**: 헤더 행(행1)을 CDP 마우스 이벤트로 클릭하여 선택 (JS click은 동작하지 않음)
@@ -74,25 +74,56 @@
   6. **후속 모달 3/3**: 확인 (항상 — 완료 확인)
 - 에러 모달 감지 후 결과 반환
 
-### [11/14] #print 버튼 → 일괄출력 실행
+### [11/15] #print 버튼 → 일괄출력 실행
 - `open_print_dialog(page)`: 브라우저에서 `#print` 버튼 클릭 → 드롭다운에서 "일괄출력" 클릭
 - WEHAGO PrintDialog (Windows Forms 앱, `Duzon - PrintDialog`) 가 별도 프로세스로 실행됨
 - PrintDialog 경로: `C:\Douzone\Wehago\WehagoPrint`
 - pywinauto로 OS 레벨에서 제어 (Playwright가 아닌 Windows UI Automation)
 
-### [12/14] 인쇄형태 선택
+### [12/15] 인쇄형태 선택
 - `_select_print_format(target_text)`: PrintDialog의 인쇄형태 ComboBox (`auto_id="cbContents"`) 에서 항목 선택
 - `auto_id` + `control_type` + `CurrentName` 기반 탐색 (좌표 독립)
 - 인쇄형태 옵션: 급여명세(구), 급여대장, 급여대장(부서별), 급여대장(비과세계), 창봉투, **급여명세(사원당 한장)**, 급여명세(전체항목), 급여대장(부서별비과세계), 급여대장(근로기준법), 급여대장(주민번호출력), 급여명세서(근로기준1~5)
 
-### [13/14] PDF 저장
+### [13/15] PDF 저장
 - `_click_save_pdf()`: PrintDialog의 PDF 버튼 (`auto_id="btnSavePDF"`) 클릭
 - Windows "다른 이름으로 저장" 대화상자 (`#32770`) 등장
 - `_handle_save_dialog(save_path)`: 파일 경로 입력 → 저장 버튼 (`저장(&S)`) 클릭
 - 저장 위치: `results/` 디렉토리
 
-### [14/14] PrintDialog 종료
+### [14/15] PrintDialog 종료
 - `_close_print_dialog()`: 닫기 버튼 (`auto_id="btnClose"`) 클릭
+
+### [15/15] 원천징수이행상황신고서 페이지 이동
+- `goto_menu_page(page, "SWTA0101")`: 현재 SmartA URL의 메뉴 ID 해시를 `SWTA0101`로 교체하여 이동
+- 사이드 메뉴에 보이지 않는 메뉴도 URL 직접 교체로 접근 가능
+- 메뉴 ID: `SWSA0101` (급여자료입력) → `SWTA0101` (원천징수이행상황신고서)
+
+### [15-1] 매월/반기 → 귀속기간/지급기간 설정
+- `get_report_period_type(page)`: 표 내 라디오 버튼(`input.LSinput[type=radio]`)에서 매월/반기 체크 상태 읽기
+- `set_period_fields(page, year, start_month, end_month)`: `#SearchMain` 상단 기간 설정 영역 조작
+- **기간 계산 로직**:
+  - **매월**: 현 시점 기준 저번달 (예: 2026년 5월 → `2026년 04월 ~ 04월`)
+  - **반기**: 올해 `01월 ~ 06월`
+- **페이지 구조** (`#SearchMain > .item[]`):
+  | idx | 항목 | 컨트롤 |
+  |-----|------|--------|
+  | 0 | 귀속기간 | `div[tabindex=0]` × 4 (시작년도, 시작월표시, 종료년도, 종료월표시) |
+  | 1 | 지급기간 | 동일 |
+  | 2 | 신고구분 | `"0. 정기신고"` 커스텀 드롭다운 |
+  | 3 | 신고리스트 | 버튼 |
+  | 4 | 수정차수 | `"1"` 커스텀 드롭다운 |
+- **연도 설정**: `div[tabindex=0]` 클릭 → Ctrl+A → Delete → 연도 타이핑 → Enter
+- **월 설정**: 화살표 버튼(`button .WSC_LUXSpriteIcon` → `closest("button")`) 클릭 → React 드롭다운에서 `li div` 텍스트 매치 후 클릭 (`01`~`12`)
+
+### [15-2] 조회 버튼 클릭
+- `#Search button` 중 텍스트 `"조회"`인 버튼을 JS `btn.click()`으로 클릭
+- `mouse.click` 좌표 방식은 불안정 → JS 직접 클릭 사용
+
+### [15-3] 마감/마감해제 버튼 처리
+- 조회 후 `.sao_head_menu button.WSC_LUXButton` 첫 번째 버튼 텍스트 확인
+- **"마감"** → 클릭하여 마감해제 (잠금 상태이므로 해제 필요)
+- **"마감해제"** → 스킵 (이미 해제된 상태)
 
 ---
 
@@ -122,6 +153,9 @@
 | `_click_save_pdf()` | PrintDialog PDF 저장 버튼 클릭 (pywinauto) |
 | `_handle_save_dialog(save_path)` | Windows 저장 대화상자 처리 (pywinauto) |
 | `_close_print_dialog()` | PrintDialog 종료 (pywinauto) |
+| `goto_menu_page(page, menu_id)` | SmartA 내 메뉴 URL 해시 교체 이동 |
+| `get_report_period_type(page)` | 매월/반기 라디오 상태 반환 |
+| `set_period_fields(page, year, start_month, end_month)` | 귀속기간/지급기간 설정 (연도+월) |
 
 ## 엑셀 다운로드/업로드 구조
 

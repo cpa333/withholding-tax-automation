@@ -217,6 +217,140 @@ async def click_menu(page, menu_id):
     log(f"메뉴 이동 완료: {await page.title()}")
 
 
+async def goto_menu_page(page, menu_id):
+    """SmartA 내 다른 메뉴 페이지로 이동 (URL 해시 교체)
+
+    현재 SmartA URL에서 메뉴 ID 해시만 교체하여 페이지 전환.
+    사이드 메뉴에 보이지 않는 메뉴(예: SWTA0101 원천징수이행상황신고서)도 이동 가능.
+    """
+    current_url = page.url
+    # 현재 URL에서 /SWSA0101 같은 메뉴 해시를 찾아 교체
+    import re
+    new_url = re.sub(r'/[A-Z]+\d+(?=[?#]|$)', '/' + menu_id, current_url)
+    if new_url == current_url:
+        log(f"  URL 교체 실패: {menu_id}")
+        return False
+
+    log(f"메뉴 이동: {menu_id}")
+    await page.goto(new_url, wait_until="domcontentloaded", timeout=30000)
+    await asyncio.sleep(2)
+    log(f"이동 완료: {await page.title()}")
+    return True
+
+
+async def get_report_period_type(page):
+    """원천징수이행상황신고서의 매월/반기 라디오 상태 반환"""
+    return await page.evaluate("""() => {
+        const radios = document.querySelectorAll('input.LSinput[type=radio]');
+        for (const r of radios) {
+            const label = r.closest('label')?.querySelector('.label_text')?.textContent?.trim();
+            if (r.checked) return label;
+        }
+        return null;
+    }""")
+
+
+async def set_period_fields(page, year, start_month, end_month):
+    """귀속기간/지급기간 설정 (#SearchMain 내 .item[0]=귀속기간, .item[1]=지급기간)
+
+    각 기간 항목: div[tabindex=0] × 4 (시작년도, 시작월표시, 종료년도, 종료월표시)
+    연도: 클릭 → Ctrl+A → 타이핑
+    월: 화살표 버튼 클릭 → 드롭다운에서 li 선택
+    """
+    search_main = await page.query_selector('#SearchMain')
+    if not search_main:
+        log("  #SearchMain 없음")
+        return False
+
+    period_labels = ['귀속기간', '지급기간']
+    items = await search_main.query_selector_all('.item')
+
+    for idx in [0, 1]:
+        if idx >= len(items):
+            break
+        item = items[idx]
+        label = period_labels[idx]
+        log(f"  {label}: {year}년 {start_month:02d}월 ~ {year}년 {end_month:02d}월")
+
+        input_divs = await item.query_selector_all('div[tabindex="0"]')
+        sprite_btns = await item.query_selector_all('button .WSC_LUXSpriteIcon')
+
+        # Set start year (div[0])
+        if len(input_divs) > 0:
+            box = await input_divs[0].bounding_box()
+            await page.mouse.click(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+            await asyncio.sleep(0.2)
+            await page.keyboard.press('Control+a')
+            await asyncio.sleep(0.1)
+            await page.keyboard.press('Delete')
+            await asyncio.sleep(0.1)
+            await page.keyboard.type(str(year))
+            await page.keyboard.press('Enter')
+            await asyncio.sleep(0.3)
+
+        # Set start month: click arrow button → select from dropdown
+        if len(sprite_btns) > 0:
+            btn = sprite_btns[0]
+            btn_parent = await btn.evaluate_handle('el => el.closest("button")')
+            box = await btn_parent.as_element().bounding_box()
+            await page.mouse.click(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+            await asyncio.sleep(0.5)
+
+            # Find and click the target month in the dropdown
+            target_text = f"{start_month:02d}"
+            clicked = await page.evaluate(f"""() => {{
+                const lis = document.querySelectorAll('div[style*="position: fixed"] li div');
+                for (const li of lis) {{
+                    if (li.textContent.trim() === '{target_text}') {{
+                        li.click();
+                        return true;
+                    }}
+                }}
+                return false;
+            }}""")
+            if not clicked:
+                log(f"    월 {target_text} 선택 실패")
+            await asyncio.sleep(0.3)
+
+        # Set end year (div[2])
+        if len(input_divs) > 2:
+            box = await input_divs[2].bounding_box()
+            await page.mouse.click(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+            await asyncio.sleep(0.2)
+            await page.keyboard.press('Control+a')
+            await asyncio.sleep(0.1)
+            await page.keyboard.press('Delete')
+            await asyncio.sleep(0.1)
+            await page.keyboard.type(str(year))
+            await page.keyboard.press('Enter')
+            await asyncio.sleep(0.3)
+
+        # Set end month
+        if len(sprite_btns) > 1:
+            btn = sprite_btns[1]
+            btn_parent = await btn.evaluate_handle('el => el.closest("button")')
+            box = await btn_parent.as_element().bounding_box()
+            await page.mouse.click(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+            await asyncio.sleep(0.5)
+
+            target_text = f"{end_month:02d}"
+            clicked = await page.evaluate(f"""() => {{
+                const lis = document.querySelectorAll('div[style*="position: fixed"] li div');
+                for (const li of lis) {{
+                    if (li.textContent.trim() === '{target_text}') {{
+                        li.click();
+                        return true;
+                    }}
+                }}
+                return false;
+            }}""")
+            if not clicked:
+                log(f"    월 {target_text} 선택 실패")
+            await asyncio.sleep(0.3)
+
+    return True
+
+
 async def select_dropdown(page, dropdown_index, option_text):
     """커스텀 드롭다운(LS_ngh_select2)에서 옵션 선택
 
@@ -805,26 +939,26 @@ async def run(dry_run=True):
     """
     async with async_playwright() as p:
         # ===== [1] Chrome 실행 =====
-        log("[1/14] Chrome 실행...")
+        log("[1/15] Chrome 실행...")
         if not await launch_chrome():
             return
 
         # ===== [2] 연결, 로그인, 팝업 닫기 =====
-        log("[2/14] Chrome 연결 및 로그인 확인...")
+        log("[2/15] Chrome 연결 및 로그인 확인...")
         browser, context, page = await connect_browser(p)
         if not await wait_for_login(page):
             return
         await dismiss_dialogs(page)
 
         # ===== [3] 수임처 급여 페이지 이동 =====
-        log("[3/14] 수임처 급여 페이지 이동...")
+        log("[3/15] 수임처 급여 페이지 이동...")
         company_name = "[테스트] (주)리틀치프코리아"
         if not await goto_salary_page(page, company_name):
             return
         await dismiss_dialogs(page)
 
         # ===== [4] 급여자료입력 메뉴 이동 =====
-        log("[4/14] 급여자료입력 메뉴 이동...")
+        log("[4/15] 급여자료입력 메뉴 이동...")
         await click_menu(page, "SWSA0101")
         await asyncio.sleep(3)
 
@@ -847,7 +981,7 @@ async def run(dry_run=True):
         await dismiss_dialogs(page)
 
         # ===== [5] 구분 드롭다운: 급여+상여 선택 =====
-        log("[5/14] 구분 드롭다운 → 급여+상여 선택...")
+        log("[5/15] 구분 드롭다운 → 급여+상여 선택...")
         await select_dropdown(page, 0, "급여+상여")
 
         # ===== [6-7] 복사후 재계산 모달 (조건부) =====
@@ -869,21 +1003,21 @@ async def run(dry_run=True):
             log("[7/14] 확인 모달 → 취소 클릭...")
             await click_dialog_button(page, "취소")
         else:
-            log("[6-7/14] 모달 없음 - 스킵")
+            log("[6-7/15] 모달 없음 - 스킵")
 
         # ===== [8] 엑셀 다운로드 =====
-        log("[8/14] 엑셀 다운로드...")
+        log("[8/15] 엑셀 다운로드...")
         save_dir = os.path.dirname(os.path.abspath(__file__))
         save_dir = os.path.abspath(os.path.join(save_dir, "..", "..", "results"))
         os.makedirs(save_dir, exist_ok=True)
         download_path = await download_excel(page, save_dir)
 
         # ===== [9] 업로드 양식 변환 =====
-        log("[9/14] 업로드 양식 변환...")
+        log("[9/15] 업로드 양식 변환...")
         upload_path = convert_for_upload(download_path)
 
         # ===== [10] 엑셀 업로드 =====
-        log("[10/14] 엑셀 업로드...")
+        log("[10/15] 엑셀 업로드...")
         success = await upload_excel(page, upload_path, dry_run=dry_run)
 
         if success:
@@ -893,16 +1027,77 @@ async def run(dry_run=True):
         log(f"URL: {page.url}")
 
         # ===== [11-14] PDF 다운로드 =====
-        log("[11/14] #print 버튼 → 일괄출력 클릭...")
-        log("[12/14] 인쇄형태 선택...")
-        log("[13/14] PDF 저장...")
-        log("[14/14] PrintDialog 종료...")
+        log("[11/15] #print 버튼 → 일괄출력 클릭...")
+        log("[12/15] 인쇄형태 선택...")
+        log("[13/15] PDF 저장...")
+        log("[14/15] PrintDialog 종료...")
         pdf_path = await download_pdf(page, save_dir)
 
         if pdf_path:
             log(f"\nPDF 다운로드 완료: {pdf_path}")
         else:
             log("\nPDF 다운로드 실패.")
+
+        # ===== [15] 원천징수이행상황신고서 페이지 이동 =====
+        log("[15/15] 원천징수이행상황신고서(SWTA0101) 이동...")
+        await goto_menu_page(page, "SWTA0101")
+        await asyncio.sleep(2)
+
+        # ===== [15-1] 매월/반기 확인 → 귀속기간/지급기간 설정 =====
+        from datetime import datetime
+        now = datetime.now()
+        period_type = await get_report_period_type(page)
+        log(f"  신고유형: {period_type}")
+
+        if period_type == "매월":
+            # 저번달
+            if now.month == 1:
+                target_year = now.year - 1
+                target_month = 12
+            else:
+                target_year = now.year
+                target_month = now.month - 1
+            log(f"  매월 → {target_year}년 {target_month:02d}월")
+            await set_period_fields(page, target_year, target_month, target_month)
+        elif period_type == "반기":
+            target_year = now.year
+            log(f"  반기 → {target_year}년 01월 ~ 06월")
+            await set_period_fields(page, target_year, 1, 6)
+        else:
+            log(f"  알 수 없는 신고유형: {period_type}")
+
+        # ===== [15-2] 조회 버튼 클릭 =====
+        log("  조회 버튼 클릭...")
+        await page.evaluate("""() => {
+            const btns = document.querySelectorAll('#Search button');
+            for (const btn of btns) {
+                if (btn.textContent.trim() === '조회' && btn.getBoundingClientRect().width > 0) {
+                    btn.click();
+                    return true;
+                }
+            }
+            return false;
+        }""")
+        await asyncio.sleep(3)
+
+        # ===== [15-3] 마감/마감해제 버튼 처리 =====
+        btn_text = await page.evaluate("""() => {
+            const menu = document.querySelector('.sao_head_menu');
+            if (!menu) return null;
+            const btn = menu.querySelector('button.WSC_LUXButton');
+            return btn ? btn.textContent.trim() : null;
+        }""")
+        if btn_text == "마감":
+            log("  마감 버튼 클릭 (마감해제)...")
+            await page.evaluate("""() => {
+                const btn = document.querySelector('.sao_head_menu button.WSC_LUXButton');
+                if (btn) btn.click();
+            }""")
+            await asyncio.sleep(1)
+        elif btn_text == "마감해제":
+            log("  이미 마감해제 상태 - 스킵")
+        else:
+            log(f"  마감 버튼 상태: {btn_text}")
 
 
 if __name__ == "__main__":
