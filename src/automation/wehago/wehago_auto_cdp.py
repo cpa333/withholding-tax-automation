@@ -1167,6 +1167,15 @@ async def run(dry_run=True):
         else:
             log(f"  마감 버튼 상태: {btn_text}")
 
+        # ===== [16] 원천징수 전자신고(SWER0101) 이동 =====
+        log("[16] 원천징수 전자신고(SWER0101) 이동...")
+        await goto_menu_page(page, "SWER0101")
+        await asyncio.sleep(3)
+
+        # 모달 확인 후 닫기
+        log("  모달 확인...")
+        await dismiss_dialogs(page)
+
 
 if __name__ == "__main__":
     asyncio.run(run())
