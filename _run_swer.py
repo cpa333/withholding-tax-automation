@@ -125,6 +125,7 @@ def _wait_for_nts(uia):
 
 def _wait_for_folder_dialog(uia, nts_root):
     """FormSelectFolder 대기. 중간에 '이미 기록된 파일' 질의 처리."""
+    UIA = comtypes.client.GetModule("UIAutomationCore.dll")
     cond_form = uia.CreatePropertyCondition(UIA.UIA_AutomationIdPropertyId, "FormSelectFolder")
     cond_win = uia.CreatePropertyCondition(UIA.UIA_ControlTypePropertyId, UIA.UIA_WindowControlTypeId)
 
@@ -164,6 +165,7 @@ def _is_overwrite_query(uia, window):
 
 def _select_tree_folder(uia, form, folder_name):
     """트리에서 바탕화면 확장 후 폴더 선택"""
+    UIA = comtypes.client.GetModule("UIAutomationCore.dll")
     cond_tree = uia.CreatePropertyCondition(UIA.UIA_AutomationIdPropertyId, "treeDir")
     tree = form.FindFirst(UIA.TreeScope_Descendants, cond_tree)
     if not tree:
@@ -221,6 +223,7 @@ def _select_tree_folder(uia, form, folder_name):
 
 def _handle_nts_modals(uia, nts_root):
     """확인 후 후속 모달(질의/안내) 자동 처리"""
+    UIA = comtypes.client.GetModule("UIAutomationCore.dll")
     cond_win = uia.CreatePropertyCondition(UIA.UIA_ControlTypePropertyId, UIA.UIA_WindowControlTypeId)
 
     for _ in range(10):
@@ -252,6 +255,7 @@ def _handle_nts_modals(uia, nts_root):
 
 def _invoke_btn(uia, parent, auto_id):
     """auto_id로 버튼 찾아서 Invoke 패턴 실행"""
+    UIA = comtypes.client.GetModule("UIAutomationCore.dll")
     cond = uia.CreatePropertyCondition(UIA.UIA_AutomationIdPropertyId, auto_id)
     btn = parent.FindFirst(UIA.TreeScope_Descendants, cond)
     if not btn:
@@ -416,14 +420,17 @@ async def set_period_fields(page, year, start_month, end_month):
             if rect["months"]:
                 m = rect["months"][0]
                 await page.mouse.click(m["x"] + m["w"] / 2, m["y"] + m["h"] / 2)
-                await asyncio.sleep(0.5)
-                await page.evaluate(f"""() => {{
+                await asyncio.sleep(0.8)
+                clicked = await page.evaluate(f"""() => {{
                     const lis = document.querySelectorAll('div[style*="position: fixed"] li div');
                     for (const li of lis) {{
-                        if (li.textContent.trim() === '{start_month:02d}') {{ li.click(); return; }}
+                        if (li.textContent.trim() === '{start_month:02d}') {{ li.click(); return true; }}
                     }}
+                    return false;
                 }}""")
-                await asyncio.sleep(0.3)
+                if not clicked:
+                    log(f"      start month {start_month:02d} select failed")
+                await asyncio.sleep(0.5)
 
             if len(rect["years"]) > 2:
                 y = rect["years"][2]
@@ -436,14 +443,17 @@ async def set_period_fields(page, year, start_month, end_month):
             if len(rect["months"]) > 1:
                 m = rect["months"][1]
                 await page.mouse.click(m["x"] + m["w"] / 2, m["y"] + m["h"] / 2)
-                await asyncio.sleep(0.5)
-                await page.evaluate(f"""() => {{
+                await asyncio.sleep(0.8)
+                clicked = await page.evaluate(f"""() => {{
                     const lis = document.querySelectorAll('div[style*="position: fixed"] li div');
                     for (const li of lis) {{
-                        if (li.textContent.trim() === '{end_month:02d}') {{ li.click(); return; }}
+                        if (li.textContent.trim() === '{end_month:02d}') {{ li.click(); return true; }}
                     }}
+                    return false;
                 }}""")
-                await asyncio.sleep(0.3)
+                if not clicked:
+                    log(f"      end month {end_month:02d} select failed")
+                await asyncio.sleep(0.5)
 
             # 전체 값 검증
             verify = await page.evaluate(f"""() => {{
@@ -520,6 +530,10 @@ async def set_password_and_submit(page, password):
 
         log(f"    password OK (attempt {attempt})")
 
+        # 비밀번호 경고 닫기 (제출 전)
+        await close_warning_overlay(page, "최소 8~15자리")
+        await asyncio.sleep(0.3)
+
         # 전자신고 파일 제작(Enter) 클릭
         log("    전자신고 파일 제작(Enter) 클릭...")
         await page.evaluate("""() => {
@@ -530,9 +544,81 @@ async def set_password_and_submit(page, password):
                 }
             }
         }""")
-        await asyncio.sleep(3)
+        await asyncio.sleep(5)
 
-        # 에러 확인 (성공/안내 메시지 제외)
+        # 에러 확인 + 비밀번호 규칙 경고 처리
+        # "비밀번호는 최소 8~15자리" 경고는 에러가 아닌 재입력 필요 신호
+        has_pwd_warning = await page.evaluate("""() => {
+            const all = document.querySelectorAll('*');
+            for (const el of all) {
+                try {
+                    const cs = window.getComputedStyle(el);
+                    if (cs.position !== 'fixed' || cs.display === 'none'
+                        || parseInt(cs.zIndex) < 1000 || el.offsetWidth < 50) continue;
+                    const txt = el.textContent;
+                    if (txt.includes('최소 8~15')) return true;
+                } catch(e) {}
+            }
+            return false;
+        }""")
+
+        if has_pwd_warning:
+            log(f"    비밀번호 규칙 경고 감지 → 확인 + 재입력 + 재제출")
+            await close_warning_overlay(page, "최소 8~15자리")
+            await asyncio.sleep(0.5)
+
+            # 비밀번호 재입력
+            await page.evaluate("""(pwd) => {
+                const dialogs = document.querySelectorAll('._isDialog');
+                for (const d of dialogs) {
+                    if (d.offsetWidth < 100 || !d.textContent.includes('변환파일 비밀번호')) continue;
+                    const inp = d.querySelector('input.LSinput');
+                    const fake = d.querySelector('.fakeinput');
+                    if (!inp || !fake) return;
+                    const setter = Object.getOwnPropertyDescriptor(
+                        window.HTMLInputElement.prototype, 'value'
+                    ).set;
+                    setter.call(inp, pwd);
+                    fake.classList.remove('placeholder');
+                    fake.textContent = pwd;
+                    inp.dispatchEvent(new Event('input', { bubbles: true }));
+                    inp.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }""", password)
+            await asyncio.sleep(0.3)
+
+            # 다시 제출
+            log("    전자신고 파일 제작(Enter) 재클릭...")
+            await page.evaluate("""() => {
+                const btns = document.querySelectorAll('button');
+                for (const btn of btns) {
+                    if (btn.textContent.trim() === '전자신고 파일 제작(Enter)' && btn.offsetWidth > 0) {
+                        btn.click(); return;
+                    }
+                }
+            }""")
+            await asyncio.sleep(3)
+
+            # 재제출 후 다시 경고 확인
+            still_warning = await page.evaluate("""() => {
+                const all = document.querySelectorAll('*');
+                for (const el of all) {
+                    try {
+                        const cs = window.getComputedStyle(el);
+                        if (cs.position !== 'fixed' || cs.display === 'none'
+                            || parseInt(cs.zIndex) < 1000 || el.offsetWidth < 50) continue;
+                        return el.textContent.includes('비밀번호는 최소 8~15자리');
+                    } catch(e) {}
+                }
+                return false;
+            }""")
+            if still_warning:
+                log(f"    여전히 비밀번호 경고 → retry")
+                continue
+
+            return True
+
+        # 일반 에러 확인
         has_error = await page.evaluate("""() => {
             const all = document.querySelectorAll('*');
             for (const el of all) {
