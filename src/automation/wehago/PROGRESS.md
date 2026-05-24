@@ -190,15 +190,31 @@
 | WehagoNTS 폴더 선택 | pywinauto `find_elements` 불안정 (RemoteMemoryBlock 오류) | COM UIAutomation (`comtypes.client`) 직접 사용 |
 | "이미 기록된 파일" 무한 루프 | 덮어쓰기 질의에서 예(Y) 눌러도 같은 질의 반복 | `select_nts_folder()`에서 질의/안내 모달 자동 분기 처리 |
 | 전자신고 제출 후 에러 오감지 | '전자신고 파일 제작' 성공 메시지를 에러로 분류 | 에러 감지에서 성공/안내 키워드 제외 |
+| 비밀번호 규칙 경고 후 NTS 미실행 | "최소 8~15자리" 경고가 떠 있으면 NTS 파일 제작이 진행 안 됨 | 경고 감지 → 확인 → 비밀번호 재입력 → 재제출 플로우 추가 |
+| COM UIAutomation UIA 스코프 에러 | `_select_tree_folder` 등 하위 함수에서 `UIA` 미정의 | 모든 NTS 하위 함수에 `UIA` 파라미터 전달 (`_wait_for_folder_dialog(UIA, uia, ...)`) |
+| SWER0101 직접 URL 접근 불가 | `humanresource` 경로에서 바로 `SWER0101` 치환 시 404 | SWSA0101 사이드바 클릭 후 URL 교체 (SPA 라우팅 필요) |
+| SmartA URL 패턴 변경 | 기존 `/smarta/SWSA0101` → 실제 `/smarta/humanresource/SWSA0101` | `goto_menu_page` 정규식: `r'/smarta/humanresource/[A-Z]+\d+'` |
+| 월 드롭다운 선택 실패 | 마우스 좌표 클릭으로 드롭다운 열기 불안정 (DPR 1.128) | JS로 sprite 버튼 `closest('button').click()` → 항목 텍스트 매치 클릭 |
+| 월 드롭다운 잔존 | 항목 선택 후 드롭다운이 열린 채 남아 후속 동작 방해, Escape 키로 안 닫힘 | JS로 `.LSselectResult` 및 `position: fixed` 패널 `display: none` 처리 |
+| dismiss_dialogs가 비밀번호 모달 닫음 | 제작(F4) 후 비밀번호 모달을 참고사항으로 오인 | 모달 대기 시 '변환파일 비밀번호'와 '참고사항' 분기 처리 |
+| 비밀번호 경고 후 성공으로 오인 | "비밀번호는 최소 8~15자리"가 에러 제외 목록에 있어 미감지 | 버튼 클릭 후 경고 overlay를 먼저 명시적 탐지 → 확인 → 재시도 |
+| COM CoInitialize 누락 | thread executor에서 COM 사용 시 OSError | `select_nts_folder()` 진입 시 `comtypes.CoInitialize()` 호출 |
 
 ### [16] 원천징수 전자신고(SWER0101) 이동
-- `page.reload()`로 페이지 새로고침 (URL 해시 교체 불필요, 이미 SWER0101에 위치)
+- 급여자료입력(SWSA0101) 사이드바 링크 먼저 클릭하여 SPA 로딩
+- `goto_menu_page(page, "SWER0101")`로 URL 해시 교체 이동
+- **URL 패턴**: `/smarta/humanresource/{MENU_ID}?params`
+  - 정규식: `r'/smarta/humanresource/[A-Z]+\d+(?=[?#]|$)'`
+  - fallback: `r'/[A-Z]+\d+(?=[?#]|$)'` (마지막 메뉴 코드 세그먼트)
 - 제출자등록 안내 모달, z-index overlay 자동 닫기
 
 ### [16-1] 지급기간 설정 (검증 포함)
 - `set_period_fields(page, year, start_month, end_month)` 사용
 - **3회 재시도 + 전체 값 검증**: 시작년도, 시작월, 종료년도, 종료월 4개 값이 모두 일치해야 통과
 - 기간 계산: 현재 기준 저번달 (1월이면 전년 12월)
+- **월 드롭다운 선택**: JS로 스프라이트 버튼(`WSC_LUXSpriteIcon` → `closest('button')`) 클릭 →
+  표시된 항목 중 텍스트 매치하여 클릭 (좌표 클릭 대신 JS element.click 사용)
+- **드롭다운 닫기**: 항목 선택 후 JS로 `.LSselectResult` 및 `position: fixed` 패널을 `display: none` 처리 (Escape 키로 안 닫힘)
 
 ### [17] 수임처 아이콘 → 코드도움 확인
 - `#SearchMain .item`에서 '수임처' 포함 항목 찾기
@@ -208,9 +224,11 @@
 ### [18] 제작(F4) 버튼 클릭
 - `button.WSC_LUXButton` 중 '제작(F4)' 텍스트, y < 200, visible 조건
 
-### [19] 모달 대기
+### [19] 모달 대기: 참고사항 vs 비밀번호 분기
 - `._isDialog`에서 '변환파일 비밀번호'(pwd) 또는 '참고사항'(ref) 감지
-- 참고사항 모달은 `dismiss_dialogs()`로 닫고 비밀번호 모달 대기
+- **중요**: 참고사항 모달만 `dismiss_dialogs()`로 닫고, 비밀번호 모달은 닫지 않음
+- 이전 버전에서 dismiss_dialogs가 비밀번호 모달까지 닫아버리는 버그 수정
+- 비밀번호 모달이 완전히 렌더링될 때까지 대기 (input.LSinput + .fakeinput 확인)
 
 ### [20] 비밀번호 입력 + 전자신고 파일 제작
 - **LSinput 컴포넌트 특성**: keyboard type만으로는 `.fakeinput.placeholder`가 갱신 안 됨
@@ -221,12 +239,19 @@
   fake.textContent = pwd;         // fakeinput 텍스트 설정
   ```
 - 검증: `input.value` + `fakeinput.textContent` 모두 일치해야 제출
-- 에러 감지: 성공/안내 메시지('전자신고 파일 제작', '홈택스 ID', '비밀번호는 최소')는 에러에서 제외
 - '전자신고 파일 제작(Enter)' 버튼 클릭
+- **비밀번호 규칙 경고 자동 재입력** (최대 3회 재시도):
+  - 버튼 클릭 후 z-index overlay에서 "비밀번호는 최소 8~15자리" 명시적 탐지
+  - 감지 시 `close_warning_overlay(page, "최소 8~15자리")`로 확인 클릭
+  - 이후 `continue`로 다음 attempt에서 비밀번호 재입력 → 재제출
+  - **주의**: 이전 버전에서는 "비밀번호는 최소"를 에러 제외 목록에 넣어 경고를 성공으로 오인했음 → 명시적 경고 탐지로 수정
+- **기타 에러 감지**: 성공 메시지('전자신고 파일 제작', '홈택스 ID')만 제외, 나머지 오류/실패 키워드는 에러로 처리
 
 ### [21] WehagoNTS 폴더 선택 + 파일 저장
 - WehagoNTS.exe는 브라우저에서 전자신고 파일 제작 시 자동 실행되는 Windows Forms 프로그램
 - **COM UIAutomation** (`comtypes.client`)으로 제어 (pywinauto 불안정)
+- **주의**: 스레드 executor에서 실행 시 `comtypes.CoInitialize()` 필수 호출
+- **주의**: `UIA` 모듈 객체를 `select_nts_folder`에서 로드 후 모든 하위 함수에 파라미터로 전달해야 함 (스코프 제한)
 - **처리 흐름**:
   1. WehagoNTS 프로세스 대기 (최대 20초)
   2. "이미 기록된 파일" 질의 → 예(Y) 자동 클릭 (분기 처리)
@@ -239,6 +264,7 @@
 - **NTS 창 구조** (`auto_id`):
   | auto_id | 컨트롤 | 용도 |
   |---------|--------|------|
+  | `smartaOnlineNTSdummyForm` | Window | NTS 루트 (Name 빈 문자열) |
   | `FormSelectFolder` | Window | 폴더 선택 다이얼로그 |
   | `treeDir` | Tree | 폴더 트리 뷰 |
   | `lblSelectNode` | Text | 현재 선택 경로 표시 |
@@ -251,7 +277,8 @@
 - **저장 결과**: `Desktop/원천징수전자신고/YYYYMMDDCXXXXXX.01`
 
 ### 실행 스크립트
-- `_run_swer.py`: SWER0101 전체 자동화 (16~22단계)
+- `_run_swer.py`: SWER0101 전체 자동화 (1~12단계, WEHAGO 로그인부터 NTS 파일 저장까지)
+- `wehago_auto_cdp.py`: 급여 등록 전체 자동화 (15단계 + SWER0101)
 
 ---
 
@@ -264,5 +291,9 @@
 
 ## 실행 방법
 ```bash
+# SWER0101 전체 자동화 (WEHAGO 로그인부터)
+python src/automation/wehago/_run_swer.py
+
+# 급여 등록 전체 자동화
 python src/automation/wehago/wehago_auto_cdp.py
 ```
