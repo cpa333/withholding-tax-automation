@@ -185,6 +185,75 @@
 | PrintDialog expand() 불가 | WindowsForms 커스텀 ComboBox | 자식 Button(열기) 클릭으로 드롭다운 열기 |
 | 기존 PrintDialog 중복 실행 | 이미 떠 있으면 "이미 인쇄함이 있습니다" 경고 모달 | `_close_existing_print_dialog()` 로 경고 모달 닫기 후 종료 |
 | Windows 저장 대화상자 탐지 | pywinauto uia backend에 미표시 | win32 backend로 `#32770` 클래스 탐색 |
+| LSinput 비밀번호 1회 입력 실패 | keyboard type만으로 fakeinput(placeholder) 미갱신 | native setter + fakeinput 직접 조작 (`classList.remove('placeholder')`) |
+| 지급기간 설정 불안정 | 연도/월 드롭다운이 간헐적으로 이전 값 유지 | 3회 재시도 + 4개 값(시작년/월, 종료년/월) 전체 검증 |
+| WehagoNTS 폴더 선택 | pywinauto `find_elements` 불안정 (RemoteMemoryBlock 오류) | COM UIAutomation (`comtypes.client`) 직접 사용 |
+| "이미 기록된 파일" 무한 루프 | 덮어쓰기 질의에서 예(Y) 눌러도 같은 질의 반복 | `select_nts_folder()`에서 질의/안내 모달 자동 분기 처리 |
+| 전자신고 제출 후 에러 오감지 | '전자신고 파일 제작' 성공 메시지를 에러로 분류 | 에러 감지에서 성공/안내 키워드 제외 |
+
+### [16] 원천징수 전자신고(SWER0101) 이동
+- `page.reload()`로 페이지 새로고침 (URL 해시 교체 불필요, 이미 SWER0101에 위치)
+- 제출자등록 안내 모달, z-index overlay 자동 닫기
+
+### [16-1] 지급기간 설정 (검증 포함)
+- `set_period_fields(page, year, start_month, end_month)` 사용
+- **3회 재시도 + 전체 값 검증**: 시작년도, 시작월, 종료년도, 종료월 4개 값이 모두 일치해야 통과
+- 기간 계산: 현재 기준 저번달 (1월이면 전년 12월)
+
+### [17] 수임처 아이콘 → 코드도움 확인
+- `#SearchMain .item`에서 '수임처' 포함 항목 찾기
+- 빈 텍스트 `button.WSC_LUXButton` 클릭 → 코드도움 모달 오픈
+- `click_codehelp_confirm()`: iframe 포함 모든 frame에서 '코드도움' → '확인(enter)' 클릭
+
+### [18] 제작(F4) 버튼 클릭
+- `button.WSC_LUXButton` 중 '제작(F4)' 텍스트, y < 200, visible 조건
+
+### [19] 모달 대기
+- `._isDialog`에서 '변환파일 비밀번호'(pwd) 또는 '참고사항'(ref) 감지
+- 참고사항 모달은 `dismiss_dialogs()`로 닫고 비밀번호 모달 대기
+
+### [20] 비밀번호 입력 + 전자신고 파일 제작
+- **LSinput 컴포넌트 특성**: keyboard type만으로는 `.fakeinput.placeholder`가 갱신 안 됨
+- **해결**: native setter로 `input.value` 설정 + `.fakeinput` 직접 조작
+  ```js
+  setter.call(inp, pwd);         // input.value 설정
+  fake.classList.remove('placeholder');  // placeholder 클래스 제거
+  fake.textContent = pwd;         // fakeinput 텍스트 설정
+  ```
+- 검증: `input.value` + `fakeinput.textContent` 모두 일치해야 제출
+- 에러 감지: 성공/안내 메시지('전자신고 파일 제작', '홈택스 ID', '비밀번호는 최소')는 에러에서 제외
+- '전자신고 파일 제작(Enter)' 버튼 클릭
+
+### [21] WehagoNTS 폴더 선택 + 파일 저장
+- WehagoNTS.exe는 브라우저에서 전자신고 파일 제작 시 자동 실행되는 Windows Forms 프로그램
+- **COM UIAutomation** (`comtypes.client`)으로 제어 (pywinauto 불안정)
+- **처리 흐름**:
+  1. WehagoNTS 프로세스 대기 (최대 20초)
+  2. "이미 기록된 파일" 질의 → 예(Y) 자동 클릭 (분기 처리)
+  3. `FormSelectFolder` 창에서 `treeDir` 트리 탐색
+  4. 바탕화면(`TreeItem`) 확장 → 지정 폴더 선택
+  5. `btnOK` Invoke 패턴으로 확인 클릭
+  6. 후속 모달 루프: "질의"(예(Y)) / "안내"(확인) 자동 처리
+  7. 바탕화면에 남은 `.01` 파일 → 폴더로 이동
+
+- **NTS 창 구조** (`auto_id`):
+  | auto_id | 컨트롤 | 용도 |
+  |---------|--------|------|
+  | `FormSelectFolder` | Window | 폴더 선택 다이얼로그 |
+  | `treeDir` | Tree | 폴더 트리 뷰 |
+  | `lblSelectNode` | Text | 현재 선택 경로 표시 |
+  | `btnOK` | Button | 확인 |
+  | `btnCancel` | Button | 취소 |
+  | `6` | Button | 예(Y) (질의 모달) |
+  | `7` | Button | 아니요(N) (질의 모달) |
+  | `2` | Button | 확인 (안내 모달) |
+
+- **저장 결과**: `Desktop/원천징수전자신고/YYYYMMDDCXXXXXX.01`
+
+### 실행 스크립트
+- `_run_swer.py`: SWER0101 전체 자동화 (16~22단계)
+
+---
 
 ## 다음 단계 (TODO)
 - 엑셀 변환 시 특정 셀 값 수정 로직 (수당/공제 항목 변경)
