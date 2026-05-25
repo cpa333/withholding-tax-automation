@@ -22,7 +22,11 @@ _timing_audit*.py
 debug_page_content.html
 _test_*.py
 _run_wehago.py
-src/automation/wehago/_*.py
+src/automation/wehago/_check_*.py
+src/automation/wehago/_debug_*.py
+src/automation/wehago/_nav.py
+src/automation/wehago/_close_modal.py
+src/automation/wehago/_full_run.py
 
 # Results
 results/
