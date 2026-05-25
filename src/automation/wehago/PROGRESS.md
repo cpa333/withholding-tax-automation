@@ -177,9 +177,9 @@ python src/automation/wehago/run_swer0101.py
 - `mouse.click` 좌표 방식은 불안정 → JS 직접 클릭 사용
 
 #### [SWTA-4] 마감/마감해제 버튼 처리
-- 조회 후 `.sao_head_menu button.WSC_LUXButton` 첫 번째 버튼 텍스트 확인
-- **"마감"** → 클릭하여 마감해제 (잠금 상태이므로 해제 필요)
-- **"마감해제"** → 스킵 (이미 해제된 상태)
+- 조회 후 `.WSC_LUXTooltip button.WSC_LUXButton` 버튼 텍스트 확인
+- **"마감"** → 현재 마감 안 됨 → 클릭하여 마감 적용 + 확인 모달 처리
+- **"마감해제"** → 현재 마감 됨 → 스킵
 
 ---
 
