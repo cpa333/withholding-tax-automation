@@ -264,6 +264,7 @@ python src/automation/wehago/run_swer0101.py
 | 비밀번호 경고 후 성공으로 오인 | "비밀번호는 최소 8~15자리"가 에러 제외 목록에 있어 미감지 | 버튼 클릭 후 경고 overlay를 먼저 명시적 탐지 → 확인 → 재시도 |
 | COM CoInitialize 누락 | thread executor에서 COM 사용 시 OSError | `select_nts_folder()` 진입 시 `comtypes.CoInitialize()` 호출 |
 | SWTA0101 마감 모달 미감지 | 마감 클릭 후 유의사항 모달이 "마감" 텍스트 없음 + 버튼이 `확인(enter)` | `_isDialog`에서 `확인(enter)` / `확인` 모두 매치 + 후속 "마감 완료!" 모달까지 2단계 처리 |
+| 엑셀 업로드 file_chooser 타임아웃 | `#collect` 토글 상태 모호 + 모달 방해 + JS evaluate 비사용자제스처 | 드롭다운 상태 검증 + 3단계 fallback (mouse.click → JS evaluate → hidden file input) |
 
 ---
 
@@ -422,6 +423,17 @@ python src/automation/wehago/run_swer0101.py
 - 수정: 초기 30초는 새로고침 없이 DOM만 조용히 확인 (로그인 진행 방해 해소)
 - 수정: 이후 15초 간격 DOM 확인, 45초마다만 새로고침
 - 수정: 총 대기시간 10분 → 15분 연장
+
+### SWSA0101 엑셀 업로드 file_chooser 타임아웃 수정
+- **원인 1**: `#collect` 버튼이 토글. 다운로드 후 드롭다운이 열린 채 있으면 재클릭 시 오히려 닫힘
+- **원인 2**: 다운로드→업로드 사이 모달 정리 없음. 잔여 모달이 드롭다운/버튼 가림
+- **원인 3**: `page.evaluate(() => a.click())`는 브라우저에서 "신뢰된 사용자 제스처"가 아님 → 파일 선택창 차단
+- **수정**: 드롭다운 상태 검증 (항목 수 확인 후 재시도) + 업로드 전 `dismiss_dialogs` 추가
+- **수정**: 파일 선택 3단계 fallback:
+  1. `page.mouse.click()` — 실제 CDP 마우스 이벤트 (신뢰된 사용자 제스처)
+  2. `click_menu_item()` — 기존 JS evaluate 방식으로 재시도
+  3. `input[type="file"]` 직접 설정 — `set_input_files()`로 숨겨진 file input에 파일 주입
+- **수정**: 타임아웃 10초 → 15초
 
 ---
 

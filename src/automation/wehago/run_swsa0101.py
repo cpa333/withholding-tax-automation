@@ -156,16 +156,91 @@ async def _handle_code_link_modal(page):
 
 async def upload_excel(page, file_path, dry_run=True):
     """변환된 엑셀 파일을 WEHAGO에 업로드"""
+    log("[엑셀 업로드] 화면 정리...")
+    await dismiss_dialogs(page)
+
+    # 드롭다운 열기 (토글 상태 검증 + 재시도)
     log("[엑셀 업로드] 드롭다운 열기...")
-    await open_collect_menu(page)
+    for attempt in range(3):
+        await open_collect_menu(page)
+        visible_count = await page.evaluate("""() => {
+            const menu = document.querySelector('.sao_head_menu');
+            if (!menu) return 0;
+            return Array.from(menu.querySelectorAll('li'))
+                .filter(li => li.offsetHeight > 0).length;
+        }""")
+        if visible_count > 0:
+            log(f"  드롭다운 열림 (항목 {visible_count}개)")
+            break
+        log(f"  드롭다운 안 열림, 재시도 {attempt + 1}/3...")
+        await asyncio.sleep(1)
+    else:
+        log("  WARNING: 드롭다운을 열지 못함. 계속 진행합니다.")
 
+    # --- 엑셀 불러오기: 3단계 fallback ---
     log("[엑셀 업로드] 엑셀 불러오기 클릭...")
-    async with page.expect_file_chooser(timeout=10000) as fc_info:
-        await click_menu_item(page, "엑셀 불러오기")
+    file_set = False
 
-    file_chooser = await fc_info.value
-    log(f"  파일 선택: {file_path}")
-    await file_chooser.set_files(file_path)
+    # 1순위: page.mouse.click — 실제 CDP 마우스 이벤트 (신뢰된 사용자 제스처)
+    item_rect = await page.evaluate("""() => {
+        const menu = document.querySelector('.sao_head_menu');
+        if (!menu) return null;
+        const items = menu.querySelectorAll('li');
+        for (const li of items) {
+            if (li.textContent.includes('엑셀 불러오기') && li.offsetHeight > 0) {
+                const rect = li.getBoundingClientRect();
+                return {
+                    x: rect.x + rect.width / 2,
+                    y: rect.y + rect.height / 2
+                };
+            }
+        }
+        return null;
+    }""")
+
+    if item_rect:
+        log(f"  항목 위치: ({round(item_rect['x'])}, {round(item_rect['y'])})")
+        try:
+            async with page.expect_file_chooser(timeout=15000) as fc_info:
+                await page.mouse.click(item_rect['x'], item_rect['y'])
+            file_chooser = await fc_info.value
+            log(f"  파일 선택: {file_path}")
+            await file_chooser.set_files(file_path)
+            file_set = True
+        except Exception as e:
+            log(f"  mouse.click 파일 선택창 실패: {e}")
+
+    # 2순위: JS evaluate click (기존 방식)
+    if not file_set:
+        log("[엑셀 업로드] JS evaluate 클릭으로 재시도...")
+        try:
+            async with page.expect_file_chooser(timeout=15000) as fc_info:
+                await click_menu_item(page, "엑셀 불러오기")
+            file_chooser = await fc_info.value
+            log(f"  파일 선택: {file_path}")
+            await file_chooser.set_files(file_path)
+            file_set = True
+        except Exception as e:
+            log(f"  JS evaluate 파일 선택창 실패: {e}")
+
+    # 3순위: hidden file input 직접 설정
+    if not file_set:
+        log("[엑셀 업로드] hidden file input 직접 설정...")
+        await click_menu_item(page, "엑셀 불러오기")
+        await asyncio.sleep(2)
+        fi_count = await page.evaluate(
+            "() => document.querySelectorAll('input[type=\"file\"]').length"
+        )
+        log(f"  file input 수: {fi_count}")
+        if fi_count > 0:
+            fi = page.locator('input[type="file"]').first
+            await fi.set_input_files(file_path)
+            log(f"  파일 설정 완료: {file_path}")
+            file_set = True
+        else:
+            log("  ERROR: file input을 찾지 못해 업로드 불가")
+            return False
+
     await asyncio.sleep(3)
 
     # 사원코드연결 모달 (파일 선택 직후 등장 가능)
@@ -532,6 +607,10 @@ async def run_swsa0101(page, save_dir, *, dry_run=True):
     # [5] 업로드 양식 변환
     log("[SWSA0101] 업로드 양식 변환...")
     upload_path = convert_for_upload(download_path)
+
+    # [5.5] 업로드 전 모달 정리
+    log("[SWSA0101] 업로드 전 화면 정리...")
+    await dismiss_dialogs(page)
 
     # [6] 엑셀 업로드
     log("[SWSA0101] 엑셀 업로드...")
