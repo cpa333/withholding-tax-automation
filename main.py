@@ -25,7 +25,7 @@ from playwright.async_api import async_playwright
 
 from src.utils.chrome_cdp import launch_chrome, connect_page
 from src.automation.wehago._common import (
-    log, wait_for_login, goto_salary_page, dismiss_dialogs,
+    log, wait_for_login, goto_salary_page, dismiss_dialogs, WEHAGO_URL,
 )
 from src.automation.wehago.run_swsa0101 import run_swsa0101
 from src.automation.wehago.run_swta0101 import run_swta0101
@@ -76,6 +76,11 @@ async def main():
             log(f"ERROR: Chrome 연결 실패 - {e}")
             log("Chrome이 CDP 모드(포트 9223)로 실행 중인지 확인하세요.")
             return
+
+        # WEHAGO 페이지로 이동 (CDP 재사용 시 다른 페이지일 수 있음)
+        if "wehago.com" not in page.url:
+            log("  WEHAGO 페이지로 이동...")
+            await page.goto(WEHAGO_URL, wait_until="domcontentloaded", timeout=30000)
 
         if not await wait_for_login(page):
             log("로그인 실패")

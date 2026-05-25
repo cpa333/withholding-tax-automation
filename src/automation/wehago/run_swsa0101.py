@@ -129,6 +129,38 @@ async def upload_excel(page, file_path, dry_run=True):
     await file_chooser.set_files(file_path)
     await asyncio.sleep(3)
 
+    # 사원코드연결 모달 처리 (엑셀의 사원과 급여관리 사원이 다를 때 등장)
+    # "변환" 버튼 클릭 → 후속 모달(확인) 처리
+    for _ in range(3):
+        has_code_link = await page.evaluate("""() => {
+            const all = document.querySelectorAll('*');
+            for (const el of all) {
+                try {
+                    const cs = window.getComputedStyle(el);
+                    if ((cs.position !== 'fixed' && cs.position !== 'absolute')
+                        || cs.display === 'none' || el.offsetWidth < 50) continue;
+                    const z = parseInt(cs.zIndex);
+                    if (z < 1000) continue;
+                    if (!el.textContent.includes('사원코드') || !el.textContent.includes('연결')) continue;
+                    const btns = el.querySelectorAll('button');
+                    for (const btn of btns) {
+                        if (btn.textContent.trim() === '변환' && btn.offsetWidth > 0) {
+                            btn.click(); return 'clicked';
+                        }
+                    }
+                } catch(e) {}
+            }
+            return null;
+        }""")
+        if has_code_link:
+            log("  사원코드연결 → 변환 클릭")
+            await asyncio.sleep(2)
+            # 후속 확인 모달 처리
+            await _click_modal_text(page, "사원", "확인")
+            await asyncio.sleep(1)
+        else:
+            break
+
     # ① 헤더 행(행1) 선택
     log("[엑셀 업로드] ① 헤더 행 선택...")
     clicked = await page.evaluate("""() => {
