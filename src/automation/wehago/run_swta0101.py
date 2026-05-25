@@ -119,29 +119,69 @@ async def run_swta0101(page):
                 if (btn.textContent.trim() === '마감' && btn.offsetWidth > 0) { btn.click(); return; }
             }
         }""")
-        await asyncio.sleep(1)
-        # 마감 적용 후 확인 모달 처리
-        await page.evaluate("""() => {
-            const all = document.querySelectorAll('*');
-            for (const el of all) {
-                try {
-                    const cs = window.getComputedStyle(el);
-                    if (cs.position !== 'fixed' || cs.display === 'none' || el.offsetWidth < 50) continue;
-                    const z = parseInt(cs.zIndex);
-                    if (z < 1000) continue;
-                    const txt = el.textContent;
-                    if (!txt.includes('마감')) continue;
-                    const btns = el.querySelectorAll('button');
+
+        # 1) 유의사항 안내 모달 → 확인(enter)
+        for i in range(15):
+            await asyncio.sleep(0.5)
+            clicked = await page.evaluate("""() => {
+                const dialogs = document.querySelectorAll('._isDialog, .LUX_basic_dialog');
+                for (const d of dialogs) {
+                    const cs = window.getComputedStyle(d);
+                    if (cs.display === 'none' || d.offsetWidth < 30) continue;
+                    const btns = d.querySelectorAll('button');
                     for (const btn of btns) {
-                        if (btn.textContent.trim() === '확인' && btn.offsetWidth > 0) {
-                            btn.click(); return;
+                        const t = btn.textContent.trim();
+                        if ((t === '확인(enter)' || t === '확인') && btn.offsetWidth > 0) {
+                            btn.click(); return t;
                         }
                     }
-                } catch(e) {}
-            }
-        }""")
+                }
+                return null;
+            }""")
+            if clicked:
+                log(f"  모달 버튼 클릭: {clicked}")
+                break
+
+        # 2) "마감 완료!" 후속 모달 → 확인
+        await asyncio.sleep(2)
+        for i in range(5):
+            clicked = await page.evaluate("""() => {
+                const dialogs = document.querySelectorAll('._isDialog, .LUX_basic_dialog');
+                for (const d of dialogs) {
+                    const cs = window.getComputedStyle(d);
+                    if (cs.display === 'none' || d.offsetWidth < 30) continue;
+                    const btns = d.querySelectorAll('button');
+                    for (const btn of btns) {
+                        const t = btn.textContent.trim();
+                        if ((t === '확인(enter)' || t === '확인') && btn.offsetWidth > 0) {
+                            btn.click(); return t;
+                        }
+                    }
+                }
+                return null;
+            }""")
+            if clicked:
+                log(f"  후속 모달 버튼 클릭: {clicked}")
+                await asyncio.sleep(1)
+            else:
+                break
+
+        # 마감 후 상태 확인
         await asyncio.sleep(1)
-        log("  마감 적용 완료")
+        new_btn = await page.evaluate("""() => {
+            const selectors = [
+                '.WSC_LUXTooltip button.WSC_LUXButton',
+                'button.WSC_LUXButton'
+            ];
+            for (const sel of selectors) {
+                for (const btn of document.querySelectorAll(sel)) {
+                    const text = btn.textContent.trim();
+                    if ((text === '마감' || text === '마감해제') && btn.offsetWidth > 0) return text;
+                }
+            }
+            return null;
+        }""")
+        log(f"  마감 후 버튼 상태: {new_btn}")
     elif btn_text == "마감해제":
         log("  이미 마감 상태 - 스킵")
     else:
