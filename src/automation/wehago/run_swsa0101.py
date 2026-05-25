@@ -130,7 +130,7 @@ async def upload_excel(page, file_path, dry_run=True):
     await asyncio.sleep(3)
 
     # 사원코드연결 모달 처리 (엑셀의 사원과 급여관리 사원이 다를 때 등장)
-    # "변환" 버튼 클릭 → 후속 모달(확인) 처리
+    # "변환" 버튼 클릭 → "연결되지 않은 사원..." 확인 모달 → 확인
     for _ in range(3):
         has_code_link = await page.evaluate("""() => {
             const all = document.querySelectorAll('*');
@@ -155,8 +155,8 @@ async def upload_excel(page, file_path, dry_run=True):
         if has_code_link:
             log("  사원코드연결 → 변환 클릭")
             await asyncio.sleep(2)
-            # 후속 확인 모달 처리
-            await _click_modal_text(page, "사원", "확인")
+            # "연결되지 않은 사원 및 연말 입력된 사원은 제외하고 변환됩니다" 확인
+            await _click_modal_text(page, "제외하고 변환", "확인")
             await asyncio.sleep(1)
         else:
             break
