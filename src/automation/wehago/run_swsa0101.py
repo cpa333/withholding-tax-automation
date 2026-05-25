@@ -549,6 +549,35 @@ async def run_swsa0101(page, save_dir, *, dry_run=True):
     else:
         log("  PDF 다운로드 실패")
 
+    # 급여대장 일괄인쇄 모달 닫기
+    log("[SWSA0101] 일괄인쇄 모달 정리...")
+    for _ in range(3):
+        closed = await page.evaluate("""() => {
+            const all = document.querySelectorAll('*');
+            for (const el of all) {
+                try {
+                    const cs = window.getComputedStyle(el);
+                    if ((cs.position !== 'fixed' && cs.position !== 'absolute')
+                        || cs.display === 'none' || el.offsetWidth < 50) continue;
+                    const z = parseInt(cs.zIndex);
+                    if (z < 1000) continue;
+                    if (!el.textContent.includes('일괄인쇄') && !el.textContent.includes('일괄PDF')) continue;
+                    const btns = el.querySelectorAll('button');
+                    for (const btn of btns) {
+                        if (btn.textContent.trim().startsWith('닫기') && btn.offsetWidth > 0) {
+                            btn.click(); return 'closed';
+                        }
+                    }
+                } catch(e) {}
+            }
+            return null;
+        }""")
+        if closed:
+            log("  일괄인쇄 모달 닫음")
+            await asyncio.sleep(0.5)
+        else:
+            break
+
     log("[SWSA0101] 완료")
 
 
