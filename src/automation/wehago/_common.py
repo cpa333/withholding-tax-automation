@@ -260,9 +260,14 @@ async def click_menu(page, menu_id):
 
 
 async def wait_for_login(page):
-    """WEHAGO 로그인 완료 대기 (수동 로그인)"""
+    """WEHAGO 로그인 완료 대기 (수동 로그인)
+
+    초기 30초는 DOM만 확인(새로고침 없이 로그인 진행 방해하지 않음),
+    이후 15초 간격으로 DOM 확인 + 45초마다 새로고침.
+    총 최대 15분 대기.
+    """
     await page.goto(WEHAGO_URL + "#/main", wait_until="domcontentloaded")
-    await asyncio.sleep(2)
+    await asyncio.sleep(3)
 
     if await page.locator("#company_").count() > 0 or await page.locator("text=나의 수임처").count() > 0:
         log("이미 로그인되어 있습니다.")
@@ -271,21 +276,35 @@ async def wait_for_login(page):
     log("\n브라우저에서 WEHAGO 로그인을 진행해 주세요.")
     log("로그인 완료 후 자동으로 감지됩니다. (터미널에서 키 입력하지 마세요)")
 
-    for _ in range(120):
+    # 초기 30초: 새로고침 없이 DOM만 조용히 확인
+    log("  로그인 대기 중...")
+    for _ in range(6):
         await asyncio.sleep(5)
         try:
-            if await page.locator("text=나의 수임처").count() > 0:
-                log("로그인 확인됨.")
-                return True
-            await page.reload(wait_until="domcontentloaded")
-            await asyncio.sleep(2)
             if await page.locator("text=나의 수임처").count() > 0:
                 log("로그인 확인됨.")
                 return True
         except Exception:
             pass
 
-    log("로그인 대기 시간 초과 (10분).")
+    # 이후: 15초 간격 DOM 확인, 45초마다 새로고침
+    for i in range(52):
+        await asyncio.sleep(15)
+        try:
+            if await page.locator("text=나의 수임처").count() > 0:
+                log("로그인 확인됨.")
+                return True
+            # 3회마다(=45초마다) 새로고침
+            if i % 3 == 2:
+                await page.reload(wait_until="domcontentloaded")
+                await asyncio.sleep(3)
+                if await page.locator("text=나의 수임처").count() > 0:
+                    log("로그인 확인됨.")
+                    return True
+        except Exception:
+            pass
+
+    log("로그인 대기 시간 초과 (15분).")
     return False
 
 
