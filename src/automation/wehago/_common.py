@@ -35,52 +35,90 @@ def compute_target_period():
 async def dismiss_dialogs(page):
     """표시 중인 팝업/다이얼로그가 있으면 모두 닫기
 
-    대상: _isDialog, LUX_basic_dialog + z-index >= 1000 fixed 오버레이
-    닫기 순서: 닫기 → X → 확인(btnbx) → 확인 → 취소
-    중첩 시 모두 사라질 때까지 반복.
+    z-index가 가장 높은 모달부터 처리 (비과세 등 상위 모달이 하위 클릭을 가리는 문제 방지).
+    비과세 모달은 취소 우선, 나머지는 닫기 → X → 확인 → 취소 순.
     """
     for _ in range(20):
         closed = await page.evaluate("""() => {
-            const selectors = ['._isDialog', '.LUX_basic_dialog'];
-            let target = null;
-            for (const sel of selectors) {
-                for (const d of document.querySelectorAll(sel)) {
-                    const cs = window.getComputedStyle(d);
-                    if (cs.display !== 'none' && cs.visibility !== 'hidden'
-                        && d.offsetParent !== null && d.offsetWidth > 0) {
-                        target = d; break;
+            // z-index 내림차순으로 정렬하여 가장 위에 있는 모달부터 처리
+            const candidates = [];
+            const all = document.querySelectorAll('*');
+            for (const el of all) {
+                try {
+                    const cs = window.getComputedStyle(el);
+                    if (cs.display === 'none' || cs.visibility === 'hidden'
+                        || el.offsetWidth < 50) continue;
+                    const z = parseInt(cs.zIndex);
+                    if (isNaN(z) || z < 1000) continue;
+                    if (cs.position !== 'fixed' && cs.position !== 'absolute') continue;
+                    if (el.classList.contains('WSC_LUXSnackbar')) continue;
+                    const txt = el.textContent.trim();
+                    // Canvas fallback 텍스트만 있는 요소 제외
+                    const clean = txt.replace(/Your browser does not support HTML5 Canvas\\./g, '').trim();
+                    if (clean.length === 0) continue;
+                    // 버튼이 있는지 확인
+                    const hasBtn = el.querySelectorAll('button').length > 0;
+                    if (!hasBtn) continue;
+                    candidates.push({el, z, txt: clean});
+                } catch(e) {}
+            }
+            candidates.sort((a, b) => {
+                // 비과세 모달 최우선
+                const aNT = a.txt.includes('비과세') ? 1 : 0;
+                const bNT = b.txt.includes('비과세') ? 1 : 0;
+                if (aNT !== bNT) return bNT - aNT;
+                return b.z - a.z;
+            });
+
+            const target = candidates.length > 0 ? candidates[0] : null;
+            if (!target) return null;
+
+            const btns = target.el.querySelectorAll('button, a');
+            const text = target.txt;
+
+            // 비과세 모달: 취소 우선
+            if (text.includes('비과세')) {
+                for (const btn of btns) {
+                    const t = btn.textContent.trim();
+                    if ((t === '취소' || t.startsWith('취소')) && btn.offsetWidth > 0) {
+                        btn.click(); return '비과세→취소';
                     }
                 }
-                if (target) break;
             }
-            if (!target) {
-                const all = document.querySelectorAll('*');
-                for (const el of all) {
-                    const cs = window.getComputedStyle(el);
-                    if (cs.position !== 'fixed' || cs.display === 'none'
-                        || parseInt(cs.zIndex) < 1000 || el.offsetWidth < 100) continue;
-                    if (el.classList.contains('WSC_LUXSnackbar')) continue;
-                    if (el.textContent.trim().length === 0) continue;
-                    target = el; break;
+
+            // 닫기 버튼
+            for (const btn of btns) {
+                if (btn.textContent.trim() === '닫기' && btn.offsetWidth > 0) { btn.click(); return '닫기'; }
+            }
+            // 수당 및 공제등록 모달: display:none으로 강제 숨김
+            // (z:1100 오버레이가 X 버튼을 덮어 JS/mouse click 불가)
+            if (text.includes('수당 및 공제등록') || text.includes('수당 및 공제 등록')) {
+                target.el.style.display = 'none';
+                // z:1100 검은 오버레이도 함께 숨김
+                const siblings = target.el.parentElement?.children;
+                if (siblings) {
+                    for (const sib of siblings) {
+                        const scs = window.getComputedStyle(sib);
+                        if (scs.position === 'fixed' && parseInt(scs.zIndex) === 1100) {
+                            sib.style.display = 'none';
+                        }
+                    }
                 }
+                return '수당공제→force-hide';
             }
-            if (!target) return null;
-            const allBtns = target.querySelectorAll('button, a');
-            for (const btn of allBtns) {
-                if (btn.textContent.trim() === '닫기') { btn.click(); return '닫기'; }
-            }
-            const luxBtns = target.querySelectorAll('button.WSC_LUXButton');
-            for (const btn of luxBtns) {
-                if (!btn.textContent.trim()) { btn.click(); return 'X'; }
-            }
-            const confirmBtn = target.querySelector('.dialog_btnbx button');
-            if (confirmBtn) { confirmBtn.click(); return '확인(btnbx)'; }
-            for (const btn of allBtns) {
+            // 확인 버튼 (간이세액 등)
+            for (const btn of btns) {
                 if (btn.textContent.trim() === '확인' && btn.offsetWidth > 0) {
                     btn.click(); return '확인';
                 }
             }
-            for (const btn of allBtns) {
+            // X 버튼 (일반)
+            const luxBtns = target.el.querySelectorAll('button.WSC_LUXButton');
+            for (const btn of luxBtns) {
+                if (!btn.textContent.trim() && btn.offsetWidth > 0) { btn.click(); return 'X'; }
+            }
+            // 취소 버튼
+            for (const btn of btns) {
                 if (btn.textContent.trim() === '취소') { btn.click(); return '취소'; }
             }
             return 'stuck';
