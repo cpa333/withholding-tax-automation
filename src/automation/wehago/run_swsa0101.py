@@ -115,6 +115,45 @@ def convert_for_upload(download_path):
     return os.path.abspath(upload_path)
 
 
+async def _handle_code_link_modal(page):
+    """사원코드연결 모달 처리: 변환 → '제외하고 변환됩니다' 확인
+
+    엑셀 파일의 사원과 급여관리 사원이 다를 때 등장.
+    파일 선택 직후 또는 후속 모달 처리 중간에 나타날 수 있음.
+    """
+    for _ in range(3):
+        found = await page.evaluate("""() => {
+            const all = document.querySelectorAll('*');
+            for (const el of all) {
+                try {
+                    const cs = window.getComputedStyle(el);
+                    if ((cs.position !== 'fixed' && cs.position !== 'absolute')
+                        || cs.display === 'none' || el.offsetWidth < 50) continue;
+                    const z = parseInt(cs.zIndex);
+                    if (z < 1000) continue;
+                    const txt = el.textContent;
+                    if (!txt.includes('사원코드') || !txt.includes('연결')) continue;
+                    if (txt.includes('급여대장')) continue;
+                    const btns = el.querySelectorAll('button');
+                    for (const btn of btns) {
+                        if (btn.textContent.trim() === '변환' && btn.offsetWidth > 0) {
+                            btn.click(); return 'clicked';
+                        }
+                    }
+                } catch(e) {}
+            }
+            return null;
+        }""")
+        if found:
+            log("  사원코드연결 → 변환 클릭")
+            await asyncio.sleep(2)
+            # "연결되지 않은 사원 및 연말 입력된 사원은 제외하고 변환됩니다" → 확인
+            await _click_modal_text(page, "제외하고 변환", "확인")
+            await asyncio.sleep(1)
+        else:
+            break
+
+
 async def upload_excel(page, file_path, dry_run=True):
     """변환된 엑셀 파일을 WEHAGO에 업로드"""
     log("[엑셀 업로드] 드롭다운 열기...")
@@ -129,37 +168,8 @@ async def upload_excel(page, file_path, dry_run=True):
     await file_chooser.set_files(file_path)
     await asyncio.sleep(3)
 
-    # 사원코드연결 모달 처리 (엑셀의 사원과 급여관리 사원이 다를 때 등장)
-    # "변환" 버튼 클릭 → "연결되지 않은 사원..." 확인 모달 → 확인
-    for _ in range(3):
-        has_code_link = await page.evaluate("""() => {
-            const all = document.querySelectorAll('*');
-            for (const el of all) {
-                try {
-                    const cs = window.getComputedStyle(el);
-                    if ((cs.position !== 'fixed' && cs.position !== 'absolute')
-                        || cs.display === 'none' || el.offsetWidth < 50) continue;
-                    const z = parseInt(cs.zIndex);
-                    if (z < 1000) continue;
-                    if (!el.textContent.includes('사원코드') || !el.textContent.includes('연결')) continue;
-                    const btns = el.querySelectorAll('button');
-                    for (const btn of btns) {
-                        if (btn.textContent.trim() === '변환' && btn.offsetWidth > 0) {
-                            btn.click(); return 'clicked';
-                        }
-                    }
-                } catch(e) {}
-            }
-            return null;
-        }""")
-        if has_code_link:
-            log("  사원코드연결 → 변환 클릭")
-            await asyncio.sleep(2)
-            # "연결되지 않은 사원 및 연말 입력된 사원은 제외하고 변환됩니다" 확인
-            await _click_modal_text(page, "제외하고 변환", "확인")
-            await asyncio.sleep(1)
-        else:
-            break
+    # 사원코드연결 모달 (파일 선택 직후 등장 가능)
+    await _handle_code_link_modal(page)
 
     # ① 헤더 행(행1) 선택
     log("[엑셀 업로드] ① 헤더 행 선택...")
@@ -232,6 +242,9 @@ async def upload_excel(page, file_path, dry_run=True):
     log("[엑셀 업로드] 후속 2/5 → '연결되지 않은 사원' 확인...")
     await _click_modal_text(page, "연결되지 않은 사원", "확인")
     await asyncio.sleep(3)
+
+    # 사원코드연결 모달 (후속 모달 처리 중간에 등장 가능)
+    await _handle_code_link_modal(page)
 
     # 후속 모달 3: 삭제후 업로드
     action = "취소" if dry_run else "확인"

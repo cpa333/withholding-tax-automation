@@ -86,9 +86,10 @@ async def dismiss_dialogs(page):
                 }
             }
 
-            // 닫기 버튼
+            // 닫기 버튼 (닫기, 닫기(Esc))
             for (const btn of btns) {
-                if (btn.textContent.trim() === '닫기' && btn.offsetWidth > 0) { btn.click(); return '닫기'; }
+                const t = btn.textContent.trim();
+                if (t.startsWith('닫기') && btn.offsetWidth > 0) { btn.click(); return '닫기'; }
             }
             // 수당 및 공제등록 모달: display:none으로 강제 숨김
             // (z:1100 오버레이가 X 버튼을 덮어 JS/mouse click 불가)
