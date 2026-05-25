@@ -26,6 +26,7 @@ from playwright.async_api import async_playwright
 from src.utils.chrome_cdp import launch_chrome, connect_page
 from src.automation.wehago._common import (
     log, wait_for_login, goto_salary_page, dismiss_dialogs, WEHAGO_URL,
+    search_companies,
 )
 from src.automation.wehago.run_swsa0101 import run_swsa0101
 from src.automation.wehago.run_swta0101 import run_swta0101
@@ -88,18 +89,46 @@ async def main():
         await dismiss_dialogs(page)
 
         # ═══ Phase 2: 수임처 선택 ═══
-        log("\n========================================")
-        log("  수임처 이름을 입력하세요")
-        log("========================================")
-        while True:
-            company_name = input("  수임처 이름: ").strip()
-            if company_name:
-                break
-            log("  이름이 비어있습니다. 다시 입력해주세요.")
+        selected_company = None
+        while not selected_company:
+            log("\n========================================")
+            log("  수임처 이름(또는 일부)을 입력하세요")
+            log("========================================")
+            keyword = input("  검색: ").strip()
+            if not keyword:
+                continue
 
-        log(f"  '{company_name}' 급여 페이지로 이동 중...")
+            matches = await search_companies(page, keyword)
+            if not matches:
+                log(f"  '{keyword}'와 일치하는 수임처가 없습니다. 다시 입력해주세요.")
+                continue
+
+            if len(matches) == 1:
+                log(f"  1개 수임처 발견: {matches[0]}")
+                confirm = input(f"  '{matches[0]}'로 진행할까요? (Y/n): ").strip().lower()
+                if confirm in ("", "y", "yes"):
+                    selected_company = matches[0]
+                else:
+                    continue
+            else:
+                log(f"  {len(matches)}개 수임처 발견:")
+                for i, name in enumerate(matches, 1):
+                    log(f"    {i}. {name}")
+                choice = input("  번호 선택 (0=재검색): ").strip()
+                try:
+                    idx = int(choice)
+                    if 1 <= idx <= len(matches):
+                        selected_company = matches[idx - 1]
+                    elif idx == 0:
+                        continue
+                    else:
+                        log("  잘못된 번호입니다.")
+                except ValueError:
+                    log("  번호를 입력해주세요.")
+
+        log(f"  '{selected_company}' 급여 페이지로 이동 중...")
         try:
-            if not await goto_salary_page(page, company_name):
+            if not await goto_salary_page(page, selected_company):
                 log("수임처 급여 페이지 이동 실패")
                 return
         except Exception as e:

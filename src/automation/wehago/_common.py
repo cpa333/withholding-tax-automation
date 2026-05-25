@@ -289,6 +289,30 @@ async def wait_for_login(page):
     return False
 
 
+async def search_companies(page, keyword):
+    """키워드로 수임처 검색. 부분 매칭 결과 목록 반환.
+
+    Returns:
+        list[str]: 매칭된 수임처 이름 목록 (빈 리스트면 결과 없음)
+    """
+    results = await page.evaluate("""(kw) => {
+        const matches = [];
+        const seen = new Set();
+        const allDivs = document.querySelectorAll('[id^="company_"]');
+        for (const div of allDivs) {
+            const nameEl = div.querySelector('a');
+            if (!nameEl) continue;
+            const name = nameEl.textContent.trim();
+            if (!name.includes(kw)) continue;
+            if (seen.has(name)) continue;
+            seen.add(name);
+            matches.push(name);
+        }
+        return matches;
+    }""", keyword)
+    return results or []
+
+
 async def goto_salary_page(page, company_name):
     """수임처의 SmartA 급여 메인 페이지로 이동
 

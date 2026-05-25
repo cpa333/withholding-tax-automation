@@ -390,6 +390,7 @@ python src/automation/wehago/run_swer0101.py
 ### main.py 개선
 - CDP 재사용 시 wehago.com이 아니면 WEHAGO 페이지로 자동 이동
 - Chrome 새 실행 시 WEHAGO 로그인 페이지 자동 열기 (기존과 동일)
+- 수임처 검색: 일부 키워드 입력으로 부분 매칭, 다중 결과 시 번호 선택
 
 ### SWSA0101 엑셀 업로드 모달 처리
 - `_handle_code_link_modal()`: 사원코드연결 모달 → "변환" → "제외하고 변환됩니다" 확인
