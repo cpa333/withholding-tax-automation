@@ -380,6 +380,20 @@ python src/automation/wehago/run_swer0101.py
 - 바탕화면 경로 `USERPROFILE\Desktop` → `SHGetFolderPathW` API로 변경 (OneDrive 대응)
 - SWTA0101 반기 신고 시 하반기(7~12월) 자동 판단 로직 추가
 
+### dismiss_dialogs 개선 (z-index 정렬 + 모달별 분기 처리)
+- z-index 내림차순 정렬로 상위 모달부터 처리 (하위 모달 가림 문제 해결)
+- 비과세 모달: 취소 버튼 우선 클릭
+- 수당 및 공제등록 모달: z:1100 오버레이가 X 버튼을 덮어 display:none으로 강제 숨김
+- 간이세액 모달: 확인 버튼 우선 처리
+- Canvas fallback 텍스트/버튼 없는 fixed 오버레이 제외
+
+### main.py 개선
+- CDP 재사용 시 wehago.com이 아니면 WEHAGO 페이지로 자동 이동
+- Chrome 새 실행 시 WEHAGO 로그인 페이지 자동 열기 (기존과 동일)
+
+### SWSA0101 엑셀 업로드 모달 처리
+- 사원코드연결 모달: "변환" 버튼 클릭 → 후속 "연결되지 않은 사원...제외하고 변환됩니다" 확인
+
 ---
 
 ## 다음 단계 (TODO)
