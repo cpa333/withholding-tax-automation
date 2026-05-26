@@ -428,10 +428,12 @@ python src/automation/wehago/run_swer0101.py
 - **원인 1**: `#collect` 버튼이 토글. 다운로드 후 드롭다운이 열린 채 있으면 재클릭 시 오히려 닫힘
 - **원인 2**: `page.evaluate(() => btn.click())` (JS 합성 이벤트)는 일부 수임처에서 드롭다운을 열지 못함
 - **원인 3**: `click_menu_item("엑셀 내려밫기")` 클릭 후 드롭다운이 자동 닫힘 → 상태 추적 어긋남
-- **원인 4**: 일부 수임처에서 "엑셀 불러오기" 링크가 `cursor: not-allowed`로 비활성화됨
+- **원인 4**: 마감 완료 상태('해제' 버튼)에서는 엑셀 업로드가 비활성화됨
 - **수정**: `open_collect_menu()` / `close_collect_menu()` → Playwright `locator.click()` 사용 (JS evaluate 대신)
 - **수정**: `open_collect_menu()` close→open 순서로 토글 상태 무관하게 열린 상태 보장
-- **수정**: 엑셀 불러오기 비활성화 감지 (`cursor: not-allowed`) → 업로드 단계 건너뛰기
+- **수정**: 마감 상태 판별 로직 — 네비게이션 바 버튼 텍스트로 판별:
+  - "해제" → 마감 완료 (급여 확정) → 엑셀 업로드 SKIP
+  - "완료" / "마감" → 미마감 → 엑셀 업로드 진행
 - **수정**: 파일 선택 3단계 fallback:
   1. `page.mouse.click()` — 실제 CDP 마우스 이벤트 (신뢰된 사용자 제스처)
   2. `click_menu_item()` — 기존 JS evaluate 방식으로 재시도

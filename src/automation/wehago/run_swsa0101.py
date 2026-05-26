@@ -167,24 +167,21 @@ async def upload_excel(page, file_path, dry_run=True):
     await close_collect_menu(page)
     await open_collect_menu(page)
 
-    # 엑셀 불러오기 비활성화 체크
-    is_disabled = await page.evaluate("""() => {
-        const menu = document.querySelector('.sao_head_menu');
-        if (!menu) return false;
-        const items = menu.querySelectorAll('li');
-        for (const li of items) {
-            if (li.textContent.includes('엑셀 불러오기')) {
-                const a = li.querySelector('a');
-                if (a) {
-                    const cs = window.getComputedStyle(a);
-                    return cs.cursor === 'not-allowed';
-                }
+    # 마감 상태 확인: '해제' 버튼이 있으면 마감 완료 → 엑셀 업로드 불가
+    status_btn = await page.evaluate("""() => {
+        const buttons = document.querySelectorAll(
+            '.WSC_LUXTooltip button.WSC_LUXButton, button.WSC_LUXButton'
+        );
+        for (const btn of buttons) {
+            const text = btn.textContent.trim();
+            if (['마감', '마감해제', '해제', '완료'].includes(text) && btn.offsetWidth > 0) {
+                return text;
             }
         }
-        return false;
+        return null;
     }""")
-    if is_disabled:
-        log("  엑셀 불러오기가 비활성화 상태입니다. 업로드를 건너뜁니다.")
+    if status_btn == '해제':
+        log("  마감 완료 상태 ('해제' 버튼). 엑셀 업로드를 건너뜁니다.")
         log("[SWSA0101] 업로드 생략 완료")
         return True
 
