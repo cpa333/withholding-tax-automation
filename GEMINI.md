@@ -310,8 +310,8 @@ pause
 
 | 파일 | 역할 |
 |------|------|
-| `_common_edi.py` | CDP 연결, 로그인 대기, 팝업 닫기, 수임사업장 선택/검색/목록 수집 |
-| `nhis_edi_auto_cdp.py` | 메인 진입점 (대화형 메뉴) |
+| `_common_edi.py` | CDP 연결, 로그인 대기, 팝업 닫기, 수임사업장 선택/검색/목록 수집, Nexacro 제어, 1사이클 워크플로우 |
+| `nhis_edi_auto_cdp.py` | 메인 진입점 (전체 자동 / 대화형 메뉴) |
 
 ### 실행
 
@@ -330,4 +330,40 @@ pause
 |------|------|
 | 1 | 수임사업장 선택 (이름/번호 입력) |
 | 2 | 전체 수임사업장 목록 조회 (페이징 수집) |
+| 3 | 수임처 PDF 다운로드 (받은문서 → 가입자고지내역서) |
+| 4 | 전체 자동 (수임처별 워크플로우 반복) |
 | 0 | 종료 |
+
+### 수임처 1사이클 워크플로우 (`run_single_firm_workflow`)
+
+1. **받은문서 열기** — `pageLinkPopup1('201')` → 웹EDI 새 탭 (`webedi/xui/index.jsp`)
+2. **'전체' 라디오 선택** — Nexacro 라디오 `rdo_prog_stat` → "전체" 항목 mousedown/mouseup/click
+3. **서식명 선택** — Nexacro 콤보 `cbo_docid` dropbutton → combolist에서 "가입자 고지(산출) 내역서" 선택
+4. **첫 행 더블클릭** — 그리드 `grid_list` row 0, col 3 (서식명) dblclick
+5. **인쇄 버튼** — `div_top_img_print` mousedown/mouseup/click
+6. **미리보기 탭** — `popup.html?formname=CO::WETZ_163.xfdl` 열림
+7. **PDF 저장** — reportview iframe 내 `button[title="PDF 저장"]` 클릭
+   - `Browser.setDownloadBehavior` CDP로 저장 경로 지정
+   - `~/Desktop/{수임처명}_국민건강보험/가입자고지내역서_건강_{YYYYMM}.pdf`
+8. **탭 정리** — 미리보기 + 웹EDI 탭 닫기
+9. **로그인 사업장 복귀** — `img[src*=we_btn_relogin]` 클릭
+10. **모달 닫기** — 공지사항 등 팝업 탭 정리
+
+### Nexacro 제어 방식
+
+웹EDI 탭(`webedi/xui/index.jsp`)은 **Nexacro** 기반. 일반 DOM click/playwright click을 무시하므로 이벤트 직접 dispatch 필요:
+- **버튼 클릭:** `mousedown` → `mouseup` → `click` (`nexacro_click()`)
+- **그리드 행 선택:** `dblclick` 이벤트 (1차 click + 2차 click + dblclick)
+- **셀 ID:** `{gridId}_body_gridrow_{row}_cell_{row}_{col}`
+- **콤보박스:** `{comboId}_dropbutton` → `{comboId}_combolist` 내 `_item` div 클릭
+- **라디오:** `{radioId}` 내 `_item` div에서 TextBoxElement 텍스트로 매칭 후 클릭
+- **미리보기 PDF:** iframe(`reportview.jsp`) 내 버튼 — Playwright `locator.click()` 사용
+
+### 주요 요소 ID
+
+| 요소 | ID |
+|------|-----|
+| 받은문서 그리드 | `mainframe_childframe_form_div_body_grid_list` |
+| 서식명 콤보 | `mainframe_childframe_form_div_body_cbo_docid` |
+| 상태 라디오 | `mainframe_childframe_form_div_body_rdo_prog_stat` |
+| 인쇄 버튼 | `mainframe_childframe_form_div_top_img_print` |
