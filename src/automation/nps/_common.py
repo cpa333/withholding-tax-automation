@@ -706,46 +706,27 @@ async def _search_workplace_in_modal(page, search_text):
         "mainframe.VFrameSet.FrameSdi.ChangeBusi"
         ".form.divPopBg.form.divPopWork.form.div01.form"
     )
-    # 검색 필드 콤보를 '사업장명'(index 1)으로 변경
-    await page.evaluate(f"""(prefix) => {{
-        const combo = document.getElementById(prefix + '.cbo00');
-        if (combo && combo.__nnxComp) {{
-            combo.__nnxComp.set_value(1);
-        }}
-        // Fallback: combo 내부 radio/button에서 '사업장명' 찾기
-        const items = combo ? combo.querySelectorAll('[id*="radioitem"], [id*="listitem"]') : [];
-        for (const item of items) {{
-            if ((item.textContent || '').includes('사업장명')) {{
-                const rect = item.getBoundingClientRect();
-                const cx = rect.x + rect.width / 2;
-                const cy = rect.y + rect.height / 2;
-                const base = {{bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0}};
-                item.dispatchEvent(new MouseEvent('mousedown', {{...base, detail: 1}}));
-                item.dispatchEvent(new MouseEvent('mouseup', {{...base, detail: 1}}));
-                item.dispatchEvent(new MouseEvent('click', {{...base, detail: 1}}));
-                break;
-            }}
-        }}
-    }}""", MODAL_SEARCH)
+    # 검색 필드 콤보 드롭다운 열기 → '사업장명'(item_0) 선택
+    await nexacro_click_button(page, f"{MODAL_SEARCH}.cbo00.dropbutton")
+    await asyncio.sleep(0.5)
+    await nexacro_click_button(page, f"{MODAL_SEARCH}.cbo00.combolist.item_0")
     await asyncio.sleep(0.5)
 
-    # 검색 입력란에 텍스트 입력
-    await page.evaluate(f"""(args) => {{
-        const input = document.getElementById(args.prefix + '.edt00')
-            || document.querySelector('[id^=\"' + args.prefix + '.edt\"] input');
-        if (input) {{
-            const nativeInput = input.tagName === 'INPUT' ? input : input.querySelector('input');
-            if (nativeInput) {{
-                nativeInput.value = args.text;
-                nativeInput.dispatchEvent(new Event('input', {{bubbles: true}}));
-                nativeInput.dispatchEvent(new Event('change', {{bubbles: true}}));
-            }}
-        }}
-    }}""", {"prefix": MODAL_SEARCH, "text": search_text})
+    # 검색 입력란(edt08)에 텍스트 입력
+    await page.evaluate("""(args) => {
+        const input = document.getElementById(args.inputId + ":input");
+        if (input) {
+            input.value = args.text;
+            input.dispatchEvent(new Event("input", {bubbles: true}));
+            input.dispatchEvent(new Event("change", {bubbles: true}));
+            return true;
+        }
+        return false;
+    }""", {"inputId": f"{MODAL_SEARCH}.edt08", "text": search_text})
     await asyncio.sleep(0.5)
 
-    # 검색 버튼 클릭
-    await nexacro_click_button(page, f"{MODAL_SEARCH}.btn04")
+    # 검색 버튼(btn00) 클릭
+    await nexacro_click_button(page, f"{MODAL_SEARCH}.btn00")
 
 
 async def open_workplace_selector(page):
