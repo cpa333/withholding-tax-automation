@@ -119,8 +119,110 @@ async def main():
 
         log("로그인 확인됨. 자동화 시작.\n")
 
-        # ═══ Phase 2: 메뉴 루프 ═══
-        while True:
+        # ═══ Phase 2: 모드 선택 ═══
+        log("실행 모드 선택:")
+        log("  1. 전체 자동 (수임처별 전체 워크플로우)")
+        log("  2. 대화형 메뉴")
+        mode = input("\n선택 > ").strip()
+
+        if mode == "1":
+            await run_full_auto(page, context)
+        else:
+            await run_interactive(page, context)
+
+
+async def run_full_auto(page, context):
+    """전체 자동 모드: 수임처 목록 입력 → 각 수임처별 전체 워크플로우 수행"""
+    log("\n수임처 목록을 입력하세요 (쉼표 구분).")
+    log("예: 주식회사 제이에스,주식회사 니즈")
+    raw = input("\n수임처 > ").strip()
+    if not raw:
+        log("수임처가 입력되지 않았습니다.")
+        return
+
+    workplaces = [w.strip() for w in raw.split(",") if w.strip()]
+    log(f"\n총 {len(workplaces)}개 수임처: {workplaces}")
+
+    for i, wp_name in enumerate(workplaces):
+        log(f"\n{'='*55}")
+        log(f"[{i+1}/{len(workplaces)}] {wp_name}")
+        log(f"{'='*55}")
+
+        try:
+            await run_single_workplace(page, context, wp_name, is_first=(i == 0))
+        except Exception as e:
+            log(f"ERROR: {wp_name} 처리 실패 - {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+
+        log(f"\n{wp_name} 처리 완료.")
+
+    log(f"\n전체 {len(workplaces)}개 수임처 자동화 완료.")
+
+
+async def run_single_workplace(page, context, workplace_name, is_first=False):
+    """단일 수임처에 대한 전체 워크플로우 수행
+
+    플로우:
+    1. 사업장 선택/전환
+    2. 결정내역 이동
+    3. 2차 상세 진입
+    4. 가입자내역 → PDF + 엑셀
+    5. 소급분내역 → PDF + 엑셀 (빈 경우 스킵)
+    6. 국고지원내역 → PDF + 통합저장 (빈 경우 스킵)
+    """
+    from datetime import datetime
+    now = datetime.now()
+    folder_name = workplace_name.replace(" ", "_")
+    save_dir = os.path.join(os.path.expanduser("~"), "Desktop", f"{folder_name}_국민연금")
+
+    # Step 1: 사업장 선택/전환
+    if is_first:
+        log("  첫 수임처 - 사업장 선택 모달에서 선택...")
+        await open_workplace_selector(page)
+        await asyncio.sleep(2)
+        await select_workplace(page, workplace_name)
+    else:
+        log(f"  사업장전환 → {workplace_name}...")
+        await switch_workplace(page, workplace_name)
+    await asyncio.sleep(3)
+
+    # Step 2: 결정내역 이동
+    log("  결정내역 메뉴 이동...")
+    ok = await navigate_to_decision_details(page)
+    if not ok:
+        log(f"  ERROR: 결정내역 이동 실패 - {workplace_name} 스킵")
+        return
+
+    # Step 3: 2차 상세 진입
+    log("  2차 결정내역 진입...")
+    ok = await open_decision_detail(page)
+    if not ok:
+        log(f"  ERROR: 2차 상세 진입 실패 - {workplace_name} 스킵")
+        return
+
+    # Step 4~6: 탭별 다운로드
+    tabs = [
+        (TAB_MEMBER, "가입자내역", "grdList2"),
+        (TAB_RETRO, "소급분내역", "grdList3"),
+        (TAB_GOVT, "국고지원내역", "grdList4"),
+    ]
+    for tab_idx, label, grid_sfx in tabs:
+        result = await process_tab_download(
+            page, context, save_dir, tab_idx, label, grid_sfx,
+        )
+        if result["skipped"]:
+            log(f"  {label} 스킵 (데이터 없음)")
+        await asyncio.sleep(1)
+
+    log(f"  저장 경로: {save_dir}")
+
+
+async def run_interactive(page, context):
+    """대화형 메뉴 모드"""
+    # ═══ Phase 2: 메뉴 루프 ═══
+    while True:
             print_menu()
             choice = input("선택 > ").strip()
 
