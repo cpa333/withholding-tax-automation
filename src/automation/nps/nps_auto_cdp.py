@@ -138,20 +138,27 @@ async def run_full_auto(page, context):
     while True:
         log(f"\n{'='*55}")
         log("  사업장전환 모달 열기...")
-        await switch_workplace_open(page)
-        await asyncio.sleep(2)
+        try:
+            await switch_workplace_open(page)
+            await asyncio.sleep(2)
+        except Exception as e:
+            log(f"  WARN: 사업장전환 버튼 실패, 재시도... ({e})")
+            await asyncio.sleep(3)
+            await switch_workplace_open(page)
+            await asyncio.sleep(2)
 
         workplaces = await list_workplaces(page)
         if not workplaces:
-            log("  사업장 목록을 불러오지 못했습니다.")
-            return
+            log("  사업장 목록을 불러오지 못했습니다. 재시도...")
+            await asyncio.sleep(2)
+            continue
 
-        log(f"\n  총 {len(workplaces)}개 사업장:")
+        log(f"\n  사업장 목록 ({len(workplaces)}개):")
         for wp in workplaces:
             log(f"    {wp['index'] + 1}. [{wp['number']}] {wp['name']}")
 
-        log(f"\n  완료: {completed}개")
-        choice = input("\n  수임처 번호 또는 이름 일부 (0=종료): ").strip()
+        log(f"\n  완료: {completed}개 | 목록에 없으면 이름 직접 입력 가능")
+        choice = input("\n  수임처 번호 또는 이름 (0=종료): ").strip()
         if not choice or choice == "0":
             log(f"\n  총 {completed}개 수임처 자동화 완료. 종료.")
             return
@@ -165,7 +172,7 @@ async def run_full_auto(page, context):
         except ValueError:
             pass
 
-        # 이름 일부 매칭
+        # 이름 일부 매칭 (표시된 목록에서)
         if not wp_name:
             matches = [wp for wp in workplaces if choice in wp["name"]]
             if len(matches) == 1:
@@ -184,9 +191,11 @@ async def run_full_auto(page, context):
                 if not wp_name:
                     log("  취소.")
                     continue
-            else:
-                log(f"  '{choice}'와(과) 일치하는 사업장이 없습니다.")
-                continue
+
+        # 표시된 목록에 없으면 직접 이름으로 검색 시도
+        if not wp_name:
+            wp_name = choice
+            log(f"  '{choice}' — 표시 목록에 없음, 이름으로 직접 검색합니다.")
 
         log(f"\n{'='*55}")
         log(f"  [{completed + 1}] {wp_name}")
@@ -263,6 +272,10 @@ async def run_single_workplace(page, context, workplace_name, is_first=False):
         await asyncio.sleep(1)
 
     log(f"  저장 경로: {save_dir}")
+
+    # 페이지 상태 정리: 첫 번째 탭으로 복귀
+    await click_detail_tab(page, TAB_MEMBER)
+    await asyncio.sleep(1)
 
 
 async def run_interactive(page, context):

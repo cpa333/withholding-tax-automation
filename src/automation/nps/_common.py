@@ -692,6 +692,62 @@ async def switch_workplace(page, workplace_name):
     return ok
 
 
+async def _search_workplace_in_modal(page, search_text):
+    """사업장전환 모달의 검색 입력란에 텍스트 입력 후 검색 실행
+
+    사업장관리번호 콤보를 '사업장명'으로 변경하고, 검색어를 입력한 뒤
+    검색 버튼을 클릭하여 그리드 결과를 갱신.
+
+    Args:
+        page: Playwright page
+        search_text: 검색할 텍스트
+    """
+    MODAL_SEARCH = (
+        "mainframe.VFrameSet.FrameSdi.ChangeBusi"
+        ".form.divPopBg.form.divPopWork.form.div01.form"
+    )
+    # 검색 필드 콤보를 '사업장명'(index 1)으로 변경
+    await page.evaluate(f"""(prefix) => {{
+        const combo = document.getElementById(prefix + '.cbo00');
+        if (combo && combo.__nnxComp) {{
+            combo.__nnxComp.set_value(1);
+        }}
+        // Fallback: combo 내부 radio/button에서 '사업장명' 찾기
+        const items = combo ? combo.querySelectorAll('[id*="radioitem"], [id*="listitem"]') : [];
+        for (const item of items) {{
+            if ((item.textContent || '').includes('사업장명')) {{
+                const rect = item.getBoundingClientRect();
+                const cx = rect.x + rect.width / 2;
+                const cy = rect.y + rect.height / 2;
+                const base = {{bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0}};
+                item.dispatchEvent(new MouseEvent('mousedown', {{...base, detail: 1}}));
+                item.dispatchEvent(new MouseEvent('mouseup', {{...base, detail: 1}}));
+                item.dispatchEvent(new MouseEvent('click', {{...base, detail: 1}}));
+                break;
+            }}
+        }}
+    }}""", MODAL_SEARCH)
+    await asyncio.sleep(0.5)
+
+    # 검색 입력란에 텍스트 입력
+    await page.evaluate(f"""(args) => {{
+        const input = document.getElementById(args.prefix + '.edt00')
+            || document.querySelector('[id^=\"' + args.prefix + '.edt\"] input');
+        if (input) {{
+            const nativeInput = input.tagName === 'INPUT' ? input : input.querySelector('input');
+            if (nativeInput) {{
+                nativeInput.value = args.text;
+                nativeInput.dispatchEvent(new Event('input', {{bubbles: true}}));
+                nativeInput.dispatchEvent(new Event('change', {{bubbles: true}}));
+            }}
+        }}
+    }}""", {"prefix": MODAL_SEARCH, "text": search_text})
+    await asyncio.sleep(0.5)
+
+    # 검색 버튼 클릭
+    await nexacro_click_button(page, f"{MODAL_SEARCH}.btn04")
+
+
 async def open_workplace_selector(page):
     """사업장 선택 모달(업무대행서비스) 열기
 
@@ -737,6 +793,8 @@ async def open_workplace_selector(page):
 async def select_workplace(page, workplace_name):
     """사업장 선택 모달에서 특정 사업장을 더블클릭으로 선택
 
+    그리드에 표시되지 않으면 모달 내 검색으로 찾기 시도.
+
     Args:
         page: Playwright page
         workplace_name: 선택할 사업장명 (부분 매칭)
@@ -748,6 +806,13 @@ async def select_workplace(page, workplace_name):
 
     # 사업장명 컬럼(col=2)에서 텍스트 매칭하여 행 인덱스 찾기
     row = await nexacro_find_row(page, GRID_WORKPLACE, col=2, text=workplace_name)
+
+    # 그리드에 없으면 모달 검색으로 찾기 시도
+    if row is None:
+        log(f"  표시 목록에 없음 — 모달 검색으로 찾는 중...")
+        await _search_workplace_in_modal(page, workplace_name)
+        await asyncio.sleep(2)
+        row = await nexacro_find_row(page, GRID_WORKPLACE, col=2, text=workplace_name)
 
     if row is None:
         log(f"  '{workplace_name}' 사업장을 찾지 못했습니다.")
