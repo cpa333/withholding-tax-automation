@@ -13,10 +13,18 @@ from src.utils.chrome_cdp import launch_chrome, CDP_URL
 NPS_URL = "https://edi.nps.or.kr"
 NPS_NEXACRO_URL = "https://edi.nps.or.kr/nexacro/index.html"
 
-# Nexacro 그리드 ID prefix (사업장 선택 모달)
+# Nexacro 그리드 ID prefix
 GRID_WORKPLACE = (
     "mainframe.VFrameSet.FrameSdi.ChangeBusi"
     ".form.divPopBg.form.divPopWork.form.grdList"
+)
+GRID_DECISION_LIST = (
+    "mainframe.VFrameSet.FrameSdi.form.divWork_M08010000"
+    ".form.divWork.form.grdList"
+)
+GRID_DECISION_DETAIL = (
+    "mainframe.VFrameSet.FrameSdi.form.divWork_M08010200"
+    ".form.divWork.form.tab00.Tabpage1.form"
 )
 
 
@@ -248,6 +256,66 @@ async def navigate_to_decision_details(page):
     await asyncio.sleep(3)
 
     log("국민연금보험료 결정내역 페이지 이동 완료.")
+    return True
+
+
+async def open_decision_detail(page, round_filter="2차"):
+    """결정내역 목록에서 이번 달 + 지정 차수 행을 더블클릭하여 상세 진입
+
+    결정내역 그리드(GRID_DECISION_LIST)에서:
+    - 처리결과 통지일(col=1)이 이번 달인 행
+    - 업무명(col=3)에 round_filter(기본 '2차')가 포함된 행
+    을 찾아 더블클릭.
+
+    Args:
+        page: Playwright page
+        round_filter: 차수 필터 (기본 '2차')
+
+    Returns:
+        bool: 상세 페이지 진입 성공 여부
+    """
+    from datetime import datetime
+    now = datetime.now()
+    month_prefix = f"{now.year}.{now.month:02d}"
+
+    log(f"결정내역에서 이번 달({month_prefix}) {round_filter} 행 검색...")
+
+    # 텍스트 매칭으로 행 찾기: 업무명(col=3)에 연도.월 + 차수 포함
+    row_idx = await page.evaluate("""(args) => {
+        const prefix = args.gridId + '.body.gridrow_';
+        const allCells = document.querySelectorAll('[id^="' + prefix + '"]');
+        for (const cell of allCells) {
+            const match = cell.id.match(/gridrow_(\\d+)\\.cell_\\d+_(\\d+)$/);
+            if (!match) continue;
+            const rowIdx = parseInt(match[1]);
+            const colIdx = parseInt(match[2]);
+            if (colIdx !== args.col) continue;
+            const text = cell.textContent.trim();
+            if (text.includes(args.monthPrefix) && text.includes(args.roundFilter)) {
+                return rowIdx;
+            }
+        }
+        return null;
+    }""", {
+        "gridId": GRID_DECISION_LIST,
+        "col": 3,
+        "monthPrefix": month_prefix,
+        "roundFilter": round_filter,
+    })
+
+    if row_idx is None:
+        log(f"  {month_prefix} {round_filter} 행을 찾지 못했습니다.")
+        return False
+
+    log(f"  {round_filter} 행 발견 (row={row_idx}). 더블클릭 진입 중...")
+    result = await nexacro_dblclick_cell(page, GRID_DECISION_LIST, row=row_idx, col=3)
+
+    if not result.get("ok"):
+        log(f"  더블클릭 실패: {result}")
+        return False
+
+    await asyncio.sleep(3)
+    log("결정내역 상세 페이지 진입 완료.")
     return True
 
 

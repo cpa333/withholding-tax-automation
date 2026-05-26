@@ -25,7 +25,7 @@ from src.utils.chrome_cdp import launch_chrome, connect_page as cdp_connect
 from src.automation.nps._common import (
     log, NPS_URL, connect_page, wait_for_login, ensure_login_page,
     open_workplace_selector, select_workplace, select_workplace_by_index,
-    list_workplaces, navigate_to_decision_details,
+    list_workplaces, navigate_to_decision_details, open_decision_detail,
 )
 
 
@@ -40,6 +40,7 @@ def print_menu():
     print("  1. 사업장 선택 (목록에서 선택)")
     print("  2. 사업장 전체 목록 조회")
     print("  3. 국민연금보험료 결정내역 이동")
+    print("  4. 결정내역 2차 상세 진입 (이번 달)")
     print("  0. 종료")
     print("-" * 55)
 
@@ -144,12 +145,20 @@ async def main():
                     import traceback
                     traceback.print_exc()
 
+            elif choice == "4":
+                try:
+                    await open_decision_detail(page)
+                except Exception as e:
+                    log(f"ERROR: {e}")
+                    import traceback
+                    traceback.print_exc()
+
             elif choice == "0":
                 log("종료합니다.")
                 break
 
             else:
-                log("잘못된 선택입니다. 1, 2, 3, 0 중 하나를 입력하세요.")
+                log("잘못된 선택입니다. 1, 2, 3, 4, 0 중 하나를 입력하세요.")
 
 
 if __name__ == "__main__":
