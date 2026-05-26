@@ -26,6 +26,8 @@ from src.automation.nps._common import (
     log, NPS_URL, connect_page, wait_for_login, ensure_login_page,
     open_workplace_selector, select_workplace, select_workplace_by_index,
     list_workplaces, navigate_to_decision_details, open_decision_detail,
+    click_detail_tab, output_with_full_ssn, download_pdf_from_preview,
+    TAB_MEMBER,
 )
 
 
@@ -41,6 +43,7 @@ def print_menu():
     print("  2. 사업장 전체 목록 조회")
     print("  3. 국민연금보험료 결정내역 이동")
     print("  4. 결정내역 2차 상세 진입 (이번 달)")
+    print("  5. 가입자내역 탭 + PDF 다운로드")
     print("  0. 종료")
     print("-" * 55)
 
@@ -153,12 +156,31 @@ async def main():
                     import traceback
                     traceback.print_exc()
 
+            elif choice == "5":
+                try:
+                    log("가입자내역 탭 이동...")
+                    await click_detail_tab(page, TAB_MEMBER)
+                    await output_with_full_ssn(page)
+
+                    from datetime import datetime
+                    now = datetime.now()
+                    filename = f"국민연금보험료_결정내역_{now.strftime('%Y%m')}"
+                    save_dir = os.path.join(
+                        os.path.expanduser("~"), "Desktop",
+                        f"주식회사_제이에스_국민연금",
+                    )
+                    await download_pdf_from_preview(context, save_dir, filename)
+                except Exception as e:
+                    log(f"ERROR: {e}")
+                    import traceback
+                    traceback.print_exc()
+
             elif choice == "0":
                 log("종료합니다.")
                 break
 
             else:
-                log("잘못된 선택입니다. 1, 2, 3, 4, 0 중 하나를 입력하세요.")
+                log("잘못된 선택입니다. 1, 2, 3, 4, 5, 0 중 하나를 입력하세요.")
 
 
 if __name__ == "__main__":

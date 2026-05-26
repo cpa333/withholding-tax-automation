@@ -27,6 +27,29 @@ GRID_DECISION_DETAIL = (
     ".form.divWork.form.tab00.Tabpage1.form"
 )
 
+# 결정내역 상세 탭 인덱스
+TAB_FINAL = 0      # 최종결정내역
+TAB_RECEIPT = 1    # 수납내역
+TAB_MEMBER = 2     # 가입자내역
+TAB_RETRO = 3      # 소급분내역
+TAB_GOVT = 4       # 국고지원내역
+
+# 결정내역 상세 탭 버튼 ID prefix
+TAB_BTN_PREFIX = (
+    "mainframe.VFrameSet.FrameSdi.form.divWork_M08010200"
+    ".form.divWork.form.tab00.tabbutton_"
+)
+
+# 출력 버튼 / 출력 옵션 모달 (UHJE0002P1)
+BTN_OUTPUT = (
+    "mainframe.VFrameSet.FrameSdi.form.divWork_M08010200"
+    ".form.divWork.form.div00.form.btn02"
+)
+MODAL_PREFIX = "mainframe.VFrameSet.FrameSdi.UHJE0002P1.form.divPopBg.form.divPopWork.form"
+RADIO_FULL_SSN = f"{MODAL_PREFIX}.div00_01.form.div01.form.rdo06.radioitem1"
+BTN_MODAL_CONFIRM = f"{MODAL_PREFIX}.div00_00.form.btn01"
+BTN_MODAL_CANCEL = f"{MODAL_PREFIX}.div00_00.form.btn00"
+
 
 def log(msg):
     print(msg, flush=True)
@@ -317,6 +340,122 @@ async def open_decision_detail(page, round_filter="2차"):
     await asyncio.sleep(3)
     log("결정내역 상세 페이지 진입 완료.")
     return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 결정내역 상세 탭 / 출력 / PDF
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def click_detail_tab(page, tab_index):
+    """결정내역 상세 페이지의 탭 전환
+
+    Args:
+        page: Playwright page
+        tab_index: 탭 인덱스 (TAB_FINAL=0, TAB_RECEIPT=1, TAB_MEMBER=2, TAB_RETRO=3, TAB_GOVT=4)
+    """
+    tab_id = f"{TAB_BTN_PREFIX}{tab_index}"
+    result = await nexacro_click_button(page, tab_id)
+    if result.get("ok"):
+        log(f"  탭 {tab_index} 전환 완료")
+    else:
+        log(f"  탭 전환 실패: {result}")
+    await asyncio.sleep(1)
+    return result.get("ok", False)
+
+
+async def output_with_full_ssn(page):
+    """출력 버튼 클릭 → 주민번호 전체표출 → 확인
+
+    출력 옵션 모달에서 주민번호를 전체표출로 선택 후 확인.
+    Crownix rdPreview 새 탭이 열림.
+    """
+    log("출력 버튼 클릭...")
+    result = await nexacro_click_button(page, BTN_OUTPUT)
+    if not result.get("ok"):
+        log(f"  ERROR: 출력 버튼 클릭 실패 - {result}")
+        return False
+    await asyncio.sleep(2)
+
+    log("주민번호 전체표출 선택...")
+    await nexacro_click_button(page, RADIO_FULL_SSN)
+    await asyncio.sleep(1)
+
+    log("확인 클릭...")
+    result = await nexacro_click_button(page, BTN_MODAL_CONFIRM)
+    if not result.get("ok"):
+        log(f"  ERROR: 확인 클릭 실패 - {result}")
+        return False
+    await asyncio.sleep(2)
+
+    log("출력 옵션 적용 완료.")
+    return True
+
+
+async def download_pdf_from_preview(context, save_dir, filename):
+    """rdPreview 탭에서 PDF 다운로드 후 탭 닫기
+
+    Crownix 뷰어(rdPreview.do) 새 탭에서 PDF 버튼 클릭으로 다운로드.
+
+    Args:
+        context: Playwright browser context
+        save_dir: 저장할 디렉토리 경로
+        filename: 저장할 파일명 (확장자 제외)
+
+    Returns:
+        str or None: 저장된 파일 경로, 실패 시 None
+    """
+    # rdPreview 탭 찾기
+    rd_page = None
+    for pg in context.pages:
+        try:
+            if "rdPreview" in pg.url:
+                rd_page = pg
+                break
+        except Exception:
+            continue
+
+    if not rd_page:
+        log("  ERROR: rdPreview 탭을 찾지 못했습니다.")
+        return None
+
+    # 다운로드 경로 설정
+    os.makedirs(save_dir, exist_ok=True)
+    cdp = await context.new_cdp_session(rd_page)
+    await cdp.send("Browser.setDownloadBehavior", {
+        "behavior": "allowAndName",
+        "downloadPath": save_dir,
+        "eventsEnabled": True,
+    })
+
+    # PDF 버튼 클릭
+    await rd_page.evaluate("""() => {
+        const btns = document.querySelectorAll('button.crownix-toolbar-button');
+        for (const btn of btns) {
+            if ((btn.textContent || '').trim() === 'PDF') {
+                btn.click();
+                return true;
+            }
+        }
+        return false;
+    }""")
+
+    # 다운로드 완료 대기
+    for _ in range(30):
+        await asyncio.sleep(1)
+        files = os.listdir(save_dir)
+        pdf_files = [f for f in files if not f.endswith(".crdownload")]
+        if pdf_files:
+            downloaded = os.path.join(save_dir, pdf_files[0])
+            final_path = os.path.join(save_dir, f"{filename}.pdf")
+            if downloaded != final_path:
+                os.rename(downloaded, final_path)
+            # rdPreview 탭 닫기
+            await rd_page.close()
+            log(f"  PDF 저장 완료: {final_path}")
+            return final_path
+
+    log("  ERROR: PDF 다운로드 시간 초과")
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
