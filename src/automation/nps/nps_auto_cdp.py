@@ -27,8 +27,8 @@ from src.automation.nps._common import (
     open_workplace_selector, select_workplace, select_workplace_by_index,
     list_workplaces, navigate_to_decision_details, open_decision_detail,
     click_detail_tab, output_with_full_ssn, download_pdf_from_preview,
-    save_excel,
-    TAB_MEMBER,
+    save_excel, process_tab_download,
+    TAB_MEMBER, TAB_RETRO, TAB_GOVT,
 )
 
 
@@ -46,6 +46,8 @@ def print_menu():
     print("  4. 결정내역 2차 상세 진입 (이번 달)")
     print("  5. 가입자내역 탭 + PDF 다운로드")
     print("  6. 엑셀저장")
+    print("  7. 소급분내역 PDF+엑셀")
+    print("  8. 전체 탭 자동 처리 (가입자/소급분/국고지원)")
     print("  0. 종료")
     print("-" * 55)
 
@@ -192,12 +194,55 @@ async def main():
                     import traceback
                     traceback.print_exc()
 
+            elif choice == "7":
+                try:
+                    save_dir = os.path.join(
+                        os.path.expanduser("~"), "Desktop",
+                        f"주식회사_제이에스_국민연금",
+                    )
+                    result = await process_tab_download(
+                        page, context, save_dir,
+                        tab_index=TAB_RETRO,
+                        tab_label="소급분내역",
+                        grid_suffix="grdList3",
+                    )
+                    if result["skipped"]:
+                        log("소급분내역 데이터 없음, 스킵")
+                except Exception as e:
+                    log(f"ERROR: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            elif choice == "8":
+                try:
+                    save_dir = os.path.join(
+                        os.path.expanduser("~"), "Desktop",
+                        f"주식회사_제이에스_국민연금",
+                    )
+                    tabs = [
+                        (TAB_MEMBER, "가입자내역", "grdList2"),
+                        (TAB_RETRO, "소급분내역", "grdList3"),
+                        (TAB_GOVT, "국고지원내역", "grdList4"),
+                    ]
+                    for tab_idx, label, grid_sfx in tabs:
+                        result = await process_tab_download(
+                            page, context, save_dir, tab_idx, label, grid_sfx,
+                        )
+                        if result["skipped"]:
+                            log(f"  {label} 스킵 (데이터 없음)")
+                        await asyncio.sleep(1)
+                    log("전체 탭 처리 완료")
+                except Exception as e:
+                    log(f"ERROR: {e}")
+                    import traceback
+                    traceback.print_exc()
+
             elif choice == "0":
                 log("종료합니다.")
                 break
 
             else:
-                log("잘못된 선택입니다. 1~6, 0 중 하나를 입력하세요.")
+                log("잘못된 선택입니다. 1~8, 0 중 하나를 입력하세요.")
 
 
 if __name__ == "__main__":

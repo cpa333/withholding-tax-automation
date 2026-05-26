@@ -530,6 +530,53 @@ async def save_excel(page, context, save_dir, filename):
     return None
 
 
+async def process_tab_download(page, context, save_dir, tab_index, tab_label, grid_suffix):
+    """결정내역 상세 탭에서 PDF + Excel 순차 다운로드
+
+    그리드가 비어있으면 스킵.
+
+    Args:
+        page: Playwright page
+        context: Playwright browser context
+        save_dir: 저장 디렉토리
+        tab_index: 탭 인덱스 (TAB_MEMBER=2, TAB_RETRO=3, TAB_GOVT=4)
+        tab_label: 파일명 구분용 라벨 (예: '가입자내역', '소급분내역')
+        grid_suffix: 그리드 ID 접미사 (예: 'grdList2', 'grdList3')
+
+    Returns:
+        dict: {pdf: path|None, excel: path|None, skipped: bool}
+    """
+    from datetime import datetime
+    now = datetime.now()
+    base = f"국민연금보험료_결정내역_{now.strftime('%Y%m')}_{tab_label}"
+
+    # 탭 전환
+    log(f"{tab_label} 탭 이동...")
+    ok = await click_detail_tab(page, tab_index)
+    if not ok:
+        log(f"  {tab_label} 탭 전환 실패, 스킵")
+        return {"pdf": None, "excel": None, "skipped": True}
+
+    # 그리드 데이터 확인
+    grid_id = f"{GRID_DECISION_DETAIL}.{grid_suffix}"
+    data = await nexacro_get_grid_data(page, grid_id)
+    if not data:
+        log(f"  {tab_label} 데이터 없음, 다운로드 스킵")
+        return {"pdf": None, "excel": None, "skipped": True}
+
+    log(f"  {tab_label} 데이터 {len(data)}행 감지, 다운로드 시작")
+
+    # PDF
+    pdf_path = None
+    if await output_with_full_ssn(page):
+        pdf_path = await download_pdf_from_preview(context, save_dir, base)
+
+    # Excel
+    excel_path = await save_excel(page, context, save_dir, f"{base}_엑셀")
+
+    return {"pdf": pdf_path, "excel": excel_path, "skipped": False}
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 사업장 선택
 # ═══════════════════════════════════════════════════════════════════════════════
