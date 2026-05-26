@@ -31,7 +31,7 @@ The application is a Python-based Windows automation tool designed to streamline
 ## Directory Structure
 - `src/`
     - `automation/`
-        - `nhis/` (공단) — 건강보험공단 자동화
+        - `nhis/` (공단) — 건강보험공단 자동화 (개인용) + 건강보험 EDI 자동화 (법인용)
         - `nps/` — 국민연금 EDI 자동화
         - `wehago/` — WEHAGO 급여 자동화
         - `hometax/` — 홈택스 원천세 신고 자동화
@@ -283,3 +283,51 @@ pause
 6. 국고지원내역 → PDF + 통합저장 (빈 경우 스킵)
 7. 저장 경로: `~/Desktop/{수임처명}_국민연금/`
 8. 다음 수임처 전환 (사업장전환 버튼)
+
+## NHIS EDI Automation Flow (`nhis_edi_auto_cdp.py`)
+
+국민건강보험 EDI (edi.nhis.or.kr) — 법인 계정(업무대행, 서울회계법인) 자동화.
+기존 개인용 `nhis_auto_cdp.py`와 별개 모듈.
+
+### 사이트 구조
+
+- **포털 URL:** `https://edi.nhis.or.kr/`
+- **메인 페이지:** `https://edi.nhis.or.kr/homeapp/wep/m/retrieveMain.xx`
+- **사업장 선택 팝업:** `retrieveFirmList.do` — 새 탭으로 열림
+- **테이블 구조:** `table.list > tbody > tr > td` (td[1]=번호, td[2]=사업장명+링크, td[3]=관리번호, td[4]=단위기호)
+
+### 수임사업장 선택
+
+1. **선택 버튼:** `img[src*=we_btn_suim]` (alt="수임사업장선택")
+2. **새 탭 팝업** 열림 (`retrieveFirmList.do?no=4`)
+3. **페이징:** `fn_next('pageNo')` JavaScript 호출 (10건/페이지)
+4. **전체 수집:** `list_all_firms()` — 21페이지 순회하여 202개 사업장 파싱
+5. **사업장 선택:** `<a onclick="fn_firmChang('1','','관리번호','단위기호','사업장명','전체관리번호')">` 클릭
+6. **검색:** `srchType` (사업장명/사업장관리번호) + `srchText` + `btnSubmit` 폼 제출
+7. **선택 완료** 후 팝업 탭 닫기
+
+### 모듈 구조
+
+| 파일 | 역할 |
+|------|------|
+| `_common_edi.py` | CDP 연결, 로그인 대기, 팝업 닫기, 수임사업장 선택/검색/목록 수집 |
+| `nhis_edi_auto_cdp.py` | 메인 진입점 (대화형 메뉴) |
+
+### 실행
+
+별도 `.bat` 파일로 실행 (`건강보험EDI 자동화.bat`):
+```bat
+@echo off
+chcp 65001 >nul
+cd /d "%~dp0"
+python -u src\automation\nhis\nhis_edi_auto_cdp.py
+pause
+```
+
+### 메뉴
+
+| 번호 | 기능 |
+|------|------|
+| 1 | 수임사업장 선택 (이름/번호 입력) |
+| 2 | 전체 수임사업장 목록 조회 (페이징 수집) |
+| 0 | 종료 |
