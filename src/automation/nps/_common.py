@@ -449,6 +449,7 @@ async def download_pdf_from_preview(context, save_dir, filename):
     })
 
     # PDF 버튼 클릭
+    before = set(os.listdir(save_dir))
     await rd_page.evaluate("""() => {
         const btns = document.querySelectorAll('button.crownix-toolbar-button');
         for (const btn of btns) {
@@ -463,11 +464,15 @@ async def download_pdf_from_preview(context, save_dir, filename):
     # 다운로드 완료 대기
     for _ in range(30):
         await asyncio.sleep(1)
-        files = os.listdir(save_dir)
-        pdf_files = [f for f in files if not f.endswith(".crdownload")]
-        if pdf_files:
-            downloaded = os.path.join(save_dir, pdf_files[0])
+        after = set(os.listdir(save_dir))
+        new_files = after - before
+        crdownload = [f for f in new_files if f.endswith(".crdownload")]
+        done = [f for f in new_files if not f.endswith(".crdownload")]
+        if not crdownload and done:
+            downloaded = os.path.join(save_dir, done[0])
             final_path = os.path.join(save_dir, f"{filename}.pdf")
+            if os.path.exists(final_path):
+                os.remove(final_path)
             if downloaded != final_path:
                 os.rename(downloaded, final_path)
             # rdPreview 탭 닫기

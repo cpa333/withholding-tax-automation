@@ -148,27 +148,45 @@ async def run_full_auto(page, context):
 
         log(f"\n  총 {len(workplaces)}개 사업장:")
         for wp in workplaces:
-            mark = " ✓" if wp.get("done") else ""
-            log(f"    {wp['index'] + 1}. [{wp['number']}] {wp['name']}{mark}")
+            log(f"    {wp['index'] + 1}. [{wp['number']}] {wp['name']}")
 
         log(f"\n  완료: {completed}개")
-        choice = input("\n  수임처 번호 또는 이름 (0=종료): ").strip()
+        choice = input("\n  수임처 번호 또는 이름 일부 (0=종료): ").strip()
         if not choice or choice == "0":
             log(f"\n  총 {completed}개 수임처 자동화 완료. 종료.")
             return
 
-        # 번호로 선택
+        # 번호로 선택 시도
         wp_name = None
         try:
             idx = int(choice) - 1
             if 0 <= idx < len(workplaces):
                 wp_name = workplaces[idx]["name"]
         except ValueError:
-            wp_name = choice
+            pass
 
+        # 이름 일부 매칭
         if not wp_name:
-            log("  잘못된 입력입니다.")
-            continue
+            matches = [wp for wp in workplaces if choice in wp["name"]]
+            if len(matches) == 1:
+                wp_name = matches[0]["name"]
+            elif len(matches) > 1:
+                log(f"\n  '{choice}'와(과) 일치하는 사업장 {len(matches)}개:")
+                for j, m in enumerate(matches):
+                    log(f"    {j + 1}. [{m['number']}] {m['name']}")
+                sub = input("  선택 (0=취소): ").strip()
+                try:
+                    sub_idx = int(sub) - 1
+                    if 0 <= sub_idx < len(matches):
+                        wp_name = matches[sub_idx]["name"]
+                except ValueError:
+                    pass
+                if not wp_name:
+                    log("  취소.")
+                    continue
+            else:
+                log(f"  '{choice}'와(과) 일치하는 사업장이 없습니다.")
+                continue
 
         log(f"\n{'='*55}")
         log(f"  [{completed + 1}] {wp_name}")
