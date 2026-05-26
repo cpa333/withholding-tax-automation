@@ -360,7 +360,11 @@ pause
 - **그리드 행 선택:** `dblclick` 이벤트 (1차 click + 2차 click + dblclick)
 - **셀 ID:** `{gridId}_body_gridrow_{row}_cell_{row}_{col}`
 - **콤보박스:** `dropbutton` 클릭 → combolist가 **동적 생성**됨 (클릭 전에는 DOM에 없음) → `_item` div에서 TextBoxElement 텍스트로 매칭 후 클릭
-- **라디오:** `{radioId}` 내 `_item` div에서 TextBoxElement 텍스트로 매칭 후 클릭
+- **라디오 (Nexacro API):** dispatchEvent로는 시각/데이터 불일치 발생 → **Nexacro 내부 API** 사용:
+  - `wait_for_nexacro_ready(page)` — DOM 요소뿐 아니라 `nexacro.Application.mainframe.childframe.form` 접근 가능까지 대기
+  - `nexacro_set_radio(page, index)` — `radio.set_index(index)` + `radio.on_fire_onitemchanged()` 로 내부 상태 + 시각 + 그리드 리로드 모두 처리
+  - 인덱스: 0=전체, 1=신규, 2=열람
+  - 접근 경로: `nexacro.Application.mainframe.childframe.form.components.div_body.components.rdo_prog_stat`
 - **미리보기 PDF:** iframe(`reportview.jsp`) 내 버튼 — Playwright `locator.click()` 사용 (Nexacro 외부 영역)
 
 ### 주요 디버깅 포인트
@@ -370,6 +374,8 @@ pause
 | 수임사업장선택 버튼 안 보임 | 수임처 선택 상태에서는 숨음 | 먼저 `we_btn_relogin`으로 로그인 사업장 복귀 |
 | combolist not found | dropbutton 클릭 전에 combolist DOM 없음 | dropbutton 클릭 후 combolist 생성 대기 |
 | 서식명 선택 후 값 불일치 | Nexacro 내부 상태 동기화 지연 | 1초 대기 후 input 값 확인 |
+| 라디오 "전체" 안 바뀜 | dispatchEvent로 시각/데이터 불일치 | Nexacro API `set_index(0)` + `on_fire_onitemchanged()` 사용 |
+| Nexacro API 접근 불가 | 프레임워크 로딩 전에 실행 | `wait_for_nexacro_ready()`로 mainframe.form 접근 확인 후 실행 |
 
 ### 주요 요소 ID
 

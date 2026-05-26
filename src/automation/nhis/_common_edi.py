@@ -391,6 +391,82 @@ async def close_firm_popup(context, popup):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Nexacro 초기화 대기
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def wait_for_nexacro_ready(page):
+    """웹EDI(Nexacro) 프레임워크가 완전히 로딩될 때까지 대기
+
+    DOM 요소뿐 아니라 nexacro.Application.mainframe.childframe.form 까지
+    접근 가능해야 Nexacro 내부 API로 제어 가능.
+    """
+    for i in range(30):
+        await asyncio.sleep(1)
+        try:
+            ready = await page.evaluate("""() => {
+                try {
+                    var n = window.nexacro;
+                    if (!n || !n.Application) return false;
+                    var mf = n.Application.mainframe;
+                    if (!mf || !mf.childframe) return false;
+                    var form = mf.childframe.form;
+                    if (!form || !form.components) return false;
+                    return !!form.components.div_body;
+                } catch(e) {
+                    return false;
+                }
+            }""")
+            if ready:
+                log(f"  Nexacro 프레임워크 준비 완료 ({i+1}초)")
+                return True
+        except Exception:
+            pass
+    log("  ERROR: Nexacro 프레임워크 로딩 시간 초과")
+    return False
+
+
+async def nexacro_set_radio(page, index):
+    """Nexacro 라디오 컴포넌트를 내부 API로 선택 (dispatchEvent 대신)
+
+    set_index()로 내부 상태 + 시각 변경 후
+    on_fire_onitemchanged()로 그리드 데이터 리로드 트리거.
+
+    Args:
+        page: 웹EDI 탭
+        index: 선택할 항목 인덱스 (0=전체, 1=신규, 2=열람)
+
+    Returns:
+        dict: {ok, value, index, text}
+    """
+    return await page.evaluate("""(targetIdx) => {
+        try {
+            var n = window.nexacro;
+            var app = n.Application;
+            var mf = app.mainframe;
+            var cf = mf.childframe;
+            var form = cf.form;
+            var divBody = form.components.div_body;
+            var radio = divBody.components.rdo_prog_stat;
+
+            var oldIndex = radio.index;
+            var oldValue = radio.value;
+
+            radio.set_index(targetIdx);
+
+            var newValue = radio.value;
+            var newIndex = radio.index;
+            var newText = radio.text;
+
+            radio.on_fire_onitemchanged(oldValue, newValue, oldIndex, newIndex);
+
+            return {ok: true, value: newValue, index: newIndex, text: newText};
+        } catch(e) {
+            return {ok: false, error: e.message};
+        }
+    }""", index)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Nexacro 이벤트 헬퍼
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -526,7 +602,7 @@ async def open_received_docs(page, context):
 async def select_doc_type(edi_page, doc_name="가입자 고지(산출) 내역서"):
     """웹EDI에서 '전체' 라디오 선택 + 서식명 콤보박스 선택
 
-    작동 확인된 순서: 라디오 먼저 → dropbutton 클릭 → combolist 생성 대기 → 항목 선택
+    순서: Nexacro 준비 대기 → 라디오(Nexacro API) → dropbutton → combolist → 항목 선택
 
     Args:
         edi_page: 웹EDI 탭 (Nexacro)
@@ -535,30 +611,18 @@ async def select_doc_type(edi_page, doc_name="가입자 고지(산출) 내역서
     Returns:
         bool: 선택 성공 여부
     """
-    # '전체' 라디오 선택
+    # Nexacro 프레임워크 준비 대기
+    if not await wait_for_nexacro_ready(edi_page):
+        return False
+
+    # '전체' 라디오 선택 — Nexacro 내부 API 사용
     log("  '전체' 라디오 선택...")
-    result = await edi_page.evaluate('''() => {
-        var container = document.getElementById('mainframe_childframe_form_div_body_rdo_prog_stat');
-        if (!container) return {ok: false, msg: 'radio container not found'};
-        var items = container.querySelectorAll('div[id$="_item"]');
-        for (var item of items) {
-            var textEl = item.querySelector('[id*=TextBoxElement]');
-            if (textEl && textEl.textContent.trim() === '전체') {
-                var rect = item.getBoundingClientRect();
-                var cx = rect.x + rect.width / 2;
-                var cy = rect.y + rect.height / 2;
-                var base = {bubbles: true, cancelable: true, view: window, screenX: cx, screenY: cy, clientX: cx, clientY: cy, button: 0, buttons: 1, relatedTarget: null};
-                item.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
-                item.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
-                item.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
-                return {ok: true};
-            }
-        }
-        return {ok: false, msg: '전체 item not found'};
-    }''')
+    result = await nexacro_set_radio(edi_page, 0)
     if not result.get("ok"):
-        log(f"  WARN: 라디오 선택 실패 - {result}")
-    await asyncio.sleep(1)
+        log(f"  ERROR: 라디오 선택 실패 - {result}")
+        return False
+    log(f"  라디오: value=\"{result.get('value')}\" index={result.get('index')} text=\"{result.get('text')}\"")
+    await asyncio.sleep(2)
 
     # 서식명 콤보 — combo 요소 대기
     log(f"  서식명 선택: {doc_name}")
