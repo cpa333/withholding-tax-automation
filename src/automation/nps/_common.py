@@ -40,7 +40,8 @@ TAB_BTN_PREFIX = (
     ".form.divWork.form.tab00.tabbutton_"
 )
 
-# 출력 버튼 / 엑셀저장 버튼 / 출력 옵션 모달 (UHJE0002P1) / 엑셀 모달 (UHJE0002P3)
+# 출력 버튼 / 엑셀저장 버튼 / 통합저장 버튼
+# 모달 ID: 출력=UHJE0002P1, 통합저장=UHJE0002P2, 엑셀저장=UHJE0002P3
 BTN_OUTPUT = (
     "mainframe.VFrameSet.FrameSdi.form.divWork_M08010200"
     ".form.divWork.form.div00.form.btn02"
@@ -49,6 +50,10 @@ BTN_EXCEL_SAVE = (
     "mainframe.VFrameSet.FrameSdi.form.divWork_M08010200"
     ".form.divWork.form.div01.form.btn01"
 )
+BTN_INTEGRATED_SAVE = (
+    "mainframe.VFrameSet.FrameSdi.form.divWork_M08010200"
+    ".form.divWork.form.div01.form.btn02"
+)
 MODAL_PREFIX = "mainframe.VFrameSet.FrameSdi.UHJE0002P1.form.divPopBg.form.divPopWork.form"
 RADIO_FULL_SSN = f"{MODAL_PREFIX}.div00_01.form.div01.form.rdo06.radioitem1"
 BTN_MODAL_CONFIRM = f"{MODAL_PREFIX}.div00_00.form.btn01"
@@ -56,6 +61,9 @@ BTN_MODAL_CANCEL = f"{MODAL_PREFIX}.div00_00.form.btn00"
 EXCEL_MODAL_PREFIX = "mainframe.VFrameSet.FrameSdi.UHJE0002P3.form.divPopBg.form.divPopWork.form"
 EXCEL_RADIO_FULL_SSN = f"{EXCEL_MODAL_PREFIX}.div00_01.form.div01.form.rdo06.radioitem1"
 EXCEL_BTN_CONFIRM = f"{EXCEL_MODAL_PREFIX}.div00_00.form.btn01"
+INTEGRATED_MODAL_PREFIX = "mainframe.VFrameSet.FrameSdi.UHJE0002P2.form.divPopBg.form.divPopWork.form"
+INTEGRATED_RADIO_FULL_SSN = f"{INTEGRATED_MODAL_PREFIX}.div00_01.form.div01.form.rdo06.radioitem1"
+INTEGRATED_BTN_CONFIRM = f"{INTEGRATED_MODAL_PREFIX}.div00_00.form.btn01"
 
 
 def log(msg):
@@ -530,6 +538,70 @@ async def save_excel(page, context, save_dir, filename):
     return None
 
 
+async def save_integrated(page, context, save_dir, filename):
+    """통합저장 버튼 클릭 → 주민번호 전체표출 → 확인 → 파일 다운로드
+
+    통합저장은 엑셀저장과 동일한 플로우지만 UHJE0002P2 모달 사용.
+    국고지원내역 탭에서 사용.
+
+    Args:
+        page: Playwright page (NPS EDI main page)
+        context: Playwright browser context
+        save_dir: 저장할 디렉토리 경로
+        filename: 저장할 파일명 (확장자 제외)
+
+    Returns:
+        str or None: 저장된 파일 경로, 실패 시 None
+    """
+    log("통합저장 버튼 클릭...")
+
+    os.makedirs(save_dir, exist_ok=True)
+    cdp = await context.new_cdp_session(page)
+    await cdp.send("Browser.setDownloadBehavior", {
+        "behavior": "allowAndName",
+        "downloadPath": save_dir,
+        "eventsEnabled": True,
+    })
+
+    before = set(os.listdir(save_dir))
+
+    result = await nexacro_click_button(page, BTN_INTEGRATED_SAVE)
+    if not result.get("ok"):
+        log(f"  ERROR: 통합저장 버튼 클릭 실패 - {result}")
+        return None
+    await asyncio.sleep(2)
+
+    log("주민번호 전체표출 선택 (통합 모달)...")
+    await nexacro_click_button(page, INTEGRATED_RADIO_FULL_SSN)
+    await asyncio.sleep(1)
+
+    log("확인 클릭...")
+    result = await nexacro_click_button(page, INTEGRATED_BTN_CONFIRM)
+    if not result.get("ok"):
+        log(f"  ERROR: 확인 클릭 실패 - {result}")
+        return None
+
+    for _ in range(30):
+        await asyncio.sleep(1)
+        after = set(os.listdir(save_dir))
+        new_files = after - before
+        crdownload = [f for f in new_files if f.endswith(".crdownload")]
+        done = [f for f in new_files if not f.endswith(".crdownload") and not f.endswith(".pdf")]
+        if not crdownload and done:
+            downloaded = os.path.join(save_dir, done[0])
+            ext = os.path.splitext(done[0])[1] or ".xlsx"
+            final_path = os.path.join(save_dir, f"{filename}{ext}")
+            if downloaded != final_path:
+                if os.path.exists(final_path):
+                    os.remove(final_path)
+                os.rename(downloaded, final_path)
+            log(f"  통합저장 완료: {final_path}")
+            return final_path
+
+    log("  ERROR: 통합저장 다운로드 시간 초과")
+    return None
+
+
 async def process_tab_download(page, context, save_dir, tab_index, tab_label, grid_suffix):
     """결정내역 상세 탭에서 PDF + Excel 순차 다운로드
 
@@ -571,8 +643,11 @@ async def process_tab_download(page, context, save_dir, tab_index, tab_label, gr
     if await output_with_full_ssn(page):
         pdf_path = await download_pdf_from_preview(context, save_dir, base)
 
-    # Excel
-    excel_path = await save_excel(page, context, save_dir, f"{base}_엑셀")
+    # 통합저장/엑셀저장 (국고지원내역은 통합저장 사용)
+    if tab_index == TAB_GOVT:
+        excel_path = await save_integrated(page, context, save_dir, f"{base}_엑셀")
+    else:
+        excel_path = await save_excel(page, context, save_dir, f"{base}_엑셀")
 
     return {"pdf": pdf_path, "excel": excel_path, "skipped": False}
 
