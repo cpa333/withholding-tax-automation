@@ -133,6 +133,7 @@ async def main():
 
 async def run_full_auto(page, context):
     """전체 자동 모드: 수임처를 하나씩 선택하며 전체 워크플로우 수행"""
+    from src.automation.nps._common import select_workplace as _select_wp
     completed = 0
 
     while True:
@@ -158,51 +159,64 @@ async def run_full_auto(page, context):
             log(f"    {wp['index'] + 1}. [{wp['number']}] {wp['name']}")
 
         log(f"\n  완료: {completed}개 | 목록에 없으면 이름 직접 입력 가능")
-        choice = input("\n  수임처 번호 또는 이름 (0=종료): ").strip()
-        if not choice or choice == "0":
-            log(f"\n  총 {completed}개 수임처 자동화 완료. 종료.")
-            return
 
-        # 번호로 선택 시도
+        # ── 수임처 선택 루프 (잘못 입력 시 여기서 반복) ──
         wp_name = None
-        try:
-            idx = int(choice) - 1
-            if 0 <= idx < len(workplaces):
-                wp_name = workplaces[idx]["name"]
-        except ValueError:
-            pass
+        while True:
+            choice = input("\n  수임처 번호 또는 이름 (0=종료): ").strip()
+            if not choice or choice == "0":
+                log(f"\n  총 {completed}개 수임처 자동화 완료. 종료.")
+                return
 
-        # 이름 일부 매칭 (표시된 목록에서)
-        if not wp_name:
-            matches = [wp for wp in workplaces if choice in wp["name"]]
-            if len(matches) == 1:
-                wp_name = matches[0]["name"]
-            elif len(matches) > 1:
-                log(f"\n  '{choice}'와(과) 일치하는 사업장 {len(matches)}개:")
-                for j, m in enumerate(matches):
-                    log(f"    {j + 1}. [{m['number']}] {m['name']}")
-                sub = input("  선택 (0=취소): ").strip()
-                try:
-                    sub_idx = int(sub) - 1
-                    if 0 <= sub_idx < len(matches):
-                        wp_name = matches[sub_idx]["name"]
-                except ValueError:
-                    pass
-                if not wp_name:
-                    log("  취소.")
-                    continue
+            wp_name = None
 
-        # 표시된 목록에 없으면 직접 이름으로 검색 시도
-        if not wp_name:
-            wp_name = choice
-            log(f"  '{choice}' — 표시 목록에 없음, 이름으로 검색합니다.")
+            # 번호로 선택 시도
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(workplaces):
+                    wp_name = workplaces[idx]["name"]
+            except ValueError:
+                pass
 
-        # 사업장 선택 시도 (모달 내 검색 포함)
-        from src.automation.nps._common import select_workplace as _select_wp
-        ok = await _select_wp(page, wp_name)
-        if not ok:
+            # 이름 일부 매칭 (표시된 목록에서)
+            if not wp_name:
+                matches = [wp for wp in workplaces if choice in wp["name"]]
+                if len(matches) == 1:
+                    wp_name = matches[0]["name"]
+                elif len(matches) > 1:
+                    log(f"\n  '{choice}'와(과) 일치하는 사업장 {len(matches)}개:")
+                    for j, m in enumerate(matches):
+                        log(f"    {j + 1}. [{m['number']}] {m['name']}")
+                    sub = input("  선택 (0=취소): ").strip()
+                    try:
+                        sub_idx = int(sub) - 1
+                        if 0 <= sub_idx < len(matches):
+                            wp_name = matches[sub_idx]["name"]
+                    except ValueError:
+                        pass
+                    if not wp_name:
+                        continue
+
+            # 표시된 목록에 없으면 직접 이름으로 검색 시도
+            if not wp_name:
+                wp_name = choice
+                log(f"  '{choice}' — 표시 목록에 없음, 이름으로 검색합니다.")
+
+            # 사업장 선택 시도 (모달 내 검색 포함)
+            ok = await _select_wp(page, wp_name)
+            if ok:
+                break  # 선택 성공 → 워크플로우 진행
+
             log(f"  '{wp_name}' 사업장을 찾을 수 없습니다. 다시 입력해주세요.")
-            continue
+            # 모달을 다시 열고 목록 새로고침
+            await switch_workplace_open(page)
+            await asyncio.sleep(2)
+            workplaces = await list_workplaces(page)
+            if workplaces:
+                log(f"\n  사업장 목록 ({len(workplaces)}개):")
+                for wp in workplaces:
+                    log(f"    {wp['index'] + 1}. [{wp['number']}] {wp['name']}")
+        # ── 수임처 선택 완료 ──
 
         log(f"\n{'='*55}")
         log(f"  [{completed + 1}] {wp_name}")
