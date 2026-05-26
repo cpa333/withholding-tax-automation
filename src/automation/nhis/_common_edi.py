@@ -113,12 +113,26 @@ async def close_popups(context):
 async def open_firm_selector(page, context):
     """수임사업장선택 버튼 클릭 → 팝업 탭 반환
 
-    메인 페이지의 수임사업장선택 이미지 버튼(img[src*=we_btn_suim]) 클릭.
-    새 탭으로 사업장 목록 팝업이 열림.
+    수임처가 선택된 상태면 먼저 '로그인 사업장 돌아가기'로 복귀 후
+    수임사업장선택 버튼 클릭.
 
     Returns:
         Page or None: 사업장 선택 팝업 탭
     """
+    # 수임처 선택 상태면 먼저 로그인 사업장으로 복귀
+    has_firm = await page.evaluate("""() => {
+        var text = document.body.innerText;
+        return text.includes('수임 사업자명');
+    }""")
+    if has_firm:
+        log("  로그인 사업장으로 복귀...")
+        await page.evaluate("""() => {
+            var img = document.querySelector('img[src*="we_btn_relogin"]');
+            if (img) img.click();
+        }""")
+        await asyncio.sleep(3)
+        await close_popups(context)
+
     log("수임사업장선택 버튼 클릭...")
     clicked = await page.evaluate("""() => {
         const img = document.querySelector('img[src*="we_btn_suim"]');
@@ -521,9 +535,29 @@ async def select_doc_type(edi_page, doc_name="가입자 고지(산출) 내역서
     """
     log(f"  서식명 선택: {doc_name}")
 
+    # 웹EDI Nexacro 앱 로딩 대기
+    for _ in range(10):
+        has_grid = await edi_page.evaluate("""() => {
+            return !!document.getElementById('mainframe_childframe_form_div_body_grid_list');
+        }""")
+        if has_grid:
+            break
+        await asyncio.sleep(1)
+
     # dropbutton 클릭하여 콤보 열기
     result = await nexacro_click(edi_page, f"{CBO_DOCID}_dropbutton")
-    await asyncio.sleep(1)
+    if not result.get("ok"):
+        log(f"  ERROR: dropbutton 클릭 실패 - {result}")
+        return False
+
+    # combolist DOM 대기
+    for _ in range(10):
+        has_list = await edi_page.evaluate("""(comboId) => {
+            return !!document.getElementById(comboId + '_combolist');
+        }""", CBO_DOCID)
+        if has_list:
+            break
+        await asyncio.sleep(0.5)
 
     # 항목 선택
     result = await nexacro_select_combo(edi_page, CBO_DOCID, doc_name)
