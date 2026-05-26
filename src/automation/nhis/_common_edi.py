@@ -524,7 +524,9 @@ async def open_received_docs(page, context):
 
 
 async def select_doc_type(edi_page, doc_name="가입자 고지(산출) 내역서"):
-    """웹EDI에서 서식명 콤보박스 선택
+    """웹EDI에서 '전체' 라디오 선택 + 서식명 콤보박스 선택
+
+    작동 확인된 순서: 라디오 먼저 → dropbutton 클릭 → combolist 생성 대기 → 항목 선택
 
     Args:
         edi_page: 웹EDI 탭 (Nexacro)
@@ -533,28 +535,59 @@ async def select_doc_type(edi_page, doc_name="가입자 고지(산출) 내역서
     Returns:
         bool: 선택 성공 여부
     """
-    log(f"  서식명 선택: {doc_name}")
+    # '전체' 라디오 선택
+    log("  '전체' 라디오 선택...")
+    result = await edi_page.evaluate('''() => {
+        var container = document.getElementById('mainframe_childframe_form_div_body_rdo_prog_stat');
+        if (!container) return {ok: false, msg: 'radio container not found'};
+        var items = container.querySelectorAll('div[id$="_item"]');
+        for (var item of items) {
+            var textEl = item.querySelector('[id*=TextBoxElement]');
+            if (textEl && textEl.textContent.trim() === '전체') {
+                var rect = item.getBoundingClientRect();
+                var cx = rect.x + rect.width / 2;
+                var cy = rect.y + rect.height / 2;
+                var base = {bubbles: true, cancelable: true, view: window, screenX: cx, screenY: cy, clientX: cx, clientY: cy, button: 0, buttons: 1, relatedTarget: null};
+                item.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
+                item.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
+                item.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
+                return {ok: true};
+            }
+        }
+        return {ok: false, msg: '전체 item not found'};
+    }''')
+    if not result.get("ok"):
+        log(f"  WARN: 라디오 선택 실패 - {result}")
+    await asyncio.sleep(1)
 
-    # 웹EDI Nexacro 앱 로딩 대기 (combo 요소만 있으면 준비됨)
+    # 서식명 콤보 — combo 요소 대기
+    log(f"  서식명 선택: {doc_name}")
     for _ in range(10):
-        has_combo = await edi_page.evaluate("""() => {
-            return !!document.getElementById('mainframe_childframe_form_div_body_cbo_docid');
-        }""")
+        has_combo = await edi_page.evaluate('() => !!document.getElementById("mainframe_childframe_form_div_body_cbo_docid")')
         if has_combo:
             break
         await asyncio.sleep(1)
 
-    # dropbutton 클릭하여 콤보 열기 → combolist 동적 생성
-    result = await nexacro_click(edi_page, f"{CBO_DOCID}_dropbutton")
+    # dropbutton 클릭 → combolist 동적 생성
+    result = await edi_page.evaluate('''() => {
+        var btn = document.getElementById('mainframe_childframe_form_div_body_cbo_docid_dropbutton');
+        if (!btn) return {ok: false, msg: 'dropbutton not found'};
+        var rect = btn.getBoundingClientRect();
+        var cx = rect.x + rect.width / 2;
+        var cy = rect.y + rect.height / 2;
+        var base = {bubbles: true, cancelable: true, view: window, screenX: cx, screenY: cy, clientX: cx, clientY: cy, button: 0, buttons: 1, relatedTarget: null};
+        btn.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
+        btn.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
+        btn.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
+        return {ok: true};
+    }''')
     if not result.get("ok"):
         log(f"  ERROR: dropbutton 클릭 실패 - {result}")
         return False
 
     # combolist DOM 생성 대기
     for _ in range(10):
-        has_list = await edi_page.evaluate("""(comboId) => {
-            return !!document.getElementById(comboId + '_combolist');
-        }""", CBO_DOCID)
+        has_list = await edi_page.evaluate('() => !!document.getElementById("mainframe_childframe_form_div_body_cbo_docid_combolist")')
         if has_list:
             break
         await asyncio.sleep(0.5)
@@ -562,15 +595,33 @@ async def select_doc_type(edi_page, doc_name="가입자 고지(산출) 내역서
         log("  ERROR: combolist가 생성되지 않았습니다.")
         return False
 
-    # 항목 선택
-    result = await nexacro_select_combo(edi_page, CBO_DOCID, doc_name)
+    # combolist에서 항목 선택
+    result = await edi_page.evaluate("""(docName) => {
+        var list = document.getElementById('mainframe_childframe_form_div_body_cbo_docid_combolist');
+        if (!list) return {ok: false, msg: 'combolist not found'};
+        var items = list.querySelectorAll('div[id$="_item"]');
+        for (var item of items) {
+            var textEl = item.querySelector('[id*=TextBoxElement]');
+            if (textEl && textEl.textContent.trim() === docName) {
+                var rect = item.getBoundingClientRect();
+                var cx = rect.x + rect.width / 2;
+                var cy = rect.y + rect.height / 2;
+                var base = {bubbles: true, cancelable: true, view: window, screenX: cx, screenY: cy, clientX: cx, clientY: cy, button: 0, buttons: 1, relatedTarget: null};
+                item.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
+                item.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
+                item.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
+                return {ok: true};
+            }
+        }
+        return {ok: false, msg: 'item not found: ' + docName};
+    }""", doc_name)
     if not result.get("ok"):
         log(f"  ERROR: 서식명 선택 실패 - {result}")
         return False
 
     await asyncio.sleep(1)
 
-    # 확인: input 값 검증
+    # 확인
     value = await edi_page.evaluate("""() => {
         var input = document.getElementById('mainframe_childframe_form_div_body_cbo_docid_comboedit_input');
         return input ? input.value : '';
@@ -593,15 +644,24 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name):
     Returns:
         str or None: 저장된 PDF 경로
     """
-    # '전체' 라디오 선택
-    log("  '전체' 라디오 선택...")
-    radio_id = "mainframe_childframe_form_div_body_rdo_prog_stat"
-    await nexacro_click_radio(edi_page, radio_id, "전체")
-    await asyncio.sleep(1)
-
     # 첫 행 더블클릭
     log("  첫 번째 문서 더블클릭...")
-    result = await nexacro_dblclick_cell(edi_page, GRID_RECEIVED, row=0, col=3)
+    result = await edi_page.evaluate('''() => {
+        var cell = document.getElementById('mainframe_childframe_form_div_body_grid_list_body_gridrow_0_cell_0_3');
+        if (!cell) return {ok: false, msg: 'cell not found'};
+        var rect = cell.getBoundingClientRect();
+        var cx = rect.x + rect.width / 2;
+        var cy = rect.y + rect.height / 2;
+        var base = {bubbles: true, cancelable: true, view: window, screenX: cx, screenY: cy, clientX: cx, clientY: cy, button: 0, buttons: 1, relatedTarget: null};
+        cell.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
+        cell.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
+        cell.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
+        cell.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 2}));
+        cell.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 2}));
+        cell.dispatchEvent(new MouseEvent('click', {...base, detail: 2}));
+        cell.dispatchEvent(new MouseEvent('dblclick', {...base, detail: 2}));
+        return {ok: true, text: cell.textContent.trim().substring(0, 60)};
+    }''')
     if not result.get("ok"):
         log(f"  ERROR: 행 더블클릭 실패 - {result}")
         return None
@@ -610,7 +670,18 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name):
 
     # 인쇄 버튼 클릭
     log("  인쇄 버튼 클릭...")
-    result = await nexacro_click(edi_page, BTN_PRINT)
+    result = await edi_page.evaluate('''() => {
+        var btn = document.getElementById('mainframe_childframe_form_div_top_img_print');
+        if (!btn) return {ok: false, msg: 'print btn not found'};
+        var rect = btn.getBoundingClientRect();
+        var cx = rect.x + rect.width / 2;
+        var cy = rect.y + rect.height / 2;
+        var base = {bubbles: true, cancelable: true, view: window, screenX: cx, screenY: cy, clientX: cx, clientY: cy, button: 0, buttons: 1, relatedTarget: null};
+        btn.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
+        btn.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
+        btn.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
+        return {ok: true};
+    }''')
     if not result.get("ok"):
         log(f"  ERROR: 인쇄 버튼 클릭 실패 - {result}")
         return None
@@ -662,7 +733,6 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name):
         done = [f for f in new_files if not f.endswith(".crdownload")]
         if not crdownload and done:
             downloaded = os.path.join(save_dir, sorted(done)[-1])
-            # PDF면 의미 있는 파일명으로 변경
             with open(downloaded, "rb") as fh:
                 header = fh.read(5)
             if header == b"%PDF-":
@@ -689,7 +759,7 @@ async def run_single_firm_workflow(page, context, firm_name):
 
     플로우:
     1. 받은문서 → 웹EDI 탭 열기
-    2. 서식명 선택 (가입자 고지(산출) 내역서)
+    2. 전체 라디오 + 서식명 선택
     3. 첫 문서 더블클릭 → 인쇄 → PDF 다운로드
     4. 미리보기 + 웹EDI 탭 닫기
     5. 로그인 사업장 돌아가기
@@ -711,8 +781,8 @@ async def run_single_firm_workflow(page, context, firm_name):
     if not edi_page:
         return False
 
-    # Step 2: 서식명 선택
-    log("  [2/5] 서식명 선택...")
+    # Step 2: 전체 라디오 + 서식명 선택
+    log("  [2/5] 전체 라디오 + 서식명 선택...")
     ok = await select_doc_type(edi_page)
     if not ok:
         await _close_edi_tabs(context)
