@@ -23,8 +23,8 @@ if sys.platform == "win32":
     import pywinauto.actionlogger
     pywinauto.actionlogger.ActionLogger.logger.handlers = []
 
-PRINT_DIALOG_TITLE_RE = "Duzon.*PrintDialog"
-PRINT_DIALOG_CLASS_RE = "WindowsForms10\.Window.*"
+PRINT_DIALOG_TITLE_RE = r"Duzon.*PrintDialog"
+PRINT_DIALOG_CLASS_RE = r"WindowsForms10\.Window.*"
 SAVE_DIALOG_CLASS = "#32770"
 DEFAULT_PRINT_FORMAT = "급여명세(사원당 한장)"
 
