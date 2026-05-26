@@ -27,11 +27,16 @@
 - **주요 도전 과제:** 보안 모듈 설치 확인 및 우회/대응.
 
 ### 4.2. 국민연금 EDI (https://edi.nps.or.kr)
-- **특징:** EDI 시스템 특성상 레거시 UI나 특정 보안 플러그인 의존도가 높을 수 있음.
+- **프레임워크:** Nexacro (엔터프라이즈 웹 UI 프레임워크)
+- **인증:** 공동인증서 로그인 (Human-in-the-loop)
 - **접근법:**
-    - 기본 제어는 Playwright 사용.
-    - 보안 플러그인으로 인해 DOM 접근이 불가능한 영역은 PyAutoGUI의 이미지 인식 및 키보드/마우스 이벤트를 활용.
-- **주요 도전 과제:** 세션 유지 및 복잡한 인증 절차 자동화.
+    - CDP로 Chrome에 연결 후 Nexacro 그리드 제어
+    - Nexacro는 일반 DOM click을 무시하므로 `dispatchEvent(new MouseEvent('dblclick'))` 로 직접 이벤트 발생 필요
+    - 그리드 셀 ID 패턴: `mainframe.VFrameSet.FrameSdi.ChangeBusi...gridrow_{row}.cell_{row}_{col}`
+    - 행 인덱스 기반보다 **텍스트 매칭**으로 행을 찾는 것이 정확
+- **사업장 선택:** 업무대행서비스 → 위탁사업장 목록 → 더블클릭으로 선택
+- **모듈:** `src/automation/nps/` (`_common.py`, `nps_auto_cdp.py`)
+- **주요 도전 과제:** Nexacro 프레임워크의 커스텀 이벤트 시스템 대응
 
 ## 5. 단계별 구현 계획
 1. **환경 구축:** Playwright 및 PyAutoGUI 설치 및 브라우저 컨텍스트 설정.
