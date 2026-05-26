@@ -4,6 +4,7 @@ import asyncio
 import os
 import subprocess
 import json
+import time
 import urllib.request
 import glob
 
@@ -186,6 +187,7 @@ def launch_chrome(url="https://www.wehago.com/", *, force=False):
 
     # 기존 Chrome 종료
     kill_chrome()
+    time.sleep(2)  # Chrome이 완전히 종료되고 프로필 잠금이 해제될 때까지 대기
 
     # Chrome 실행
     subprocess.Popen(
@@ -203,7 +205,6 @@ def launch_chrome(url="https://www.wehago.com/", *, force=False):
 
     # CDP 활성 대기
     for _ in range(20):
-        import time
         time.sleep(1)
         if check_cdp_available():
             result["success"] = True
@@ -219,9 +220,19 @@ async def launch_chrome_async(url="https://www.wehago.com/", *, force=False):
 
 
 async def connect_page(playwright):
-    """CDP로 Chrome에 연결하고 첫 번째 페이지 반환"""
+    """CDP로 Chrome에 연결하고 WEHAGO 탭 우선 반환"""
     browser = await playwright.chromium.connect_over_cdp(CDP_URL)
     context = browser.contexts[0]
+
+    # WEHAGO가 열려있는 탭 우선 선택
+    for p in context.pages:
+        try:
+            if "wehago.com" in p.url:
+                return browser, context, p
+        except Exception:
+            continue
+
+    # 없으면 첫 번째 탭 또는 새 탭
     page = context.pages[0] if context.pages else await context.new_page()
     return browser, context, page
 

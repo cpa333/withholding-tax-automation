@@ -58,14 +58,16 @@ python src/automation/wehago/run_swer0101.py
 - `dismiss_dialogs()`: 초기 팝업 정리
 
 ### Phase 2: 수임처 선택
-- 사용자 입력으로 수임처 이름 1회 입력
-- `goto_salary_page()`: SmartA 급여 페이지 이동
+- `select_and_goto_company()`: WEHAGO 메인 이동 → 수임처 검색 → SmartA 급여 페이지 이동
+- 키워드 부분 매칭, 다중 결과 시 번호 선택
 
 ### Phase 3: 메뉴 루프
 - 1: SWSA0101 (급여자료입력) — dry_run 선택 가능
 - 2: SWTA0101 (원천징수이행상황신고서) — 자동 마감/마감해제
 - 3: SWER0101 (원천징수전자신고) — 비밀번호 + NTS 폴더 입력
+- 4: 수임처 변경 — 재시작 없이 다른 수임처로 전환
 - 0: 종료
+- 메뉴 상단에 현재 수임처명 표시
 
 ---
 
@@ -361,8 +363,9 @@ python src/automation/wehago/run_swer0101.py
 | `_click_modal_text(page, text_fragment, action)` | 특정 텍스트가 포함된 모달에서 확인/취소 클릭 |
 | `goto_menu_page(page, menu_id)` | SmartA 내 URL 해시 교체로 메뉴 이동 (2단계 폴백) |
 | `click_menu(page, menu_id)` | SmartA 사이드 메뉴 클릭 (SPA 라우팅) |
-| `wait_for_login(page)` | WEHAGO 로그인 완료 대기 (최대 10분) |
+| `wait_for_login(page)` | WEHAGO 로그인 완료 대기 (최대 15분) |
 | `goto_salary_page(page, company_name)` | 수임처 SmartA 급여 페이지로 이동 |
+| `select_and_goto_company(page)` | 수임처 검색/선택 + 급여 페이지 이동 (main.py) |
 | `select_dropdown(page, dropdown_index, option_text)` | 커스텀 드롭다운에서 옵션 선택 |
 | `open_collect_menu(page)` | #collect 버튼 클릭하여 드롭다운 열기 |
 | `click_menu_item(page, item_text)` | sao_head_menu 드롭다운에서 항목 클릭 |
@@ -400,7 +403,16 @@ python src/automation/wehago/run_swer0101.py
 ### main.py 개선
 - CDP 재사용 시 wehago.com이 아니면 WEHAGO 페이지로 자동 이동
 - Chrome 새 실행 시 WEHAGO 로그인 페이지 자동 열기 (기존과 동일)
+- `bring_to_front()` 추가: Chrome 실행 후 WEHAGO 탭을 화면에 활성화
 - 수임처 검색: 일부 키워드 입력으로 부분 매칭, 다중 결과 시 번호 선택
+- 수임처 선택 로직을 `select_and_goto_company()` 함수로 추출 (재사용)
+- 메뉴 옵션 4: 수임처 변경 (재시작 없이 WEHAGO 메인 → 재검색 → 전환)
+- 메뉴 상단에 현재 수임처명 표시
+
+### Chrome 실행 안정성 개선
+- `kill_chrome()` 후 2초 대기 추가: Chrome이 완전히 종료되고 프로필 잠금이 해제될 때까지 대기
+- `connect_page()` 개선: 여러 탭 중 WEHAGO가 열려있는 탭을 우선 선택
+- `import time` 모듈 레벨로 이동 (루프 내 인라인 import 제거)
 
 ### SWSA0101 엑셀 업로드 모달 처리
 - `_handle_code_link_modal()`: 사원코드연결 모달 → "변환" → "제외하고 변환됩니다" 확인
@@ -444,7 +456,7 @@ python src/automation/wehago/run_swer0101.py
 ## 다음 단계 (TODO)
 - 엑셀 변환 시 특정 셀 값 수정 로직 (수당/공제 항목 변경)
 - 근로소득원천징수영수증 발급
-- 다른 수임처 반복 처리 로직
+- ~~다른 수임처 반복 처리 로직~~ (완료: 메뉴 옵션 4로 수임처 변경 지원)
 - 재계산 → 완료 처리 자동화
 - Hometax 원천세 신고 자동화
 - PyInstaller 빌드 테스트 및 배포

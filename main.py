@@ -42,8 +42,11 @@ def print_header():
     print("=" * 55)
 
 
-def print_menu():
+def print_menu(company_name=None):
     print("\n" + "-" * 55)
+    if company_name:
+        print(f"  현재 수임처: {company_name}")
+        print()
     print("  1. 급여자료입력 (SWSA0101)")
     print("     - 엑셀 다운로드/변환/업로드, PDF 발급")
     print()
@@ -53,8 +56,65 @@ def print_menu():
     print("  3. 원천징수전자신고 (SWER0101)")
     print("     - 전자신고 파일 제작, NTS 저장")
     print()
+    print("  4. 수임처 변경")
+    print("     - 다른 수임처로 전환 (재시작 불필요)")
+    print()
     print("  0. 종료")
     print("-" * 55)
+
+
+async def select_and_goto_company(page):
+    """수임처 검색/선택 후 급여 페이지로 이동. 선택된 수임처명 반환."""
+    # WEHAGO 메인으로 이동
+    log("\n  WEHAGO 메인 페이지로 이동...")
+    await page.goto(WEHAGO_URL + "#/main", wait_until="domcontentloaded", timeout=30000)
+    await asyncio.sleep(3)
+    await dismiss_dialogs(page)
+
+    selected_company = None
+    while not selected_company:
+        log("\n========================================")
+        log("  수임처 이름(또는 일부)을 입력하세요")
+        log("========================================")
+        keyword = input("  검색: ").strip()
+        if not keyword:
+            continue
+
+        matches = await search_companies(page, keyword)
+        if not matches:
+            log(f"  '{keyword}'와 일치하는 수임처가 없습니다. 다시 입력해주세요.")
+            continue
+
+        if len(matches) == 1:
+            log(f"  1개 수임처 발견: {matches[0]}")
+            confirm = input(f"  '{matches[0]}'로 진행할까요? (Y/n): ").strip().lower()
+            if confirm in ("", "y", "yes"):
+                selected_company = matches[0]
+            else:
+                continue
+        else:
+            log(f"  {len(matches)}개 수임처 발견:")
+            for i, name in enumerate(matches, 1):
+                log(f"    {i}. {name}")
+            choice = input("  번호 선택 (0=재검색): ").strip()
+            try:
+                idx = int(choice)
+                if 1 <= idx <= len(matches):
+                    selected_company = matches[idx - 1]
+                elif idx == 0:
+                    continue
+                else:
+                    log("  잘못된 번호입니다.")
+            except ValueError:
+                log("  번호를 입력해주세요.")
+
+    log(f"  '{selected_company}' 급여 페이지로 이동 중...")
+    if not await goto_salary_page(page, selected_company):
+        log("수임처 급여 페이지 이동 실패")
+        return None
+    await dismiss_dialogs(page)
+    log("  이동 완료!\n")
+    return selected_company
 
 
 async def main():
@@ -81,6 +141,7 @@ async def main():
         # WEHAGO 메인 페이지로 이동 (항상 이동하여 로그인 상태 확인)
         log("  WEHAGO 메인 페이지로 이동...")
         await page.goto(WEHAGO_URL + "#/main", wait_until="domcontentloaded", timeout=30000)
+        await page.bring_to_front()
 
         if not await wait_for_login(page):
             log("로그인 실패")
@@ -88,59 +149,16 @@ async def main():
         await dismiss_dialogs(page)
 
         # ═══ Phase 2: 수임처 선택 ═══
-        selected_company = None
-        while not selected_company:
-            log("\n========================================")
-            log("  수임처 이름(또는 일부)을 입력하세요")
-            log("========================================")
-            keyword = input("  검색: ").strip()
-            if not keyword:
-                continue
-
-            matches = await search_companies(page, keyword)
-            if not matches:
-                log(f"  '{keyword}'와 일치하는 수임처가 없습니다. 다시 입력해주세요.")
-                continue
-
-            if len(matches) == 1:
-                log(f"  1개 수임처 발견: {matches[0]}")
-                confirm = input(f"  '{matches[0]}'로 진행할까요? (Y/n): ").strip().lower()
-                if confirm in ("", "y", "yes"):
-                    selected_company = matches[0]
-                else:
-                    continue
-            else:
-                log(f"  {len(matches)}개 수임처 발견:")
-                for i, name in enumerate(matches, 1):
-                    log(f"    {i}. {name}")
-                choice = input("  번호 선택 (0=재검색): ").strip()
-                try:
-                    idx = int(choice)
-                    if 1 <= idx <= len(matches):
-                        selected_company = matches[idx - 1]
-                    elif idx == 0:
-                        continue
-                    else:
-                        log("  잘못된 번호입니다.")
-                except ValueError:
-                    log("  번호를 입력해주세요.")
-
-        log(f"  '{selected_company}' 급여 페이지로 이동 중...")
-        try:
-            if not await goto_salary_page(page, selected_company):
-                log("수임처 급여 페이지 이동 실패")
-                return
-        except Exception as e:
-            log(f"ERROR: 수임처 이동 중 오류 - {e}")
+        selected_company = await select_and_goto_company(page)
+        if not selected_company:
+            log("수임처 선택 실패")
             return
-        await dismiss_dialogs(page)
-        log("  이동 완료!\n")
 
         os.makedirs(SAVE_DIR, exist_ok=True)
 
         # ═══ Phase 3: 메뉴 루프 ═══
         while True:
-            print_menu()
+            print_menu(selected_company)
             choice = input("선택 > ").strip()
 
             if choice == "1":
@@ -184,12 +202,25 @@ async def main():
                     traceback.print_exc()
                 log("\n완료. 다른 작업을 선택하거나 0으로 종료하세요.")
 
+            elif choice == "4":
+                log("\n수임처를 변경합니다...")
+                try:
+                    new_company = await select_and_goto_company(page)
+                    if new_company:
+                        selected_company = new_company
+                        log(f"  '{selected_company}'로 변경 완료")
+                    else:
+                        log("  수임처 변경 실패")
+                except Exception as e:
+                    log(f"ERROR: {e}")
+                    traceback.print_exc()
+
             elif choice == "0":
                 log("종료합니다.")
                 break
 
             else:
-                log("잘못된 선택입니다. 1, 2, 3, 0 중 하나를 입력하세요.")
+                log("잘못된 선택입니다. 1, 2, 3, 4, 0 중 하나를 입력하세요.")
 
 
 if __name__ == "__main__":
