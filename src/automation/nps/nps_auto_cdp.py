@@ -195,15 +195,21 @@ async def run_full_auto(page, context):
         # 표시된 목록에 없으면 직접 이름으로 검색 시도
         if not wp_name:
             wp_name = choice
-            log(f"  '{choice}' — 표시 목록에 없음, 이름으로 직접 검색합니다.")
+            log(f"  '{choice}' — 표시 목록에 없음, 이름으로 검색합니다.")
+
+        # 사업장 선택 시도 (모달 내 검색 포함)
+        from src.automation.nps._common import select_workplace as _select_wp
+        ok = await _select_wp(page, wp_name)
+        if not ok:
+            log(f"  '{wp_name}' 사업장을 찾을 수 없습니다. 다시 입력해주세요.")
+            continue
 
         log(f"\n{'='*55}")
         log(f"  [{completed + 1}] {wp_name}")
         log(f"{'='*55}")
 
         try:
-            is_first = (completed == 0)
-            await run_single_workplace(page, context, wp_name, is_first=is_first)
+            await run_single_workplace(page, context, wp_name, is_first=(completed == 0))
             completed += 1
             log(f"\n  {wp_name} 처리 완료. ({completed}개 완료)")
         except Exception as e:
@@ -222,28 +228,23 @@ async def switch_workplace_open(page):
 async def run_single_workplace(page, context, workplace_name, is_first=False):
     """단일 수임처에 대한 전체 워크플로우 수행
 
+    사업장은 이미 선택된 상태여야 함 (run_full_auto에서 사전 선택).
+
     플로우:
-    1. 사업장 선택/전환
-    2. 결정내역 이동
-    3. 2차 상세 진입
-    4. 가입자내역 → PDF + 엑셀
-    5. 소급분내역 → PDF + 엑셀 (빈 경우 스킵)
-    6. 국고지원내역 → PDF + 통합저장 (빈 경우 스킵)
+    1. 결정내역 이동
+    2. 2차 상세 진입
+    3. 가입자내역 → PDF + 엑셀
+    4. 소급분내역 → PDF + 엑셀 (빈 경우 스킵)
+    5. 국고지원내역 → PDF + 통합저장 (빈 경우 스킵)
     """
     from datetime import datetime
     now = datetime.now()
     folder_name = workplace_name.replace(" ", "_")
     save_dir = os.path.join(os.path.expanduser("~"), "Desktop", f"{folder_name}_국민연금")
 
-    # Step 1: 사업장 선택/전환 (모달은 이미 열려있음)
-    if is_first:
-        log("  첫 수임처 - 사업장 선택...")
-    else:
-        log(f"  사업장전환 → {workplace_name}...")
-    await select_workplace(page, workplace_name)
     await asyncio.sleep(3)
 
-    # Step 2: 결정내역 이동
+    # Step 1: 결정내역 이동
     log("  결정내역 메뉴 이동...")
     ok = await navigate_to_decision_details(page)
     if not ok:
