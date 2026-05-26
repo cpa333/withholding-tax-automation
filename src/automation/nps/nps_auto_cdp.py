@@ -132,33 +132,64 @@ async def main():
 
 
 async def run_full_auto(page, context):
-    """전체 자동 모드: 수임처 목록 입력 → 각 수임처별 전체 워크플로우 수행"""
-    log("\n수임처 목록을 입력하세요 (쉼표 구분).")
-    log("예: 주식회사 제이에스,주식회사 니즈")
-    raw = input("\n수임처 > ").strip()
-    if not raw:
-        log("수임처가 입력되지 않았습니다.")
-        return
+    """전체 자동 모드: 수임처를 하나씩 선택하며 전체 워크플로우 수행"""
+    completed = 0
 
-    workplaces = [w.strip() for w in raw.split(",") if w.strip()]
-    log(f"\n총 {len(workplaces)}개 수임처: {workplaces}")
-
-    for i, wp_name in enumerate(workplaces):
+    while True:
         log(f"\n{'='*55}")
-        log(f"[{i+1}/{len(workplaces)}] {wp_name}")
+        log("  사업장전환 모달 열기...")
+        await switch_workplace_open(page)
+        await asyncio.sleep(2)
+
+        workplaces = await list_workplaces(page)
+        if not workplaces:
+            log("  사업장 목록을 불러오지 못했습니다.")
+            return
+
+        log(f"\n  총 {len(workplaces)}개 사업장:")
+        for wp in workplaces:
+            mark = " ✓" if wp.get("done") else ""
+            log(f"    {wp['index'] + 1}. [{wp['number']}] {wp['name']}{mark}")
+
+        log(f"\n  완료: {completed}개")
+        choice = input("\n  수임처 번호 또는 이름 (0=종료): ").strip()
+        if not choice or choice == "0":
+            log(f"\n  총 {completed}개 수임처 자동화 완료. 종료.")
+            return
+
+        # 번호로 선택
+        wp_name = None
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(workplaces):
+                wp_name = workplaces[idx]["name"]
+        except ValueError:
+            wp_name = choice
+
+        if not wp_name:
+            log("  잘못된 입력입니다.")
+            continue
+
+        log(f"\n{'='*55}")
+        log(f"  [{completed + 1}] {wp_name}")
         log(f"{'='*55}")
 
         try:
-            await run_single_workplace(page, context, wp_name, is_first=(i == 0))
+            is_first = (completed == 0)
+            await run_single_workplace(page, context, wp_name, is_first=is_first)
+            completed += 1
+            log(f"\n  {wp_name} 처리 완료. ({completed}개 완료)")
         except Exception as e:
-            log(f"ERROR: {wp_name} 처리 실패 - {e}")
+            log(f"  ERROR: {wp_name} 처리 실패 - {e}")
             import traceback
             traceback.print_exc()
             continue
 
-        log(f"\n{wp_name} 처리 완료.")
 
-    log(f"\n전체 {len(workplaces)}개 수임처 자동화 완료.")
+async def switch_workplace_open(page):
+    """사업장전환 버튼 클릭하여 모달 열기 (선택은 하지 않음)"""
+    from src.automation.nps._common import nexacro_click_button, BTN_CHANGE_WORKPLACE
+    await nexacro_click_button(page, BTN_CHANGE_WORKPLACE)
 
 
 async def run_single_workplace(page, context, workplace_name, is_first=False):
@@ -177,15 +208,12 @@ async def run_single_workplace(page, context, workplace_name, is_first=False):
     folder_name = workplace_name.replace(" ", "_")
     save_dir = os.path.join(os.path.expanduser("~"), "Desktop", f"{folder_name}_국민연금")
 
-    # Step 1: 사업장 선택/전환
+    # Step 1: 사업장 선택/전환 (모달은 이미 열려있음)
     if is_first:
-        log("  첫 수임처 - 사업장 선택 모달에서 선택...")
-        await open_workplace_selector(page)
-        await asyncio.sleep(2)
-        await select_workplace(page, workplace_name)
+        log("  첫 수임처 - 사업장 선택...")
     else:
         log(f"  사업장전환 → {workplace_name}...")
-        await switch_workplace(page, workplace_name)
+    await select_workplace(page, workplace_name)
     await asyncio.sleep(3)
 
     # Step 2: 결정내역 이동
