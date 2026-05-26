@@ -299,6 +299,7 @@ pause
 ### 수임사업장 선택
 
 1. **선택 버튼:** `img[src*=we_btn_suim]` (alt="수임사업장선택")
+   - 수임처 선택 상태에서는 버튼이 안 보임 → `img[src*=we_btn_relogin]` 으로 먼저 로그인 사업장 복귀 필요
 2. **새 탭 팝업** 열림 (`retrieveFirmList.do?no=4`)
 3. **페이징:** `fn_next('pageNo')` JavaScript 호출 (10건/페이지)
 4. **전체 수집:** `list_all_firms()` — 21페이지 순회하여 202개 사업장 파싱
@@ -338,11 +339,14 @@ pause
 
 1. **받은문서 열기** — `pageLinkPopup1('201')` → 웹EDI 새 탭 (`webedi/xui/index.jsp`)
 2. **'전체' 라디오 선택** — Nexacro 라디오 `rdo_prog_stat` → "전체" 항목 mousedown/mouseup/click
-3. **서식명 선택** — Nexacro 콤보 `cbo_docid` dropbutton → combolist에서 "가입자 고지(산출) 내역서" 선택
+3. **서식명 선택** — Nexacro 콤보 `cbo_docid`
+   - `cbo_docid` 요소 로딩 대기
+   - `dropbutton` 클릭 → combolist **동적 생성** (클릭 전에는 DOM에 존재하지 않음)
+   - combolist 생성 대기 후 "가입자 고지(산출) 내역서" 항목 mousedown/mouseup/click
 4. **첫 행 더블클릭** — 그리드 `grid_list` row 0, col 3 (서식명) dblclick
 5. **인쇄 버튼** — `div_top_img_print` mousedown/mouseup/click
 6. **미리보기 탭** — `popup.html?formname=CO::WETZ_163.xfdl` 열림
-7. **PDF 저장** — reportview iframe 내 `button[title="PDF 저장"]` 클릭
+7. **PDF 저장** — reportview iframe 내 `button[title="PDF 저장"]` 클릭 (Playwright locator)
    - `Browser.setDownloadBehavior` CDP로 저장 경로 지정
    - `~/Desktop/{수임처명}_국민건강보험/가입자고지내역서_건강_{YYYYMM}.pdf`
 8. **탭 정리** — 미리보기 + 웹EDI 탭 닫기
@@ -352,12 +356,20 @@ pause
 ### Nexacro 제어 방식
 
 웹EDI 탭(`webedi/xui/index.jsp`)은 **Nexacro** 기반. 일반 DOM click/playwright click을 무시하므로 이벤트 직접 dispatch 필요:
-- **버튼 클릭:** `mousedown` → `mouseup` → `click` (`nexacro_click()`)
+- **버튼 클릭:** `mousedown` → `mouseup` → `click` (인라인 JS로 직접 dispatch)
 - **그리드 행 선택:** `dblclick` 이벤트 (1차 click + 2차 click + dblclick)
 - **셀 ID:** `{gridId}_body_gridrow_{row}_cell_{row}_{col}`
-- **콤보박스:** `{comboId}_dropbutton` → `{comboId}_combolist` 내 `_item` div 클릭
+- **콤보박스:** `dropbutton` 클릭 → combolist가 **동적 생성**됨 (클릭 전에는 DOM에 없음) → `_item` div에서 TextBoxElement 텍스트로 매칭 후 클릭
 - **라디오:** `{radioId}` 내 `_item` div에서 TextBoxElement 텍스트로 매칭 후 클릭
-- **미리보기 PDF:** iframe(`reportview.jsp`) 내 버튼 — Playwright `locator.click()` 사용
+- **미리보기 PDF:** iframe(`reportview.jsp`) 내 버튼 — Playwright `locator.click()` 사용 (Nexacro 외부 영역)
+
+### 주요 디버깅 포인트
+
+| 문제 | 원인 | 해결 |
+|------|------|------|
+| 수임사업장선택 버튼 안 보임 | 수임처 선택 상태에서는 숨음 | 먼저 `we_btn_relogin`으로 로그인 사업장 복귀 |
+| combolist not found | dropbutton 클릭 전에 combolist DOM 없음 | dropbutton 클릭 후 combolist 생성 대기 |
+| 서식명 선택 후 값 불일치 | Nexacro 내부 상태 동기화 지연 | 1초 대기 후 input 값 확인 |
 
 ### 주요 요소 ID
 
