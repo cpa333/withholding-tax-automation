@@ -535,22 +535,22 @@ async def select_doc_type(edi_page, doc_name="가입자 고지(산출) 내역서
     """
     log(f"  서식명 선택: {doc_name}")
 
-    # 웹EDI Nexacro 앱 로딩 대기
+    # 웹EDI Nexacro 앱 로딩 대기 (combo 요소만 있으면 준비됨)
     for _ in range(10):
-        has_grid = await edi_page.evaluate("""() => {
-            return !!document.getElementById('mainframe_childframe_form_div_body_grid_list');
+        has_combo = await edi_page.evaluate("""() => {
+            return !!document.getElementById('mainframe_childframe_form_div_body_cbo_docid');
         }""")
-        if has_grid:
+        if has_combo:
             break
         await asyncio.sleep(1)
 
-    # dropbutton 클릭하여 콤보 열기
+    # dropbutton 클릭하여 콤보 열기 → combolist 동적 생성
     result = await nexacro_click(edi_page, f"{CBO_DOCID}_dropbutton")
     if not result.get("ok"):
         log(f"  ERROR: dropbutton 클릭 실패 - {result}")
         return False
 
-    # combolist DOM 대기
+    # combolist DOM 생성 대기
     for _ in range(10):
         has_list = await edi_page.evaluate("""(comboId) => {
             return !!document.getElementById(comboId + '_combolist');
@@ -558,6 +558,9 @@ async def select_doc_type(edi_page, doc_name="가입자 고지(산출) 내역서
         if has_list:
             break
         await asyncio.sleep(0.5)
+    else:
+        log("  ERROR: combolist가 생성되지 않았습니다.")
+        return False
 
     # 항목 선택
     result = await nexacro_select_combo(edi_page, CBO_DOCID, doc_name)
