@@ -65,6 +65,12 @@ INTEGRATED_MODAL_PREFIX = "mainframe.VFrameSet.FrameSdi.UHJE0002P2.form.divPopBg
 INTEGRATED_RADIO_FULL_SSN = f"{INTEGRATED_MODAL_PREFIX}.div00_01.form.div01.form.rdo06.radioitem1"
 INTEGRATED_BTN_CONFIRM = f"{INTEGRATED_MODAL_PREFIX}.div00_00.form.btn01"
 
+# 사업장전환 버튼 (페이지 상단 헤더)
+BTN_CHANGE_WORKPLACE = (
+    "mainframe.VFrameSet.FrameSdi.form.divHeader.form.divHeader.form.btnChangeBusi"
+)
+# 사업장전환 모달 그리드 — 기존 GRID_WORKPLACE와 동일 (ChangeBusi.grdList)
+
 
 def log(msg):
     print(msg, flush=True)
@@ -653,8 +659,33 @@ async def process_tab_download(page, context, save_dir, tab_index, tab_label, gr
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 사업장 선택
+# 사업장 선택 / 전환
 # ═══════════════════════════════════════════════════════════════════════════════
+
+async def switch_workplace(page, workplace_name):
+    """사업장전환 버튼으로 사업장 전환
+
+    페이지 상단 '사업장전환' 버튼 클릭 → 모달에서 사업장 더블클릭 선택.
+
+    Args:
+        page: Playwright page
+        workplace_name: 선택할 사업장명 (부분 매칭)
+
+    Returns:
+        bool: 전환 성공 여부
+    """
+    log("사업장전환 버튼 클릭...")
+    result = await nexacro_click_button(page, BTN_CHANGE_WORKPLACE)
+    if not result.get("ok"):
+        log(f"  ERROR: 사업장전환 버튼 실패 - {result}")
+        return False
+    await asyncio.sleep(2)
+
+    ok = await select_workplace(page, workplace_name)
+    if ok:
+        log(f"  사업장 전환 완료: {workplace_name}")
+    return ok
+
 
 async def open_workplace_selector(page):
     """사업장 선택 모달(업무대행서비스) 열기

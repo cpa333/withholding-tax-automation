@@ -27,7 +27,7 @@ from src.automation.nps._common import (
     open_workplace_selector, select_workplace, select_workplace_by_index,
     list_workplaces, navigate_to_decision_details, open_decision_detail,
     click_detail_tab, output_with_full_ssn, download_pdf_from_preview,
-    save_excel, process_tab_download,
+    save_excel, save_integrated, process_tab_download, switch_workplace,
     TAB_MEMBER, TAB_RETRO, TAB_GOVT,
 )
 
@@ -48,6 +48,7 @@ def print_menu():
     print("  6. 엑셀저장")
     print("  7. 소급분내역 PDF+엑셀")
     print("  8. 전체 탭 자동 처리 (가입자/소급분/국고지원)")
+    print("  9. 사업장전환")
     print("  0. 종료")
     print("-" * 55)
 
@@ -237,12 +238,24 @@ async def main():
                     import traceback
                     traceback.print_exc()
 
+            elif choice == "9":
+                try:
+                    name = input("  전환할 사업장명 (0=취소): ").strip()
+                    if not name or name == "0":
+                        pass
+                    else:
+                        await switch_workplace(page, name)
+                except Exception as e:
+                    log(f"ERROR: {e}")
+                    import traceback
+                    traceback.print_exc()
+
             elif choice == "0":
                 log("종료합니다.")
                 break
 
             else:
-                log("잘못된 선택입니다. 1~8, 0 중 하나를 입력하세요.")
+                log("잘못된 선택입니다. 1~9, 0 중 하나를 입력하세요.")
 
 
 if __name__ == "__main__":
