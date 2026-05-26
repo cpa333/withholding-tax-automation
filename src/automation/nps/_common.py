@@ -183,6 +183,75 @@ async def nexacro_get_grid_data(page, grid_id):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Nexacro 메뉴 네비게이션
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def nexacro_click_button(page, element_id):
+    """Nexacro 버튼에 mousedown/mouseup/click 이벤트 발생
+
+    Nexacro 프레임워크의 버튼은 일반 DOM click을 무시하므로,
+    이벤트를 직접 dispatch 해야 함.
+
+    Args:
+        page: Playwright page
+        element_id: Nexacro 버튼 element ID
+    """
+    return await page.evaluate("""(elId) => {
+        const btn = document.getElementById(elId);
+        if (!btn) return {error: 'element not found: ' + elId};
+
+        const rect = btn.getBoundingClientRect();
+        const cx = rect.x + rect.width / 2;
+        const cy = rect.y + rect.height / 2;
+
+        const base = {
+            bubbles: true, cancelable: true, view: window,
+            screenX: cx, screenY: cy, clientX: cx, clientY: cy,
+            button: 0, buttons: 1, relatedTarget: null
+        };
+
+        btn.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
+        btn.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
+        btn.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
+
+        return {ok: true, text: btn.textContent.trim().substring(0, 40)};
+    }""", element_id)
+
+
+async def navigate_to_decision_details(page):
+    """결정내역 > 국민연금보험료 결정내역 메뉴로 이동
+
+    상단 네비바에서 '결정내역'(M08000000) 클릭 후
+    '국민연금보험료 결정내역'(M08010000) 서브메뉴 클릭.
+    """
+    TOP_MENU_ID = (
+        "mainframe.VFrameSet.FrameSdi.form.divTop.form.divTopMenu"
+        ".form.btnTop_M08000000"
+    )
+    SUB_MENU_ID = (
+        "mainframe.VFrameSet.FrameSdi.form.divTop.form.divTopMenu"
+        ".form.divSub_M08000000.form.btn2D_M08010000"
+    )
+
+    log("결정내역 메뉴 클릭...")
+    result = await nexacro_click_button(page, TOP_MENU_ID)
+    if not result.get("ok"):
+        log(f"  ERROR: {result}")
+        return False
+    await asyncio.sleep(2)
+
+    log("국민연금보험료 결정내역 서브메뉴 클릭...")
+    result = await nexacro_click_button(page, SUB_MENU_ID)
+    if not result.get("ok"):
+        log(f"  ERROR: {result}")
+        return False
+    await asyncio.sleep(3)
+
+    log("국민연금보험료 결정내역 페이지 이동 완료.")
+    return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # 사업장 선택
 # ═══════════════════════════════════════════════════════════════════════════════
 

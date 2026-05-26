@@ -30,11 +30,15 @@
 - **프레임워크:** Nexacro (엔터프라이즈 웹 UI 프레임워크)
 - **인증:** 공동인증서 로그인 (Human-in-the-loop)
 - **접근법:**
-    - CDP로 Chrome에 연결 후 Nexacro 그리드 제어
-    - Nexacro는 일반 DOM click을 무시하므로 `dispatchEvent(new MouseEvent('dblclick'))` 로 직접 이벤트 발생 필요
+    - CDP로 Chrome에 연결 후 Nexacro 제어
+    - Nexacro는 일반 DOM click을 무시하므로 `dispatchEvent(new MouseEvent(...))` 로 직접 이벤트 발생 필요
+    - **버튼/메뉴:** mousedown → mouseup → click 순차 발생
+    - **그리드 행 선택:** dblclick 이벤트 (click × 2 + dblclick)
     - 그리드 셀 ID 패턴: `mainframe.VFrameSet.FrameSdi.ChangeBusi...gridrow_{row}.cell_{row}_{col}`
     - 행 인덱스 기반보다 **텍스트 매칭**으로 행을 찾는 것이 정확
 - **사업장 선택:** 업무대행서비스 → 위탁사업장 목록 → 더블클릭으로 선택
+- **메뉴 네비게이션:** 상단 메뉴 ID 패턴 `btnTop_M{code}` / 서브메뉴 `btn2D_M{code}`
+- **결정내역:** 결정내역(M08000000) → 국민연금보험료 결정내역(M08010000)
 - **모듈:** `src/automation/nps/` (`_common.py`, `nps_auto_cdp.py`)
 - **주요 도전 과제:** Nexacro 프레임워크의 커스텀 이벤트 시스템 대응
 
