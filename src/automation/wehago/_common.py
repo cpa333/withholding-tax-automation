@@ -423,12 +423,33 @@ async def select_dropdown(page, dropdown_index, option_text):
 
 
 async def open_collect_menu(page):
-    """우측 끝 #collect 버튼 클릭하여 드롭다운 메뉴 열기"""
-    await page.evaluate("""() => {
-        const btn = document.querySelector('#collect');
-        if (btn) btn.click();
-    }""")
+    """우측 끝 #collect 버튼 클릭하여 드롭다운 메뉴 열기
+
+    항상 close → open 순서로 실행하여 토글 상태와 무관하게 열린 상태 보장.
+    Playwright locator.click() 사용 (JS evaluate click은 합성 이벤트로 인식되어
+    일부 페이지에서 드롭다운이 열리지 않음).
+    """
+    # close (토글 상태 모르므로 한 번 클릭)
+    try:
+        await page.locator('#collect').click(timeout=3000)
+    except Exception:
+        pass
+    await asyncio.sleep(0.5)
+    # open
+    try:
+        await page.locator('#collect').click(timeout=3000)
+    except Exception:
+        pass
     await asyncio.sleep(1)
+
+
+async def close_collect_menu(page):
+    """드롭다운 메뉴 닫기"""
+    try:
+        await page.locator('#collect').click(timeout=3000)
+    except Exception:
+        pass
+    await asyncio.sleep(0.5)
 
 
 async def click_menu_item(page, item_text):

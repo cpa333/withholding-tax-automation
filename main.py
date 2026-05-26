@@ -78,10 +78,9 @@ async def main():
             log("Chrome이 CDP 모드(포트 9223)로 실행 중인지 확인하세요.")
             return
 
-        # WEHAGO 페이지로 이동 (CDP 재사용 시 다른 페이지일 수 있음)
-        if "wehago.com" not in page.url:
-            log("  WEHAGO 페이지로 이동...")
-            await page.goto(WEHAGO_URL, wait_until="domcontentloaded", timeout=30000)
+        # WEHAGO 메인 페이지로 이동 (항상 이동하여 로그인 상태 확인)
+        log("  WEHAGO 메인 페이지로 이동...")
+        await page.goto(WEHAGO_URL + "#/main", wait_until="domcontentloaded", timeout=30000)
 
         if not await wait_for_login(page):
             log("로그인 실패")

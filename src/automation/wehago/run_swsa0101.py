@@ -13,7 +13,7 @@ import time
 
 from src.automation.wehago._common import (
     log, dismiss_dialogs, click_menu, click_dialog_button,
-    open_collect_menu, click_menu_item, _click_modal_text,
+    open_collect_menu, close_collect_menu, click_menu_item, _click_modal_text,
     select_dropdown, goto_menu_page,
 )
 
@@ -35,6 +35,7 @@ DEFAULT_PRINT_FORMAT = "급여명세(사원당 한장)"
 
 async def download_excel(page, save_dir="."):
     """급여자료입력 화면에서 엑셀 다운로드"""
+    await close_collect_menu(page)
     log("[엑셀 다운로드] 드롭다운 열기...")
     await open_collect_menu(page)
 
@@ -55,6 +56,8 @@ async def download_excel(page, save_dir="."):
     save_path = os.path.join(save_dir, fname)
     await download.save_as(save_path)
     log(f"  저장 완료: {save_path}")
+
+    await close_collect_menu(page)
     return os.path.abspath(save_path)
 
 
@@ -159,23 +162,31 @@ async def upload_excel(page, file_path, dry_run=True):
     log("[엑셀 업로드] 화면 정리...")
     await dismiss_dialogs(page)
 
-    # 드롭다운 열기 (토글 상태 검증 + 재시도)
+    # 드롭다운 열기
     log("[엑셀 업로드] 드롭다운 열기...")
-    for attempt in range(3):
-        await open_collect_menu(page)
-        visible_count = await page.evaluate("""() => {
-            const menu = document.querySelector('.sao_head_menu');
-            if (!menu) return 0;
-            return Array.from(menu.querySelectorAll('li'))
-                .filter(li => li.offsetHeight > 0).length;
-        }""")
-        if visible_count > 0:
-            log(f"  드롭다운 열림 (항목 {visible_count}개)")
-            break
-        log(f"  드롭다운 안 열림, 재시도 {attempt + 1}/3...")
-        await asyncio.sleep(1)
-    else:
-        log("  WARNING: 드롭다운을 열지 못함. 계속 진행합니다.")
+    await close_collect_menu(page)
+    await open_collect_menu(page)
+
+    # 엑셀 불러오기 비활성화 체크
+    is_disabled = await page.evaluate("""() => {
+        const menu = document.querySelector('.sao_head_menu');
+        if (!menu) return false;
+        const items = menu.querySelectorAll('li');
+        for (const li of items) {
+            if (li.textContent.includes('엑셀 불러오기')) {
+                const a = li.querySelector('a');
+                if (a) {
+                    const cs = window.getComputedStyle(a);
+                    return cs.cursor === 'not-allowed';
+                }
+            }
+        }
+        return false;
+    }""")
+    if is_disabled:
+        log("  엑셀 불러오기가 비활성화 상태입니다. 업로드를 건너뜁니다.")
+        log("[SWSA0101] 업로드 생략 완료")
+        return True
 
     # --- 엑셀 불러오기: 3단계 fallback ---
     log("[엑셀 업로드] 엑셀 불러오기 클릭...")
