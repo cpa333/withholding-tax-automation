@@ -40,15 +40,22 @@ TAB_BTN_PREFIX = (
     ".form.divWork.form.tab00.tabbutton_"
 )
 
-# 출력 버튼 / 출력 옵션 모달 (UHJE0002P1)
+# 출력 버튼 / 엑셀저장 버튼 / 출력 옵션 모달 (UHJE0002P1) / 엑셀 모달 (UHJE0002P3)
 BTN_OUTPUT = (
     "mainframe.VFrameSet.FrameSdi.form.divWork_M08010200"
     ".form.divWork.form.div00.form.btn02"
+)
+BTN_EXCEL_SAVE = (
+    "mainframe.VFrameSet.FrameSdi.form.divWork_M08010200"
+    ".form.divWork.form.div01.form.btn01"
 )
 MODAL_PREFIX = "mainframe.VFrameSet.FrameSdi.UHJE0002P1.form.divPopBg.form.divPopWork.form"
 RADIO_FULL_SSN = f"{MODAL_PREFIX}.div00_01.form.div01.form.rdo06.radioitem1"
 BTN_MODAL_CONFIRM = f"{MODAL_PREFIX}.div00_00.form.btn01"
 BTN_MODAL_CANCEL = f"{MODAL_PREFIX}.div00_00.form.btn00"
+EXCEL_MODAL_PREFIX = "mainframe.VFrameSet.FrameSdi.UHJE0002P3.form.divPopBg.form.divPopWork.form"
+EXCEL_RADIO_FULL_SSN = f"{EXCEL_MODAL_PREFIX}.div00_01.form.div01.form.rdo06.radioitem1"
+EXCEL_BTN_CONFIRM = f"{EXCEL_MODAL_PREFIX}.div00_00.form.btn01"
 
 
 def log(msg):
@@ -455,6 +462,71 @@ async def download_pdf_from_preview(context, save_dir, filename):
             return final_path
 
     log("  ERROR: PDF 다운로드 시간 초과")
+    return None
+
+
+async def save_excel(page, context, save_dir, filename):
+    """엑셀저장 버튼 클릭 → 주민번호 전체표출 → 확인 → Excel 다운로드
+
+    결정내역 상세 페이지의 '엑셀저장' 버튼(btn01 in div01) 클릭 후
+    UHJE0002P3 모달에서 전체표출 선택 → 확인.
+
+    Args:
+        page: Playwright page (NPS EDI main page)
+        context: Playwright browser context
+        save_dir: 저장할 디렉토리 경로
+        filename: 저장할 파일명 (확장자 제외)
+
+    Returns:
+        str or None: 저장된 파일 경로, 실패 시 None
+    """
+    log("엑셀저장 버튼 클릭...")
+
+    os.makedirs(save_dir, exist_ok=True)
+    cdp = await context.new_cdp_session(page)
+    await cdp.send("Browser.setDownloadBehavior", {
+        "behavior": "allowAndName",
+        "downloadPath": save_dir,
+        "eventsEnabled": True,
+    })
+
+    before = set(os.listdir(save_dir))
+
+    result = await nexacro_click_button(page, BTN_EXCEL_SAVE)
+    if not result.get("ok"):
+        log(f"  ERROR: 엑셀저장 버튼 클릭 실패 - {result}")
+        return None
+    await asyncio.sleep(2)
+
+    log("주민번호 전체표출 선택 (엑셀 모달)...")
+    await nexacro_click_button(page, EXCEL_RADIO_FULL_SSN)
+    await asyncio.sleep(1)
+
+    log("확인 클릭...")
+    result = await nexacro_click_button(page, EXCEL_BTN_CONFIRM)
+    if not result.get("ok"):
+        log(f"  ERROR: 확인 클릭 실패 - {result}")
+        return None
+
+    # 다운로드 완료 대기
+    for _ in range(30):
+        await asyncio.sleep(1)
+        after = set(os.listdir(save_dir))
+        new_files = after - before
+        crdownload = [f for f in new_files if f.endswith(".crdownload")]
+        done = [f for f in new_files if not f.endswith(".crdownload") and not f.endswith(".pdf")]
+        if not crdownload and done:
+            downloaded = os.path.join(save_dir, done[0])
+            ext = os.path.splitext(done[0])[1] or ".xlsx"
+            final_path = os.path.join(save_dir, f"{filename}{ext}")
+            if downloaded != final_path:
+                if os.path.exists(final_path):
+                    os.remove(final_path)
+                os.rename(downloaded, final_path)
+            log(f"  Excel 저장 완료: {final_path}")
+            return final_path
+
+    log("  ERROR: Excel 다운로드 시간 초과")
     return None
 
 
