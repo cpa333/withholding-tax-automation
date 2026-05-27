@@ -404,7 +404,7 @@ pause
 
 ### 적용한 것
 
-1. **Chrome 실행 인수** — `--disable-blink-features=AutomationControlled` (navigator.webdriver 브라우저 레벨 차단), `--disable-infobars` (자동화 안내바 제거)
+1. **Chrome 실행 인수** — 자동화 관련 플래그 미사용 (Chrome 경고문 방지). playwright-stealth JS 오버라이드에 전적으로 의존.
 2. **`playwright-stealth` v2.0+ (Stealth 클래스)** — 선택적 모듈 적용:
    - **활성**: navigator.webdriver, plugins, permissions, vendor, chrome_app, chrome_csi, chrome_loadTimes, hairline, iframe_contentWindow, error_prototype
    - **비활성** (실제 값 유지): webgl_vendor, navigator_hardware_concurrency, navigator_platform, navigator_languages, navigator_user_agent, navigator_user_agent_data, sec_ch_ua, media_codecs, chrome_runtime
@@ -442,3 +442,131 @@ pause
 | 서식명 콤보 | `mainframe_childframe_form_div_body_cbo_docid` |
 | 상태 라디오 | `mainframe_childframe_form_div_body_rdo_prog_stat` |
 | 인쇄 버튼 | `mainframe_childframe_form_div_top_img_print` |
+
+---
+
+## 대규모 배치 자동화 아키텍처 (설계 문서)
+
+> **상태:** 설계 완료, 코드 구현은 `src/batch/` 모듈에 베이스 코드만 존재.
+> 각 포털(NHIS EDI, NPS EDI, WEHAGO, Hometax)의 **전체 수임처 자동화** 적용 시 참고.
+
+### 개요
+
+현재 각 포털 자동화는 **1개 수임처 단위**로 수동 실행됨. 회계법인 실무에서는
+월 100~200개 수임처를 순차 처리해야 하므로, SQLite 기반 배치 엔진으로
+**크래시 복구, 재시도, 진행률 추적**을 자동화.
+
+```
+YAML 설정 → BatchEngine → [Job 1, Job 2, ..., Job N] → Reporter
+                ↓                ↓
+           SQLite DB        StateManager
+         (checkpoint)     (step tracking)
+```
+
+### `src/batch/` 모듈 구조
+
+| 파일 | 역할 |
+|------|------|
+| `models.py` | 데이터 모델 (Portal enum, Client/Batch/Job/Step dataclass, 상태 전이) |
+| `db.py` | SQLite WAL 모드, Repository 패턴 (Client/Batch/Job/Step CRUD) |
+| `state.py` | StateManager — 단계 체크포인트, 크래시 복구, 이어서 진행 |
+| `engine.py` | BatchEngine — 비동기 배치 오케스트레이터 |
+| `reporter.py` | HTML + CSV 결과 리포트 생성 (비개발 사용자용) |
+| `__init__.py` | 공개 API exports |
+
+### 상태 머신
+
+- **Batch:** created → running → completed / paused / crashed / archived
+- **Job:** pending → running → completed / failed / skipped
+- **Step:** pending → running → completed / failed
+
+### 포털별 배치 준비도
+
+| 포털 | 단일 자동화 | 배치 준비도 | 비고 |
+|------|-------------|-------------|------|
+| NHIS EDI | 완료 (10단계 워크플로우) | ~70% | BatchAdapter 구현 필요 |
+| NPS EDI | 완료 (13단계 워크플로우) | ~65% | 사업장전환 로직 재사용 |
+| WEHAGO | 부분 (SWSA0101, SWER0101) | ~15% | 다중 서식 미지원 |
+| Hometax | 초기 (SWTA0101) | ~10% | 기본 구조만 |
+
+### BatchAdapter 인터페이스 (설계)
+
+각 포털별로 구현해야 할 인터페이스:
+
+```python
+class BatchAdapter(ABC):
+    @abstractmethod
+    async def login(self, page) -> None: ...
+
+    @abstractmethod
+    async def select_client(self, page, client_name: str) -> None: ...
+
+    @abstractmethod
+    async def run_workflow(self, page, client_name: str,
+                          state: StateManager) -> list[str]: ...
+
+    @abstractmethod
+    async def verify_result(self, page, client_name: str) -> bool: ...
+```
+
+### 수임처 설정 스키마 (YAML)
+
+```yaml
+# config/clients.yaml
+nhis_edi:
+  - name: "(주)ABC"
+    code: "1234567890"
+    active: true
+  - name: "XYZ 주식회사"
+    code: "0987654321"
+    active: true
+
+nps_edi:
+  - name: "(주)ABC"
+    search_keyword: "ABC"
+    active: true
+
+wehago:
+  - name: "(주)ABC"
+    business_no: "123-45-67890"
+    active: true
+```
+
+### UX 설계 (비개발 사용자 관점)
+
+1. **콘솔 진행률** — `[3/200] (주)ABC 처리 중... [=====>    ] 1.5%`
+2. **크래시 후 재시작** — `이어서 진행 (3/200부터 계속)`
+3. **실패 재시도** — 실패 건만 자동 재시도 (최대 3회)
+4. **HTML 리포트** — 완료 후 브라우저로 결과 확인 (수임처별 성공/실패/소요시간)
+5. **오류 메시지** — 한글 오류 + 복구 방법 제안
+
+### 대규모 처리 기법 — 적용 가능성 분석 완료
+
+대상 사이트가 Nexacro(NHIS EDI, NPS EDI)와 SPA(WEHAGO) 기반이므로,
+일반 웹 크롤링 기법의 대부분이 이 프로젝트 아키텍처에 **부적합**함.
+
+#### 영구 불가 (적용하면 자동화 자체가 고장남)
+
+| 기법 | 이유 |
+|------|------|
+| Nexacro 이벤트 시퀀스 랜덤 지연 | mousedown→mouseup→click 사이 지연 = 이벤트 무시됨 |
+| 워크플로우 도중 페이지 새로고침 | Nexacro MDI 탭 전부 닫힘, SPA 라우팅 리셋 |
+| 자동 재로그인 | 공동인증서 로그인, 물리적 사용자 개입 필수 |
+| 적응형 토큰 버킷 | 브라우저 자동화에 "요청/초" 개념 미적용 |
+| rebrowser-patches | page.evaluate() 크래시 리스크, Nexacro 제어가 evaluate에 전적으로 의존 |
+
+#### 배치 시점에 가능 (수임처 간 전환에서만 동작)
+
+| 기법 | 적용 방식 |
+|------|----------|
+| Circuit Breaker | 배치 엔진 레벨 — 연속 실패 시 배치 일시정지 |
+| 시간대별 속도 조절 | 수임처 간 대기 시간 가중치 (자동화 로직 무변경) |
+| 수임처 전환 시 새로고침 | switch_firm/switch_workplace 직전에만 수행 |
+| 세션 만료 감지 | 배치 엔진 훅 — 만료 시 일시정지 후 사용자에게 재로그인 요청 |
+
+### 예상 소요 시간 (포털당)
+
+- 수임처 1개당 약 30~60초 (서버 응답 시간 포함)
+- 200개 수임처: **2~3시간** (포털당)
+- 4개 포털 전체: **8~13시간** (순차 처리 기준)
+- 병렬 처리 불가: 동일 Chrome 세션, 동일 포털 계정 사용
