@@ -398,14 +398,22 @@ pause
 - Human-in-the-loop 공동인증서 로그인
 - 대상 사이트(NHIS EDI, NPS EDI, WEHAGO, 홈택스)는 엔터프라이즈 안티봇 미사용
 
+### 설계 원칙
+
+**실제 Chrome의 핑거프린트 값을 위장하지 않는다.** playwright-stealth는 Headless Chrome 환경을 위해 만들어졌으므로, 실제 Chrome에서 WebGL vendor를 "Intel Iris"로 덮어쓰거나 hardwareConcurrency를 4로 강제 설정하면 **값 간 불일치**가 발생해 오히려 탐지 신호가 됨. 따라서 webdriver 등 자동화 마커만 제거하고 나머지는 실제 값 유지.
+
 ### 적용한 것
 
 1. **Chrome 실행 인수** — `--disable-blink-features=AutomationControlled` (navigator.webdriver 브라우저 레벨 차단), `--disable-infobars` (자동화 안내바 제거)
-2. **`playwright-stealth`** — `stealth_async(page)` 로 navigator.webdriver 제거, Chrome runtime 패치 등 JS 레벨 보완
+2. **`playwright-stealth` v2.0+ (Stealth 클래스)** — 선택적 모듈 적용:
+   - **활성**: navigator.webdriver, plugins, permissions, vendor, chrome_app, chrome_csi, chrome_loadTimes, hairline, iframe_contentWindow, error_prototype
+   - **비활성** (실제 값 유지): webgl_vendor, navigator_hardware_concurrency, navigator_platform, navigator_languages, navigator_user_agent, navigator_user_agent_data, sec_ch_ua, media_codecs, chrome_runtime
 3. **신규 탭 자동 처리** — `context.on("page")` 콜백으로 사이트가 여는 팝업/탭에도 자동 스텔스 적용
+4. **Fallback** — playwright-stealth 미설치 시 `navigator.webdriver` 수동 오버라이드만 적용
 
 ### 적용하지 않은 것 (해로움)
 
+- **WebGL/hardwareConcurrency 위장** — 실제 GPU·코어 수와 불일치 → 탐지 신호
 - **browserforge** (핑거프린트 위장) — 실제 프로필 핑거프린트와 충돌
 - **User-Agent 로테이션** — 세션 깨짐
 - **프록시 로테이션** — 단일 사용자/단일 PC
@@ -422,6 +430,9 @@ pause
 | `src/automation/nps/_common.py` | `connect_page()` | NPS EDI 연결 |
 | `src/automation/hometax/hometax_auto_cdp.py` | `connect_browser()` | 홈택스 연결 |
 | `src/automation/wehago/wehago_auto_cdp.py` | `connect_browser()` | WEHAGO 연결 |
+| `src/automation/nhis/nhis_auto_cdp.py` | inline | NHIS 개인용 자동화 |
+| `src/automation/wehago/_full_run.py` | inline | WEHAGO 전체 실행 |
+| `src/automation/wehago/_run_swer.py` | inline | SWER 원천징수이행 |
 
 ### 주요 요소 ID
 
