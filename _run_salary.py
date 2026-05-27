@@ -6,7 +6,8 @@ import asyncio
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "src"))
 
 from playwright.async_api import async_playwright
 
@@ -15,7 +16,7 @@ if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
 
-CDP_URL = "http://localhost:9223"
+from src.utils.chrome_cdp import CDP_URL
 COMPANY_NAME = "[테스트] (주)리틀치프코리아"
 SAVE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "results"))
 

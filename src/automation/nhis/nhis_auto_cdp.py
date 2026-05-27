@@ -14,14 +14,15 @@ if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
 
-CDP_URL = "http://localhost:9222"
-MINWON_URL = "https://www.nhis.or.kr/nhis/minwon/minwonServiceBoard.do"
-PDF_PASSWORD = "880718"
-
 # 프로젝트 루트 경로
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 sys.path.insert(0, PROJECT_ROOT)
+
+from src.utils.chrome_cdp import CDP_URL, CDP_PORT
 from src.utils.pdf_reader import postprocess_pdf
+
+MINWON_URL = "https://www.nhis.or.kr/nhis/minwon/minwonServiceBoard.do"
+PDF_PASSWORD = "880718"
 
 
 def log(msg):
@@ -52,10 +53,10 @@ def find_chrome():
 
 
 async def check_cdp_available():
-    """CDP 포트 9222가 활성인지 확인"""
+    """CDP 포트가 활성인지 확인"""
     try:
         import urllib.request
-        with urllib.request.urlopen("http://localhost:9222/json/version", timeout=2) as resp:
+        with urllib.request.urlopen(f"{CDP_URL}/json/version", timeout=2) as resp:
             return resp.status == 200
     except Exception:
         return False
@@ -163,7 +164,7 @@ async def run():
 
             subprocess.Popen([
                 chrome_path,
-                "--remote-debugging-port=9222",
+                f"--remote-debugging-port={CDP_PORT}",
                 "--user-data-dir=" + os.path.join(os.environ.get("TEMP", "/tmp"), "chrome-nhis"),
                 "--start-maximized",
                 "--disable-blink-features=AutomationControlled",

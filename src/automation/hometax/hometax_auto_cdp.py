@@ -8,9 +8,12 @@ if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
 
-from playwright.async_api import async_playwright
+# PROJECT_ROOT to sys.path for src.* imports
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, PROJECT_ROOT)
 
-CDP_URL = "http://localhost:9222"
+from playwright.async_api import async_playwright
+from src.utils.chrome_cdp import CDP_URL
 HOMETAX_URL = "https://www.hometax.go.kr"
 
 

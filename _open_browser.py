@@ -1,4 +1,4 @@
-"""subprocess로 Chrome을 CDP 디버깅 모드로 실행 (9222 포트)
+"""subprocess로 Chrome을 CDP 디버깅 모드로 실행
 
 주의: playwright.chromium.launch()로 실행하면 download.save_as()가 0바이트를 반환함.
 반드시 subprocess.Popen으로 실행 후 connect_over_cdp로 연결할 것.
@@ -7,6 +7,10 @@ import subprocess
 import os
 import time
 import sys
+
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, PROJECT_ROOT)
+from src.utils.chrome_cdp import CDP_URL, CDP_PORT
 
 
 def find_chrome():
@@ -37,7 +41,7 @@ def main():
 
     subprocess.Popen([
         chrome_path,
-        "--remote-debugging-port=9222",
+        f"--remote-debugging-port={CDP_PORT}",
         f"--user-data-dir={user_data_dir}",
         "--start-maximized",
         target_url,
@@ -48,9 +52,9 @@ def main():
         time.sleep(1)
         try:
             import urllib.request
-            with urllib.request.urlopen("http://localhost:9222/json/version", timeout=2) as resp:
+            with urllib.request.urlopen(f"{CDP_URL}/json/version", timeout=2) as resp:
                 if resp.status == 200:
-                    print(f"READY: CDP 포트 9222 활성 (Chrome 연결 가능)", flush=True)
+                    print(f"READY: CDP 포트 {CDP_PORT} 활성 (Chrome 연결 가능)", flush=True)
                     return
         except Exception:
             pass

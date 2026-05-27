@@ -21,16 +21,16 @@ from datetime import datetime
 
 import comtypes.client
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+sys.path.insert(0, PROJECT_ROOT)
 
 from playwright.async_api import async_playwright
+from src.utils.chrome_cdp import CDP_URL
 
 if sys.platform == "win32":
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding="utf-8")
     sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding="utf-8")
-
-CDP_URL = "http://localhost:9223"
 WEHAGO_URL = "https://www.wehago.com/"
 PASSWORD = "asdfghjk"
 COMPANY_NAME = "[테스트] (주)리틀치프코리아"

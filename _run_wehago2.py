@@ -6,12 +6,15 @@ import time
 import openpyxl
 from playwright.async_api import async_playwright
 
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, PROJECT_ROOT)
+
 if sys.platform == "win32":
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding="utf-8")
     sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding="utf-8")
 
-CDP_URL = "http://localhost:9222"
+from src.utils.chrome_cdp import CDP_URL
 SAVE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "results"))
 COMPANY_NAME = "근린커피 상암"
 

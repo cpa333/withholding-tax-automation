@@ -1,6 +1,11 @@
 import asyncio
+import os
 import sys
 from playwright.async_api import async_playwright
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+sys.path.insert(0, PROJECT_ROOT)
+from src.utils.chrome_cdp import CDP_URL
 
 # Windows 터미널 한글 깨짐 방지
 if sys.platform == "win32":
@@ -12,8 +17,8 @@ async def run():
         # 이미 9222 포트로 열려 있는 브라우저에 연결 시도
         # 만약 열려있지 않다면 새로 실행하도록 설정 (선택 가능)
         try:
-            print("기존 브라우저(9222 포트)에 연결을 시도합니다...")
-            browser = await p.chromium.connect_over_cdp("http://localhost:9222")
+            print(f"기존 브라우저에 연결을 시도합니다... ({CDP_URL})")
+            browser = await p.chromium.connect_over_cdp(CDP_URL)
             context = browser.contexts[0]
             page = context.pages[0]
         except Exception as e:

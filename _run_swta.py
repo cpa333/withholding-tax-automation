@@ -7,12 +7,15 @@ import time
 from datetime import datetime
 from playwright.async_api import async_playwright
 
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, PROJECT_ROOT)
+
 if sys.platform == "win32":
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
 
-CDP_URL = "http://localhost:9223"
+from src.utils.chrome_cdp import CDP_URL
 
 
 def log(msg):

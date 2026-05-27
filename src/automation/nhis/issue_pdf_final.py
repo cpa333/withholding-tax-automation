@@ -4,6 +4,10 @@ import sys
 from datetime import datetime
 from playwright.async_api import async_playwright
 
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+sys.path.insert(0, PROJECT_ROOT)
+from src.utils.chrome_cdp import CDP_URL
+
 if sys.platform == "win32":
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
@@ -11,7 +15,7 @@ if sys.platform == "win32":
 async def issue_pdf():
     async with async_playwright() as p:
         try:
-            browser = await p.chromium.connect_over_cdp("http://localhost:9222")
+            browser = await p.chromium.connect_over_cdp(CDP_URL)
             context = browser.contexts[0]
             page = context.pages[0]
             

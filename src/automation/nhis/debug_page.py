@@ -3,11 +3,15 @@ import sys
 import os
 from playwright.async_api import async_playwright
 
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+sys.path.insert(0, PROJECT_ROOT)
+from src.utils.chrome_cdp import CDP_URL
+
 async def debug_screenshot():
     async with async_playwright() as p:
         try:
-            print("기존 브라우저(9222 포트)에 연결 중...")
-            browser = await p.chromium.connect_over_cdp("http://localhost:9222")
+            print(f"기존 브라우저에 연결 중... ({CDP_URL})")
+            browser = await p.chromium.connect_over_cdp(CDP_URL)
             context = browser.contexts[0]
             page = context.pages[0]
             

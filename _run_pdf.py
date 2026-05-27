@@ -6,6 +6,9 @@ import re
 import time
 from playwright.async_api import async_playwright
 
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, PROJECT_ROOT)
+
 if sys.platform == "win32":
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
@@ -16,7 +19,7 @@ if sys.platform == "win32":
     import pywinauto.actionlogger
     pywinauto.actionlogger.ActionLogger.logger.handlers = []
 
-CDP_URL = "http://localhost:9223"
+from src.utils.chrome_cdp import CDP_URL
 PRINT_DIALOG_TITLE = "Duzon - PrintDialog"
 PRINT_DIALOG_CLASS = "WindowsForms10.Window.8.app.0.141b42a_r8_ad1"
 SAVE_DIALOG_CLASS = "#32770"

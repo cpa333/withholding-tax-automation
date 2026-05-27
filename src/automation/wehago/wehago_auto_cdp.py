@@ -16,7 +16,12 @@ if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
 
-CDP_URL = "http://localhost:9223"
+# PROJECT_ROOT to sys.path for src.* imports
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, PROJECT_ROOT)
+
+from src.utils.chrome_cdp import CDP_URL, CDP_PORT
+
 WEHAGO_URL = "https://www.wehago.com/"
 SMARTA_BASE = "https://smarta.wehago.com"
 
@@ -39,10 +44,10 @@ def find_chrome():
 
 
 async def check_cdp_available():
-    """CDP 포트 9223이 활성인지 확인"""
+    """CDP 포트가 활성인지 확인"""
     try:
         import urllib.request
-        with urllib.request.urlopen("http://localhost:9223/json/version", timeout=2) as resp:
+        with urllib.request.urlopen(f"{CDP_URL}/json/version", timeout=2) as resp:
             return resp.status == 200
     except Exception:
         return False
@@ -74,7 +79,7 @@ async def launch_chrome():
 
     subprocess.Popen([
         chrome_path,
-        "--remote-debugging-port=9223",
+        f"--remote-debugging-port={CDP_PORT}",
         "--user-data-dir=" + user_data,
         "--profile-directory=Profile 2",
         "--start-maximized",
