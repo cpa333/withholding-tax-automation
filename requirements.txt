@@ -3,3 +3,4 @@ pywinauto>=0.6.8
 openpyxl>=3.0
 comtypes>=1.4
 pyinstaller>=6.0
+playwright-stealth>=1.0.6

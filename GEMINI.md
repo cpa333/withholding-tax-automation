@@ -37,6 +37,8 @@ The application is a Python-based Windows automation tool designed to streamline
         - `hometax/` — 홈택스 원천세 신고 자동화
     - `ui/`
     - `utils/`
+        - `chrome_cdp.py` — Chrome CDP 실행/연결 공통 유틸
+        - `stealth.py` — Playwright 스텔스 (navigator.webdriver 제거 등)
 - `results/` — 다운로드/변환된 엑셀 파일
 - `build/`
 - `main.py`
@@ -386,6 +388,40 @@ pause
 | 서식명 선택 후 값 불일치 | Nexacro 내부 상태 동기화 지연 | 1초 대기 후 input 값 확인 |
 | 라디오 "전체" 안 바뀜 | dispatchEvent로 시각/데이터 불일치 | Nexacro API `set_index(0)` + `on_fire_onitemchanged()` 사용 |
 | Nexacro API 접근 불가 | 프레임워크 로딩 전에 실행 | `wait_for_nexacro_ready()`로 mainframe.form 접근 확인 후 실행 |
+
+## Playwright Stealth (`src/utils/stealth.py`)
+
+### 적용 배경
+
+이 프로젝트는 CDP 모드로 **실제 Chrome**에 연결하므로 이미 강력한 안티탐지 기반을 가짐:
+- 실제 Chrome + 실제 사용자 프로필 (쿠키/히스토리/확장프로그램)
+- Human-in-the-loop 공동인증서 로그인
+- 대상 사이트(NHIS EDI, NPS EDI, WEHAGO, 홈택스)는 엔터프라이즈 안티봇 미사용
+
+### 적용한 것
+
+1. **Chrome 실행 인수** — `--disable-blink-features=AutomationControlled` (navigator.webdriver 브라우저 레벨 차단), `--disable-infobars` (자동화 안내바 제거)
+2. **`playwright-stealth`** — `stealth_async(page)` 로 navigator.webdriver 제거, Chrome runtime 패치 등 JS 레벨 보완
+3. **신규 탭 자동 처리** — `context.on("page")` 콜백으로 사이트가 여는 팝업/탭에도 자동 스텔스 적용
+
+### 적용하지 않은 것 (해로움)
+
+- **browserforge** (핑거프린트 위장) — 실제 프로필 핑거프린트와 충돌
+- **User-Agent 로테이션** — 세션 깨짐
+- **프록시 로테이션** — 단일 사용자/단일 PC
+- **리소스 차단** — Nexacro, Crownix, Raon 등 필수 리소스 로딩 불가
+- **마우스/타이핑 시뮬레이션** — Nexacro dispatchEvent와 충돌
+
+### 적용 지점
+
+| 파일 | 함수 | 역할 |
+|------|------|------|
+| `src/utils/stealth.py` | `apply_stealth()`, `stealth_all_pages()`, `register_auto_stealth()` | 스텔스 공통 유틸 |
+| `src/utils/chrome_cdp.py` | `connect_page()` | 공용 CDP 연결 (WEHAGO) |
+| `src/automation/nhis/_common_edi.py` | `connect_page()` | NHIS EDI 연결 |
+| `src/automation/nps/_common.py` | `connect_page()` | NPS EDI 연결 |
+| `src/automation/hometax/hometax_auto_cdp.py` | `connect_browser()` | 홈택스 연결 |
+| `src/automation/wehago/wehago_auto_cdp.py` | `connect_browser()` | WEHAGO 연결 |
 
 ### 주요 요소 ID
 

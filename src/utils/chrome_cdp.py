@@ -197,6 +197,8 @@ def launch_chrome(url="https://www.wehago.com/", *, force=False):
             f"--user-data-dir={junc}",
             f"--profile-directory={profile}",
             "--start-maximized",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-infobars",
             url,
         ],
         stdout=subprocess.DEVNULL,
@@ -221,8 +223,13 @@ async def launch_chrome_async(url="https://www.wehago.com/", *, force=False):
 
 async def connect_page(playwright):
     """CDP로 Chrome에 연결하고 WEHAGO 탭 우선 반환"""
+    from src.utils.stealth import stealth_all_pages, register_auto_stealth
+
     browser = await playwright.chromium.connect_over_cdp(CDP_URL)
     context = browser.contexts[0]
+
+    await stealth_all_pages(context)
+    register_auto_stealth(context)
 
     # WEHAGO가 열려있는 탭 우선 선택
     for p in context.pages:

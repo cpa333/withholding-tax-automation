@@ -166,6 +166,8 @@ async def run():
                 "--remote-debugging-port=9222",
                 "--user-data-dir=" + os.path.join(os.environ.get("TEMP", "/tmp"), "chrome-nhis"),
                 "--start-maximized",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
                 "https://www.nhis.or.kr"
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 

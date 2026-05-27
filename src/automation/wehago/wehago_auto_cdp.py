@@ -78,6 +78,8 @@ async def launch_chrome():
         "--user-data-dir=" + user_data,
         "--profile-directory=Profile 2",
         "--start-maximized",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-infobars",
         WEHAGO_URL,
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -94,8 +96,14 @@ async def launch_chrome():
 
 async def connect_browser(playwright):
     """CDP로 Chrome에 연결하고 첫 페이지 반환"""
+    from src.utils.stealth import stealth_all_pages, register_auto_stealth
+
     browser = await playwright.chromium.connect_over_cdp(CDP_URL)
     context = browser.contexts[0]
+
+    await stealth_all_pages(context)
+    register_auto_stealth(context)
+
     page = context.pages[0] if context.pages else await context.new_page()
     return browser, context, page
 

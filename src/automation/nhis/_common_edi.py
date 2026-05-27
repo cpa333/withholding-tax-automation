@@ -31,8 +31,13 @@ def log(msg):
 
 async def connect_page(playwright):
     """CDP로 Chrome에 연결하고 NHIS EDI 탭 우선 반환"""
+    from src.utils.stealth import stealth_all_pages, register_auto_stealth
+
     browser = await playwright.chromium.connect_over_cdp(CDP_URL)
     context = browser.contexts[0]
+
+    await stealth_all_pages(context)
+    register_auto_stealth(context)
 
     for pg in context.pages:
         try:
