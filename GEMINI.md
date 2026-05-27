@@ -293,8 +293,18 @@ pause
 
 - **포털 URL:** `https://edi.nhis.or.kr/`
 - **메인 페이지:** `https://edi.nhis.or.kr/homeapp/wep/m/retrieveMain.xx`
+- **공지 팝업:** `retrievePopupData.do` — 로그인 시 자동 생성, 새 탭으로 열림
+  - `#chk_close` 체크박스("하루동안 열지않기") → `closeWin()` JS 함수로 닫으면 쿠키 설정되어 다음 접속 시 재등장하지 않음
 - **사업장 선택 팝업:** `retrieveFirmList.do` — 새 탭으로 열림
 - **테이블 구조:** `table.list > tbody > tr > td` (td[1]=번호, td[2]=사업장명+링크, td[3]=관리번호, td[4]=단위기호)
+
+### 시작 로직 (main)
+
+1. `launch_chrome(url=NHIS_EDI_URL)` — CDP 모드(포트 9223)로 Chrome 실행/재사용
+2. `connect_page(p)` — `_common_edi` 버전으로 `edi.nhis.or.kr` 탭 우선 반환
+3. 이미 EDI 페이지면 `page.goto()` 생략 (팝업 재생성 방지)
+4. **팝업 먼저 닫기** (`close_popups`) — 공지 팝업이 `pages[0]`일 수 있어 로그인 감시 전 처리 필요
+5. `wait_for_login(page)` — 로그인 대기
 
 ### 수임사업장 선택
 

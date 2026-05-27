@@ -254,13 +254,17 @@ async def main():
     async with async_playwright() as p:
         log("[2/3] Chrome 연결 + 로그인 대기...")
         try:
-            browser, context, page = await cdp_connect(p)
+            browser, context, page = await connect_page(p)
         except Exception as e:
             log(f"ERROR: Chrome 연결 실패 - {e}")
             return
 
-        # NHIS EDI 페이지로 이동
-        await page.goto(NHIS_EDI_URL, wait_until="domcontentloaded", timeout=30000)
+        # 이미 NHIS EDI 페이지면 재로딩하지 않음 (팝업 재생성 방지)
+        if "edi.nhis.or.kr" not in page.url:
+            await page.goto(NHIS_EDI_URL, wait_until="domcontentloaded", timeout=30000)
+
+        # 팝업 먼저 닫기 — popup 탭이 pages[0]일 수 있어 로그인 인식 방해
+        page = await close_popups(context)
         await page.bring_to_front()
 
         if not await wait_for_login(page):
@@ -268,9 +272,6 @@ async def main():
             return
 
         log("로그인 확인됨. 자동화 시작.\n")
-
-        # 팝업 닫기
-        page = await close_popups(context)
 
         # Phase 2: 모드 선택
         log("실행 모드 선택:")

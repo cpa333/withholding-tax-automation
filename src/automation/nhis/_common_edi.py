@@ -84,7 +84,11 @@ async def wait_for_login(page):
 
 
 async def close_popups(context):
-    """메인 페이지 제외 모든 팝업/공지사항 탭 닫기"""
+    """메인 페이지 제외 모든 팝업/공지사항 탭 닫기
+
+    retrievePopupData.do 팝업은 '하루동안 열지않기' 체크 후 closeWin()으로 닫아
+    다음 접속 시 재등장하지 않도록 처리.
+    """
     main_page = None
     for pg in context.pages:
         if "retrieveMain" in pg.url:
@@ -95,12 +99,25 @@ async def close_popups(context):
 
     closed = 0
     for pg in context.pages[:]:
-        if pg != main_page:
-            try:
-                await pg.close()
-                closed += 1
-            except Exception:
-                pass
+        if pg == main_page:
+            continue
+        try:
+            # 공지 팝업이면 '하루동안 열지않기' 체크 후 정상 닫기
+            if "retrievePopupData" in pg.url:
+                checked = await pg.evaluate("""() => {
+                    var cb = document.getElementById('chk_close');
+                    if (cb && !cb.checked) { cb.click(); return true; }
+                    return false;
+                }""")
+                if checked:
+                    log("  '하루동안 열지않기' 체크")
+                await pg.evaluate("() => { if (typeof closeWin === 'function') closeWin(); }")
+                await asyncio.sleep(0.5)
+            await pg.close()
+            closed += 1
+        except Exception:
+            # closeWin()이 탭을 이미 닫은 경우
+            pass
     if closed:
         log(f"  팝업 {closed}개 닫음")
     return main_page
