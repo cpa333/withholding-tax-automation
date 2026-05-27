@@ -84,7 +84,7 @@ async def launch_chrome():
         "--profile-directory=Profile 2",
         "--start-maximized",
         "--disable-blink-features=AutomationControlled",
-        "--disable-infobars",
+        "--test-type",
         WEHAGO_URL,
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 

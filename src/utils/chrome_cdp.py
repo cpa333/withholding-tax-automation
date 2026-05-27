@@ -198,7 +198,7 @@ def launch_chrome(url="https://www.wehago.com/", *, force=False):
             f"--profile-directory={profile}",
             "--start-maximized",
             "--disable-blink-features=AutomationControlled",
-            "--disable-infobars",
+            "--test-type",
             url,
         ],
         stdout=subprocess.DEVNULL,

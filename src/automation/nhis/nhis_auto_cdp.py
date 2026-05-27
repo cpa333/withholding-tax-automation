@@ -168,7 +168,7 @@ async def run():
                 "--user-data-dir=" + os.path.join(os.environ.get("TEMP", "/tmp"), "chrome-nhis"),
                 "--start-maximized",
                 "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
+                "--test-type",
                 "https://www.nhis.or.kr"
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
