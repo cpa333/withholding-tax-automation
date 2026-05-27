@@ -19,16 +19,6 @@ _WEBDRIVER_OVERRIDE = """
     });
 """
 
-# playwright-stealth 모듈 중 핑거프린트 위장(오히려 해로운 것)은 제외
-_STEALTH_SKIP_MODULES = {
-    "webgl.vendor",           # 실제 GPU 정보 덮어쓰면 일관성 깨짐
-    "navigator.hardwareConcurrency",  # 실제 코어 수와 불일치
-    "navigator.platform",     # 실제 platform과 불일치 가능
-    "navigator.languages",    # 실제 언어 설정과 불일치 가능
-    "media.codecs",           # 실제 코덱 정보와 불일치
-    "user-agent-override",    # 실제 UA와 불일치
-}
-
 
 async def apply_stealth(page: Page) -> None:
     """Apply stealth patches to a single page.
@@ -38,27 +28,31 @@ async def apply_stealth(page: Page) -> None:
     are left as-is because overwriting correct values creates inconsistencies.
     """
     try:
-        from playwright_stealth import StealthConfig, stealth_async
-        config = StealthConfig(
+        from playwright_stealth import Stealth
+        s = Stealth(
             navigator_webdriver=True,
             navigator_plugins=True,
             navigator_permissions=True,
             navigator_vendor=True,
             chrome_app=True,
             chrome_csi=True,
-            chrome_loadTimes=True,
-            chrome_hairline=True,
-            error_proxy=True,
-            error_sourceurl=True,
+            chrome_load_times=True,
+            hairline=True,
             iframe_content_window=True,
-            webgl_vendor=False,          # 실제 GPU 정보 유지
-            navigator_hardware_concurrency=False,  # 실제 코어 수 유지
-            navigator_platform=False,    # 실제 platform 유지
-            navigator_languages=False,   # 실제 언어 유지
-            media_codecs=False,          # 실제 코덱 유지
-            user_agent_override=False,   # 실제 UA 유지
+            error_prototype=True,
+            webgl_vendor=False,                    # 실제 GPU 정보 유지
+            navigator_hardware_concurrency=False,   # 실제 코어 수 유지
+            navigator_platform=False,               # 실제 platform 유지
+            navigator_platform_override=None,
+            navigator_languages=False,              # 실제 언어 유지
+            navigator_languages_override=None,
+            navigator_user_agent=False,             # 실제 UA 유지
+            navigator_user_agent_data=False,        # 실제 Client Hints 유지
+            sec_ch_ua=False,                        # 실제 Sec-CH-UA 유지
+            media_codecs=False,                     # 실제 코덱 유지
+            chrome_runtime=False,                   # 확장 충돌 방지
         )
-        await stealth_async(page, config)
+        await s.apply_stealth_async(page)
     except Exception:
         # playwright-stealth 미설치 또는 런타임 오류 시 수동 폴백
         try:
