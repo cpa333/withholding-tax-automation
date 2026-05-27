@@ -697,6 +697,11 @@ async def main():
         log("[1] Chrome CDP 연결...")
         browser = await p.chromium.connect_over_cdp(CDP_URL)
         context = browser.contexts[0]
+
+        from src.utils.stealth import stealth_all_pages, register_auto_stealth
+        await stealth_all_pages(context)
+        register_auto_stealth(context)
+
         page = context.pages[0] if context.pages else await context.new_page()
 
         # ── [2] WEHAGO 로그인 ────────────────────────────────────

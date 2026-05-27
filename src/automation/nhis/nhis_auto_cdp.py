@@ -189,6 +189,11 @@ async def run():
             return
 
         context = browser.contexts[0]
+
+        from src.utils.stealth import stealth_all_pages, register_auto_stealth
+        await stealth_all_pages(context)
+        register_auto_stealth(context)
+
         page = context.pages[0]
 
         # 이전 팝업 탭 정리
