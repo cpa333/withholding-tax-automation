@@ -512,30 +512,15 @@ async def get_all_clients_from_management(page):
 async def get_clients_from_main_page(page):
     """WEHAGO 메인 페이지(#/main)에서 수임처명 + 사업자등록번호 스크래핑.
 
-    div.cl_list_content.type_lite 내 카드에서 이름과 사업자번호를 동시 추출.
-    SPA에서 카드가 점진적으로 렌더링되므로 카드 수가 안정화될 때까지 폴링.
+    ul.inner_list > li 내 카드에서 이름과 사업자번호를 동시 추출.
+    이 선택자는 WEHAGO SPA의 가상 스크롤과 무관하게 항상 전체 목록을 포함.
     """
-    # 카드 렌더링 안정화 대기: 2초 간격으로 카드 수가 변하지 않으면 완료
-    prev_count = 0
-    for _ in range(10):
-        count = await page.evaluate(r'''() => {
-            return document.querySelectorAll(
-                'div.cl_list_content.type_lite div.sub_info[id^="company_"]'
-            ).length;
-        }''')
-        if count > 0 and count == prev_count:
-            break
-        prev_count = count
-        await asyncio.sleep(2)
-
     clients = await page.evaluate(r'''() => {
-        const cards = document.querySelectorAll(
-            'div.cl_list_content.type_lite div.sub_info[id^="company_"]'
-        );
+        const items = document.querySelectorAll('ul.inner_list > li');
         const results = [];
-        for (const card of cards) {
-            const nameEl = card.querySelector('a');
-            const bizEl = card.querySelector('p.company_num');
+        for (const li of items) {
+            const nameEl = li.querySelector('a[id^="tooltip_"]');
+            const bizEl = li.querySelector('p.company_num');
             if (!nameEl) continue;
             let name = nameEl.textContent.trim();
             name = name.replace('[테스트] ', '');
