@@ -228,6 +228,21 @@ steps     (id, job_id, step_name, step_index, status, started_at, ...)
 
 ## 9. 빌드 및 실행
 
+### 초기 환경 설정 (처음 실행하는 PC)
+
+`setup.bat`를 **관리자 권한으로 실행** (우클릭 → 관리자 권한으로 실행):
+
+1. 관리자 권한 확인
+2. Python 3.10+ 설치 여부 및 버전 확인
+3. pip 업그레이드
+4. `requirements.txt` 패키지 일괄 설치 (PySide6, Playwright, pywinauto, PyMuPDF 등)
+5. Playwright Chromium 브라우저 바이너리 설치 (~150MB)
+6. Google Chrome 설치 여부 확인
+
+사전 요구:
+- **Python 3.10+**: 미설치 시 python.org 또는 Microsoft Store에서 설치 (PATH 추가 필수)
+- **Google Chrome**: 미설치 시 google.com/chrome에서 설치
+
 ### 개발 모드
 
 ```bash
@@ -270,6 +285,7 @@ python build.py
 | pywinauto | Windows GUI 자동화 |
 | openpyxl | Excel 파일 처리 |
 | comtypes | COM 인터페이스 |
+| PyMuPDF | PDF 텍스트/표 추출 |
 | pyinstaller | exe 빌드 |
 
 ## 11. 핵심 설계 결정
