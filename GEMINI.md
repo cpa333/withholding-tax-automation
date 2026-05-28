@@ -483,7 +483,7 @@ src/ui/
 
 | 명령 | 트리거 | 흐름 |
 |------|--------|------|
-| `refresh_clients` | "새로 가져오기" 버튼 | `_ensure_browser("wehago")` → `_wait_for_login("wehago")` → 수임처 스크래핑 → DB 저장 |
+| `refresh_clients` | "새로 가져오기" 버튼 | `_ensure_browser("wehago")` → `_wait_for_login("wehago")` → taxagent 이동 → 카드별 클릭으로 이름+사업자번호 스크래핑 → DB 저장 |
 | `run_phase` (2+) | "시작" 버튼 | `_ensure_browser(portal)` → `_wait_for_login(portal)` → BatchEngine 배치 실행 |
 
 ### 로그인 대기 전략 (포털별)

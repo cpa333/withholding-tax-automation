@@ -46,11 +46,15 @@
 - **모두 삭제 버튼:** 등록된 수임처 전체 삭제 (확인 다이얼로그 포함)
 - "시작" 버튼은 Phase 1에서 비활성화됨
 
-스크래핑 동작:
-1. WEHAGO 메인 페이지(`#/main`)의 카드 UI에서 직접 수임처 정보 추출
-2. `div.cl_list_content.type_lite div.sub_info[id^="company_"]`에서 각 카드의 수임처명(`a`)과 사업자등록번호(`p.company_num`) 수집
-3. `[테스트]` 접두사 제거 후 DB에 wehago 포털로 저장 (수임처명 + 사업자등록번호)
-4. 레거시: `get_all_clients_from_management()` (수임처관리 페이지 스크래핑)은 별도 유지
+스크래핑 동작 (`get_clients_with_biz_from_taxagent`):
+1. 수임처관리 페이지(`tedge/#/taxagent`)로 이동 → 모달 닫기 → 리스트 로딩 대기
+2. 스크롤 컨테이너를 끝까지 스크롤하여 전체 카드(24개) 로드
+3. 각 카드를 순차 클릭 → `div.cl_basicinfo_section` 상세 영역에서 사업자등록번호(`\d{3}-\d{2}-\d{5}`) 추출
+4. 수임처명은 `li.is_linkbtn.selected > span.company_name_text`에서 추출
+5. `[테스트]` 접두사 제거 후 DB에 wehago 포털로 저장 (수임처명 + 사업자등록번호)
+6. 레거시: `get_all_clients_from_management()` (이름만 수집)은 별도 유지
+
+> **참고:** 메인 페이지(`#/main`)의 카드 UI는 SPA 가상 스크롤로 인해 항상 20개만 DOM에 렌더링되어 전체 수임처를 보장하지 않음.
 
 ### Phase 2: 국민건강보험 EDI
 
