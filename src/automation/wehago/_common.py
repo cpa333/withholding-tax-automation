@@ -15,6 +15,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from src.utils.chrome_cdp import CDP_URL
 
 WEHAGO_URL = "https://www.wehago.com/"
+WEHAGO_TAXAGENT_URL = "https://www.wehago.com/tedge/#/taxagent"
 
 
 def log(msg):
@@ -369,6 +370,143 @@ async def search_companies(page, keyword):
         return matches;
     }""", keyword)
     return results or []
+
+
+async def goto_client_management(page):
+    """메인 페이지에서 '수임처관리' 버튼 클릭하여 전체 수임처 목록 페이지로 이동.
+
+    '담당 수임처' 텍스트 근처의 '수임처관리' 링크/버튼을 찾아 클릭.
+    """
+    # 현재 페이지 URL 로깅
+    current_url = page.url
+    log(f"  현재 URL: {current_url}")
+
+    # 페이지에 있는 텍스트 디버깅
+    debug_info = await page.evaluate("""() => {
+        const info = {buttons: [], links: [], cardCount: 0, nameTextCount: 0};
+
+        // 모든 버튼/링크에서 '수임처' 포함 텍스트 수집
+        document.querySelectorAll('a, button').forEach(el => {
+            const t = el.textContent.trim();
+            if (t.includes('수임처') || t.includes('관리')) {
+                info.buttons.push({tag: el.tagName, text: t.substring(0, 50), href: el.href || ''});
+            }
+        });
+
+        // 카드/이름 요소 개수
+        info.cardCount = document.querySelectorAll('li[id^="card"]').length;
+        info.nameTextCount = document.querySelectorAll('span.company_name_text').length;
+        info.companyDivCount = document.querySelectorAll('[id^="company_"]').length;
+
+        return info;
+    }""")
+    log(f"  디버그: 버튼/링크={debug_info.get('buttons', [])}")
+    log(f"  디버그: card={debug_info.get('cardCount')}, name_text={debug_info.get('nameTextCount')}, company_div={debug_info.get('companyDivCount')}")
+
+    # 이미 수임처관리 페이지에 있는지 확인
+    if debug_info.get('cardCount', 0) > 0:
+        log("  이미 수임처관리 페이지에 있습니다.")
+        return True
+
+    # "수임처관리" 클릭 시도 — 여러 방식으로
+    clicked = await page.evaluate("""() => {
+        // 1) 정확히 "수임처관리" 텍스트
+        const allElements = document.querySelectorAll('a, button, span');
+        for (const el of allElements) {
+            const text = el.textContent.trim();
+            if (text === '수임처관리' || text === '수임처 관리' || text === '수임처 관리 ') {
+                el.click();
+                return 'exact: ' + text;
+            }
+        }
+
+        // 2) "수임처관리"를 포함하는 요소
+        for (const el of allElements) {
+            const text = el.textContent.trim();
+            if (text.includes('수임처관리') && text.length < 20) {
+                el.click();
+                return 'contains: ' + text;
+            }
+        }
+
+        // 3) "담당 수임처" 근처에서 찾기
+        const headings = document.querySelectorAll('h2, h3, h4, .title, [class*="title"]');
+        for (const h of headings) {
+            if (h.textContent.includes('담당 수임처') || h.textContent.includes('수임처')) {
+                const parent = h.parentElement;
+                if (parent) {
+                    const link = parent.querySelector('a, button');
+                    if (link) {
+                        link.click();
+                        return 'near_title: ' + link.textContent.trim();
+                    }
+                }
+            }
+        }
+
+        return false;
+    }""")
+
+    if not clicked:
+        log("  '수임처관리' 버튼을 찾지 못했습니다.")
+        return False
+
+    log(f"  '수임처관리' 클릭 성공 ({clicked}) → 로딩 대기...")
+    await asyncio.sleep(3)
+
+    # 이동 후 확인
+    after_info = await page.evaluate("""() => ({
+        url: location.href,
+        cardCount: document.querySelectorAll('li[id^="card"]').length,
+        nameTextCount: document.querySelectorAll('span.company_name_text').length,
+    })""")
+    log(f"  이동 후: url={after_info['url']}, card={after_info['cardCount']}, name_text={after_info['nameTextCount']}")
+
+    return True
+
+
+async def get_all_clients_from_management(page):
+    """수임처관리 페이지에서 전체 수임처 목록 스크래핑.
+
+    HTML 구조: <ul class="acceptance_list"> 안의 <li>에서 수임처명.
+    리스트는 div.cl_lnb_bottom 스크롤 컨테이너 안에 있어서
+    컨테이너를 끝까지 스크롤해야 전체 항목이 로드됨.
+    """
+    # 1) 스크롤 컨테이너를 끝까지 스크롤하여 모든 항목 로드
+    for _ in range(10):
+        count = await page.evaluate("""() => {
+            const container = document.querySelector('div.cl_lnb_bottom');
+            if (!container) return 0;
+            container.scrollTop = container.scrollHeight;
+            const lists = container.querySelectorAll('ul.acceptance_list');
+            let total = 0;
+            for (const ul of lists) {
+                total += ul.querySelectorAll(':scope > li').length;
+            }
+            return total;
+        }""")
+        await asyncio.sleep(0.5)
+
+    # 2) 로드된 전체 항목에서 이름 수집
+    names = await page.evaluate("""() => {
+        const allLists = document.querySelectorAll('ul.acceptance_list');
+        for (const list of allLists) {
+            const items = list.querySelectorAll(':scope > li');
+            if (items.length === 0) continue;
+            const results = [];
+            for (const item of items) {
+                const nameEl = item.querySelector('span.company_name_text');
+                if (!nameEl) continue;
+                const name = nameEl.textContent.trim();
+                if (name) results.push(name);
+            }
+            return results;
+        }
+        return [];
+    }""")
+
+    log(f"  수임처 스크랩 완료: 총 {len(names or [])}건")
+    return names or []
 
 
 async def goto_salary_page(page, company_name):

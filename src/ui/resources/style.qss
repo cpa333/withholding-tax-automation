@@ -1,0 +1,141 @@
+/* 원천징수 자동화 스타일시트 */
+
+/* ── 전체 ── */
+QMainWindow {
+    background-color: #ffffff;
+    color: #1a1a1a;
+}
+
+QWidget {
+    font-family: '맑은 고딕', 'Segoe UI', sans-serif;
+    font-size: 13px;
+    color: #1a1a1a;
+}
+
+QLabel {
+    color: #1a1a1a;
+}
+
+QLineEdit {
+    color: #1a1a1a;
+    background-color: #ffffff;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    padding: 3px 6px;
+}
+
+QTextEdit {
+    color: #1a1a1a;
+    background-color: #ffffff;
+}
+
+/* ── 툴바 ── */
+QSpinBox {
+    padding: 3px 6px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    color: #1a1a1a;
+    background-color: #ffffff;
+}
+
+QCheckBox {
+    spacing: 5px;
+    color: #1a1a1a;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+}
+
+QPushButton {
+    padding: 5px 12px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    background-color: #f8f8f8;
+    color: #1a1a1a;
+}
+
+QPushButton:hover {
+    background-color: #e8e8e8;
+}
+
+QPushButton:disabled {
+    color: #aaa;
+    background-color: #f0f0f0;
+}
+
+/* ── 테이블 ── */
+QTableView {
+    gridline-color: #e0e0e0;
+    selection-background-color: #d0e4f7;
+    selection-color: #000;
+    alternate-background-color: #fafafa;
+    color: #1a1a1a;
+    background-color: #ffffff;
+}
+
+QHeaderView::section {
+    background-color: #f5f5f5;
+    color: #1a1a1a;
+    padding: 4px 8px;
+    border: none;
+    border-bottom: 2px solid #ddd;
+    font-weight: bold;
+}
+
+/* ── 프로그레스바 ── */
+QProgressBar {
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    background-color: #f0f0f0;
+    color: #1a1a1a;
+    text-align: center;
+}
+
+QProgressBar::chunk {
+    border-radius: 2px;
+    background-color: #4caf50;
+}
+
+/* ── 스플리터 ── */
+QSplitter::handle {
+    background-color: #ddd;
+}
+
+QSplitter::handle:horizontal {
+    width: 2px;
+}
+
+QSplitter::handle:vertical {
+    height: 2px;
+}
+
+/* ── 상태바 ── */
+QStatusBar {
+    background-color: #f5f5f5;
+    color: #1a1a1a;
+    border-top: 1px solid #ddd;
+    padding: 2px 8px;
+    font-size: 12px;
+}
+
+QStatusBar QLabel {
+    color: #1a1a1a;
+}
+
+/* ── 스크롤바 ── */
+QScrollBar:vertical {
+    background-color: #f5f5f5;
+    width: 10px;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #ccc;
+    border-radius: 4px;
+    min-height: 30px;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
