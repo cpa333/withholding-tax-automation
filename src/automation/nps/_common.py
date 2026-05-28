@@ -700,7 +700,7 @@ async def process_tab_download(page, context, save_dir, tab_index, tab_label, gr
 # 사업장 선택 / 전환
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def switch_workplace(page, workplace_name):
+async def switch_workplace(page, workplace_name, management_number=""):
     """사업장전환 버튼으로 사업장 전환
 
     페이지 상단 '사업장전환' 버튼 클릭 → 모달에서 사업장 더블클릭 선택.
@@ -708,6 +708,7 @@ async def switch_workplace(page, workplace_name):
     Args:
         page: Playwright page
         workplace_name: 선택할 사업장명 (부분 매칭)
+        management_number: 사업장관리번호 (숫자만, 우선 사용)
 
     Returns:
         bool: 전환 성공 여부
@@ -719,30 +720,29 @@ async def switch_workplace(page, workplace_name):
         return False
     await asyncio.sleep(2)
 
-    ok = await select_workplace(page, workplace_name)
+    ok = await select_workplace(page, workplace_name, management_number)
     if ok:
         log(f"  사업장 전환 완료: {workplace_name}")
     return ok
 
 
-async def _search_workplace_in_modal(page, search_text):
+async def _search_workplace_in_modal(page, search_text, search_by_mgmt_no=False):
     """사업장전환 모달의 검색 입력란에 텍스트 입력 후 검색 실행
-
-    사업장관리번호 콤보를 '사업장명'으로 변경하고, 검색어를 입력한 뒤
-    검색 버튼을 클릭하여 그리드 결과를 갱신.
 
     Args:
         page: Playwright page
         search_text: 검색할 텍스트
+        search_by_mgmt_no: True면 사업장관리번호(item_1), False면 사업장명(item_0)
     """
     MODAL_SEARCH = (
         "mainframe.VFrameSet.FrameSdi.ChangeBusi"
         ".form.divPopBg.form.divPopWork.form.div01.form"
     )
-    # 검색 필드 콤보 드롭다운 열기 → '사업장명'(item_0) 선택
+    # 검색 필드 콤보 드롭다운 열기 → 항목 선택
     await nexacro_click_button(page, f"{MODAL_SEARCH}.cbo00.dropbutton")
     await asyncio.sleep(0.5)
-    await nexacro_click_button(page, f"{MODAL_SEARCH}.cbo00.combolist.item_0")
+    item = "item_1" if search_by_mgmt_no else "item_0"
+    await nexacro_click_button(page, f"{MODAL_SEARCH}.cbo00.combolist.{item}")
     await asyncio.sleep(0.5)
 
     # 검색 입력란(edt08)에 텍스트 입력
@@ -804,18 +804,34 @@ async def open_workplace_selector(page):
     await asyncio.sleep(2)
 
 
-async def select_workplace(page, workplace_name):
+async def select_workplace(page, workplace_name, management_number=""):
     """사업장 선택 모달에서 특정 사업장을 더블클릭으로 선택
 
-    그리드에 표시되지 않으면 모달 내 검색으로 찾기 시도.
+    management_number가 제공되면 사업장관리번호(col=1)로 검색.
+    그렇지 않으면 사업장명(col=2)으로 검색.
 
     Args:
         page: Playwright page
         workplace_name: 선택할 사업장명 (부분 매칭)
+        management_number: 사업장관리번호 (숫자만, 우선 사용)
 
     Returns:
         bool: 선택 성공 여부
     """
+    if management_number:
+        log(f"  사업장 검색: 관리번호 '{management_number}'")
+        # 그리드는 하이픈 포함 형식이므로 모달 검색으로 바로 진행
+        await _search_workplace_in_modal(page, management_number, search_by_mgmt_no=True)
+        await asyncio.sleep(2)
+        # 검색 후 첫 번째 행 선택 (관리번호 검색은 결과가 1건)
+        result = await nexacro_dblclick_cell(page, GRID_WORKPLACE, row=0, col=2)
+        if result.get("ok"):
+            log(f"  사업장 선택 완료: {result.get('text', '')}")
+            await asyncio.sleep(3)
+            return True
+        log(f"  사업장 선택 실패: {result}")
+        return False
+
     log(f"  사업장 검색: '{workplace_name}'")
 
     # 사업장명 컬럼(col=2)에서 텍스트 매칭하여 행 인덱스 찾기

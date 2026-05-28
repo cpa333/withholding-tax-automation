@@ -206,3 +206,35 @@ class StateManager:
             except (json.JSONDecodeError, TypeError):
                 result[s.step_name] = {}
         return result
+
+
+class NoopStateManager:
+    """단건 실행용 상태 관리자 (DB 기록 없음)
+
+    모든 메서드가 no-op이며 should_skip_step은 항상 False.
+    BatchEngine 없이 단일 수임처만 실행할 때 사용.
+    """
+
+    def before_step(self, job_id, step_name, step_index=0, step_data=None):
+        pass
+
+    def after_step(self, job_id, step_name, step_data=None):
+        pass
+
+    def fail_step(self, job_id, step_name, error_message=""):
+        pass
+
+    def get_resume_index(self, job_id):
+        return 0
+
+    def should_skip_step(self, job_id, step_name):
+        return False
+
+    def define_workflow(self, job_id, steps):
+        pass
+
+    def detect_partial_execution(self, job_id):
+        return []
+
+    def reset_partial_steps(self, job_id):
+        return 0

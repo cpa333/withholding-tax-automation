@@ -304,18 +304,44 @@ async def search_firm(popup, keyword, search_type="name"):
     return (await _parse_current_page_firms(popup))["firms"]
 
 
-async def select_firm(popup, firm_name):
+async def select_firm(popup, firm_name, management_number=""):
     """사업장 선택 팝업에서 특정 사업장 선택
 
-    현재 목록에서 먼저 찾고, 없으면 검색으로 찾기.
+    management_number가 제공되면 사업장관리번호로 검색.
+    그렇지 않으면 사업장명으로 기존 목록에서 찾은 후 검색.
 
     Args:
         popup: 사업장 선택 팝업 탭
         firm_name: 선택할 사업장명 (부분 매칭)
+        management_number: 사업장관리번호 (숫자만, 우선 사용)
 
     Returns:
         bool: 선택 성공 여부
     """
+    if management_number:
+        log(f"  사업장 검색: 관리번호 '{management_number}'")
+        results = await search_firm(popup, management_number, search_type="number")
+        if not results:
+            log(f"  관리번호 '{management_number}' 사업장을 찾지 못했습니다.")
+            return False
+        # fn_firmChang onclick이 있는 실제 수임처 링크 클릭 (헤더 정렬 링크 제외)
+        found = await popup.evaluate("""() => {
+            const links = document.querySelectorAll('table.list a');
+            for (const a of links) {
+                const onclick = a.getAttribute('onclick') || '';
+                if (onclick.includes('fn_firmChang')) {
+                    a.click();
+                    return a.textContent.trim();
+                }
+            }
+            return null;
+        }""")
+        if found:
+            log(f"  '{found}' 선택 완료")
+            return True
+        log(f"  검색 결과에서 사업장을 찾지 못했습니다.")
+        return False
+
     log(f"  사업장 검색: '{firm_name}'")
 
     # 1페이지로 리셋 후 전체 목록에서 찾기

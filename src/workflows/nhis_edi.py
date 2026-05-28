@@ -21,7 +21,7 @@ class NhisEdiWorkflow(BaseWorkflow):
 
     async def run_single(
         self, page, context, client_name: str, job_id: int,
-        state: StateManager, **kwargs,
+        state: StateManager, management_number: str = "", **kwargs,
     ) -> bool:
         from src.automation.nhis._common_edi import (
             close_popups, open_firm_selector, select_firm, close_firm_popup,
@@ -49,7 +49,7 @@ class NhisEdiWorkflow(BaseWorkflow):
         # 사업장 검색/선택
         if not state.should_skip_step(job_id, "select_firm"):
             state.before_step(job_id, "select_firm", 1)
-            ok = await select_firm(popup, client_name)
+            ok = await select_firm(popup, client_name, management_number)
             if not ok:
                 state.fail_step(job_id, "select_firm", f"'{client_name}' 선택 실패")
                 await close_firm_popup(context, popup)

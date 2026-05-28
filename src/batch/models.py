@@ -177,6 +177,16 @@ class Step:
 # 편의 함수
 # ═══════════════════════════════════════════════════════════════════════
 
+def biz_to_mgmt_no(business_number: str) -> str:
+    """사업자등록번호를 사업장관리번호로 변환
+
+    하이픈 제거 후 끝에 '0' 추가.
+    예: "123-45-67890" → "12345678900"
+    """
+    digits = business_number.replace("-", "")
+    return digits + "0" if digits else ""
+
+
 def make_batch_key(year: int, month: int, portal: str) -> str:
     """배치 고유키 생성
 

@@ -52,6 +52,8 @@ class AutomationRunner(AsyncWorker):
                     await self._handle_run_phase(cmd)
                 elif cmd.get("type") == "refresh_clients":
                     await self._handle_refresh_clients()
+                elif cmd.get("type") == "run_single_client":
+                    await self._handle_run_single_client(cmd)
 
         self.log_message.emit("자동화 러너 종료됨")
 
@@ -263,6 +265,79 @@ class AutomationRunner(AsyncWorker):
         except Exception as e:
             self.log_message.emit(f"수임처 조회 실패: {e}")
             self.error_occurred.emit(f"수임처 조회 실패: {e}")
+
+    def start_single_client(self, phase_id: int, client_name: str,
+                            management_number: str = ""):
+        """단건 실행: 수임처 1개에 대해서만 자동화 실행"""
+        cmd = {
+            "type": "run_single_client",
+            "phase_id": phase_id,
+            "client_name": client_name,
+            "management_number": management_number,
+        }
+        self._command_queue.put_nowait(cmd)
+        if not self._pause_event.is_set():
+            self._pause_event.set()
+        if not self.isRunning():
+            self.start()
+
+    async def _handle_run_single_client(self, cmd: dict):
+        """단건 실행 명령 처리 — BatchEngine 없이 직접 워크플로우 실행"""
+        phase_id = cmd.get("phase_id", 0)
+        client_name = cmd.get("client_name", "")
+        management_number = cmd.get("management_number", "")
+
+        from src.workflows.registry import get_phase_info, get_workflow
+
+        info = get_phase_info(phase_id)
+        if not info:
+            self.log_message.emit(f"알 수 없는 페이즈: {phase_id}")
+            return
+
+        portal = info["portal"]
+        display_name = info["display_name"]
+        self.log_message.emit(f"[{display_name}] 단건 실행: {client_name}")
+        self.phase_changed.emit(phase_id, "running")
+
+        # Chrome 실행 + 로그인
+        if not await self._ensure_browser(portal):
+            self.phase_changed.emit(phase_id, "failed")
+            self.error_occurred.emit("Chrome 연결 실패")
+            return
+
+        if not await self._wait_for_login(portal):
+            self.phase_changed.emit(phase_id, "failed")
+            self.error_occurred.emit("로그인 실패 또는 시간 초과")
+            return
+
+        await self._reconnect_page(portal)
+
+        # 워크플로우 직접 실행 (BatchEngine 없이)
+        workflow = get_workflow(phase_id)
+        if not workflow:
+            self.log_message.emit(f"워크플로우를 찾을 수 없음: phase {phase_id}")
+            return
+
+        from src.batch.state import NoopStateManager
+        state = NoopStateManager()
+
+        try:
+            success = await workflow.run_single(
+                self._page, self._context,
+                client_name, job_id=0,
+                state=state,
+                management_number=management_number,
+            )
+            if success:
+                self.log_message.emit(f"[{display_name}] {client_name} 단건 실행 완료")
+                self.phase_changed.emit(phase_id, "completed")
+            else:
+                self.log_message.emit(f"[{display_name}] {client_name} 단건 실행 실패")
+                self.phase_changed.emit(phase_id, "failed")
+        except Exception as e:
+            self.log_message.emit(f"[{display_name}] {client_name} 오류: {e}")
+            self.error_occurred.emit(str(e))
+            self.phase_changed.emit(phase_id, "failed")
 
     def _reset_batch(self, db_path: str, portal: str, phase_id: int):
         """이전 배치/잡/단계를 모두 삭제하여 깨끗한 상태로 초기화"""

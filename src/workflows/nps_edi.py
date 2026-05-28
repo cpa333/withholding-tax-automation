@@ -23,7 +23,7 @@ class NpsEdiWorkflow(BaseWorkflow):
 
     async def run_single(
         self, page, context, client_name: str, job_id: int,
-        state: StateManager, **kwargs,
+        state: StateManager, management_number: str = "", **kwargs,
     ) -> bool:
         from src.automation.nps._common import (
             navigate_to_decision_details, open_decision_detail,
@@ -43,7 +43,7 @@ class NpsEdiWorkflow(BaseWorkflow):
         # 사업장 전환
         if not state.should_skip_step(job_id, "switch_workplace"):
             state.before_step(job_id, "switch_workplace", 0)
-            ok = await switch_workplace(page, client_name)
+            ok = await switch_workplace(page, client_name, management_number)
             if not ok:
                 state.fail_step(job_id, "switch_workplace", f"'{client_name}' 전환 실패")
                 return False

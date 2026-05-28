@@ -17,7 +17,7 @@ from typing import Callable, Optional, Awaitable
 
 from src.batch.models import (
     Batch, BatchStatus, Client, Job, JobStatus, Portal,
-    make_batch_key, now_iso,
+    biz_to_mgmt_no, make_batch_key, now_iso,
 )
 from src.batch.db import (
     BatchDB, BatchRepository, ClientRepository, JobRepository, StepRepository,
@@ -248,8 +248,17 @@ class BatchEngine:
         """단일 잡 실행"""
         self.job_repo.mark_running(job.id)
 
+        # 사업장관리번호 조회
+        mgmt_no = ""
+        if job.client_id:
+            client = self.client_repo.get(job.client_id)
+            if client and client.business_number:
+                mgmt_no = biz_to_mgmt_no(client.business_number)
+
         print(f"\n{'─'*55}")
         print(f"  [{job.client_name}] 처리 시작")
+        if mgmt_no:
+            print(f"  사업장관리번호: {mgmt_no}")
         print(f"  잡 ID: {job.id}, 재시도: {job.retry_count}")
         print(f"{'─'*55}")
 
@@ -262,6 +271,7 @@ class BatchEngine:
         try:
             success = await workflow_func(
                 page, context, job, self.state,
+                management_number=mgmt_no,
             )
 
             if success:

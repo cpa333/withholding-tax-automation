@@ -100,9 +100,12 @@ class CompanyTable(QWidget):
     job_selected = Signal(int)  # job_id
     refresh_requested = Signal()
     delete_all_requested = Signal()
+    single_run_requested = Signal(str, str)  # client_name, management_number
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._selected_client_name = ""
+        self._selected_business_number = ""
         self._setup_ui()
 
     def _setup_ui(self):
@@ -132,8 +135,20 @@ class CompanyTable(QWidget):
         )
         self.delete_all_btn.clicked.connect(self.delete_all_requested.emit)
 
+        self.single_run_btn = QPushButton("단건 실행")
+        self.single_run_btn.setStyleSheet(
+            "QPushButton { background-color: #ff9800; color: white; "
+            "padding: 4px 12px; border-radius: 3px; font-size: 12px; }"
+            "QPushButton:hover { background-color: #f57c00; }"
+            "QPushButton:disabled { background-color: #bbb; }"
+        )
+        self.single_run_btn.setEnabled(False)
+        self.single_run_btn.clicked.connect(self._on_single_run)
+        self.single_run_btn.setVisible(False)
+
         btn_row.addWidget(self.refresh_btn)
         btn_row.addWidget(self.delete_all_btn)
+        btn_row.addWidget(self.single_run_btn)
         btn_row.addStretch()
 
         self._btn_row_widget = QWidget()
@@ -174,7 +189,7 @@ class CompanyTable(QWidget):
     def update_jobs(self, jobs: list[dict], failed_info: list[dict] | None = None):
         """수임처 Job 목록 업데이트 (Phase 2+ 모드)"""
         self.model.set_jobs(jobs)
-        self._btn_row_widget.setVisible(False)
+        self.single_run_btn.setEnabled(False)
 
         if failed_info:
             errors = [f"  - {j['name']}: {j.get('error', '알 수 없음')}" for j in failed_info]
@@ -185,8 +200,17 @@ class CompanyTable(QWidget):
             self.error_summary.setText("")
 
     def set_client_mode(self, enabled: bool):
-        """수임처 관리 버튼 표시/숨김"""
-        self._btn_row_widget.setVisible(enabled)
+        """Phase 1 모드: 단건실행 숨김, 새로가져오기/모두삭제 유지"""
+        self.single_run_btn.setVisible(not enabled)
+        if enabled:
+            self.single_run_btn.setEnabled(False)
+
+    def set_single_run_mode(self, visible: bool):
+        """Phase 2+ 단건 실행 모드"""
+        self.single_run_btn.setVisible(visible)
+        self.single_run_btn.setEnabled(False)
+        self._selected_client_name = ""
+        self._selected_business_number = ""
 
     def set_buttons_enabled(self, enabled: bool):
         """버튼 활성/비활성 (실행 중 잠금)"""
@@ -195,5 +219,18 @@ class CompanyTable(QWidget):
 
     def _on_clicked(self, index):
         job = self.model.get_job_at(index.row())
-        if job and "job_id" in job:
+        if not job:
+            return
+        if "job_id" in job:
             self.job_selected.emit(job["job_id"])
+        if "name" in job and self.model._clients_mode:
+            self._selected_client_name = job.get("name", "")
+            self._selected_business_number = job.get("business_number", "")
+            self.single_run_btn.setEnabled(bool(self._selected_client_name))
+
+    def _on_single_run(self):
+        if self._selected_client_name:
+            self.single_run_requested.emit(
+                self._selected_client_name,
+                self._selected_business_number,
+            )

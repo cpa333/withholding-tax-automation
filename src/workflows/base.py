@@ -54,14 +54,16 @@ class BaseWorkflow(ABC):
         """
         workflow_self = self
 
-        async def _workflow(page, context, job: Job, state_manager: StateManager) -> bool:
+        async def _workflow(page, context, job: Job, state_manager: StateManager,
+                            **engine_kwargs) -> bool:
             # 워크플로우 단계 정의 (최초 실행 시에만)
             resume_at = state_manager.get_resume_index(job.id)
             if resume_at == 0:
                 state_manager.define_workflow(job.id, workflow_self.steps)
 
+            merged = {**kwargs, **engine_kwargs}
             return await workflow_self.run_single(
-                page, context, job.client_name, job.id, state_manager, **kwargs,
+                page, context, job.client_name, job.id, state_manager, **merged,
             )
 
         _workflow.__name__ = f"{self.__class__.__name__}.as_workflow_func"
