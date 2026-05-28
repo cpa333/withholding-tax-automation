@@ -116,6 +116,7 @@ class AutomationRunner(AsyncWorker):
                         engine.client_repo.upsert(Client(
                             name=c.name,
                             portal=portal,
+                            business_number=c.business_number,
                             enabled=True,
                         ))
                 self.log_message.emit(f"  WEHAGO → {portal}: {len(wehago_clients)}개 수임처 동기화")
@@ -183,11 +184,8 @@ class AutomationRunner(AsyncWorker):
             engine.close()
 
     async def _handle_refresh_clients(self):
-        """새로 가져오기: WEHAGO에서 수임처 스크래핑 후 DB 업데이트"""
-        from src.automation.wehago._common import (
-            WEHAGO_TAXAGENT_URL, dismiss_dialogs,
-            get_all_clients_from_management,
-        )
+        """새로 가져오기: WEHAGO 메인 페이지에서 수임처 스크래핑 후 DB 업데이트"""
+        from src.automation.wehago._common import get_clients_from_main_page
         from src.batch.db import BatchDB, ClientRepository
         from src.batch.models import Client
 
@@ -198,33 +196,16 @@ class AutomationRunner(AsyncWorker):
             self.error_occurred.emit("Chrome 연결 실패")
             return
 
-        # 로그인 대기
+        # 로그인 대기 (로그인 후 #/main에 카드 로드됨)
         if not await self._wait_for_login("wehago"):
             self.error_occurred.emit("WEHAGO 로그인 실패 또는 시간 초과")
             return
-        page = self._page
+
         try:
-            await page.goto(WEHAGO_TAXAGENT_URL, wait_until="domcontentloaded", timeout=30000)
-            await dismiss_dialogs(page)
+            clients_data = await get_clients_from_main_page(self._page)
+            clients_data = [c for c in clients_data if c["name"]]
 
-            try:
-                await page.wait_for_selector(
-                    'ul.acceptance_list li span.company_name_text',
-                    timeout=15000,
-                )
-            except Exception:
-                self.log_message.emit("리스트 로딩 재시도...")
-                await dismiss_dialogs(page)
-                await page.wait_for_selector(
-                    'ul.acceptance_list li span.company_name_text',
-                    timeout=20000,
-                )
-
-            companies = await get_all_clients_from_management(page)
-            companies = [n.replace("[테스트] ", "") for n in companies]
-            companies = [n for n in companies if n]
-
-            self.log_message.emit(f"수임처 {len(companies)}건 조회 완료")
+            self.log_message.emit(f"수임처 {len(clients_data)}건 조회 완료")
 
             # DB 교체: 기존 clients 전체 삭제 후 재등록
             db = BatchDB(self._db_path)
@@ -234,19 +215,19 @@ class AutomationRunner(AsyncWorker):
                 db.conn.execute("DELETE FROM jobs")
                 db.conn.execute("DELETE FROM batches")
                 db.conn.execute("DELETE FROM clients")
-                db.conn.execute("COMMIT")
 
                 client_repo = ClientRepository(db)
-                for name in companies:
+                for c in clients_data:
                     client_repo.upsert(Client(
-                        name=name,
+                        name=c["name"],
                         portal="wehago",
+                        business_number=c["business_number"],
                         enabled=True,
                     ))
             finally:
                 db.close()
 
-            self.log_message.emit(f"수임처 새로 가져오기 완료: {len(companies)}건")
+            self.log_message.emit(f"수임처 새로 가져오기 완료: {len(clients_data)}건")
             self.phase_changed.emit(1, "completed")
 
         except Exception as e:

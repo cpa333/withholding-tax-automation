@@ -239,6 +239,7 @@ class MainWindow(QMainWindow):
                 client_dicts = [
                     {
                         "name": c.name.replace("[테스트] ", ""),
+                        "business_number": c.business_number,
                         "portal": c.portal,
                         "enabled": c.enabled,
                     }

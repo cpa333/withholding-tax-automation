@@ -47,9 +47,10 @@
 - "시작" 버튼은 Phase 1에서 비활성화됨
 
 스크래핑 동작:
-1. `div.cl_lnb_bottom` 컨테이너를 하단까지 스크롤하여 전체 리스트 로드
-2. 두 개의 `ul.acceptance_list` 중 `li` 자식이 있는 것을 찾아 수임처명 추출
-3. `[테스트]` 접두사 제거 후 DB에 wehago 포털로 저장
+1. WEHAGO 메인 페이지(`#/main`)의 카드 UI에서 직접 수임처 정보 추출
+2. `div.cl_list_content.type_lite div.sub_info[id^="company_"]`에서 각 카드의 수임처명(`a`)과 사업자등록번호(`p.company_num`) 수집
+3. `[테스트]` 접두사 제거 후 DB에 wehago 포털로 저장 (수임처명 + 사업자등록번호)
+4. 레거시: `get_all_clients_from_management()` (수임처관리 페이지 스크래핑)은 별도 유지
 
 ### Phase 2: 국민건강보험 EDI
 

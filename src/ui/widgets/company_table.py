@@ -17,7 +17,7 @@ _STATUS_DISPLAY = {
 }
 
 _HEADERS_JOBS = ["수임처명", "상태", "현재 단계", "소요시간", "에러"]
-_HEADERS_CLIENTS = ["수임처명", "포털", "활성"]
+_HEADERS_CLIENTS = ["수임처명", "사업자등록번호", "포털", "활성"]
 
 
 class CompanyTableModel(QAbstractTableModel):
@@ -64,8 +64,9 @@ class CompanyTableModel(QAbstractTableModel):
         if self._clients_mode:
             if role == Qt.ItemDataRole.DisplayRole:
                 if col == 0: return row_data.get("name", "")
-                elif col == 1: return row_data.get("portal", "")
-                elif col == 2: return "O" if row_data.get("enabled", True) else "X"
+                elif col == 1: return row_data.get("business_number", "")
+                elif col == 2: return row_data.get("portal", "")
+                elif col == 3: return "O" if row_data.get("enabled", True) else "X"
             return None
 
         if role == Qt.ItemDataRole.DisplayRole:
@@ -154,11 +155,11 @@ class CompanyTable(QWidget):
         self.table.setSelectionMode(QTableView.SingleSelection)
         self.table.setEditTriggers(QTableView.NoEditTriggers)
 
-        # 컬럼 너비
+        # 컬럼 너비 (Job 모드 기준)
         self.table.setColumnWidth(0, 200)  # 수임처명
-        self.table.setColumnWidth(1, 70)   # 상태
-        self.table.setColumnWidth(2, 150)  # 현재 단계
-        self.table.setColumnWidth(3, 70)   # 소요시간
+        self.table.setColumnWidth(1, 130)  # 사업자등록번호 / 상태
+        self.table.setColumnWidth(2, 70)   # 포털 / 현재 단계
+        self.table.setColumnWidth(3, 70)   # 활성 / 소요시간
         self.table.horizontalHeader().setStretchLastSection(True)
 
         self.table.clicked.connect(self._on_clicked)

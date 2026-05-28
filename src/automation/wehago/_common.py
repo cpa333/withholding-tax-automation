@@ -509,6 +509,32 @@ async def get_all_clients_from_management(page):
     return names or []
 
 
+async def get_clients_from_main_page(page):
+    """WEHAGO 메인 페이지(#/main)에서 수임처명 + 사업자등록번호 스크래핑.
+
+    div.cl_list_content.type_lite 내 카드에서 이름과 사업자번호를 동시 추출.
+    페이지 이동/스크롤 불필요.
+    """
+    clients = await page.evaluate(r'''() => {
+        const cards = document.querySelectorAll(
+            'div.cl_list_content.type_lite div.sub_info[id^="company_"]'
+        );
+        const results = [];
+        for (const card of cards) {
+            const nameEl = card.querySelector('a');
+            const bizEl = card.querySelector('p.company_num');
+            if (!nameEl) continue;
+            let name = nameEl.textContent.trim();
+            name = name.replace('[테스트] ', '');
+            const bizNum = bizEl ? bizEl.textContent.trim() : '';
+            if (name) results.push({name: name, business_number: bizNum});
+        }
+        return results;
+    }''')
+    log(f"  메인 페이지 스크랩: {len(clients or [])}건")
+    return clients or []
+
+
 async def goto_salary_page(page, company_name):
     """수임처의 SmartA 급여 메인 페이지로 이동
 
