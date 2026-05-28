@@ -184,8 +184,11 @@ class AutomationRunner(AsyncWorker):
             engine.close()
 
     async def _handle_refresh_clients(self):
-        """새로 가져오기: WEHAGO 메인 페이지에서 수임처 스크래핑 후 DB 업데이트"""
-        from src.automation.wehago._common import get_clients_from_main_page
+        """새로 가져오기: taxagent에서 수임처명 + 사업자등록번호 수집 후 DB 업데이트"""
+        from src.automation.wehago._common import (
+            WEHAGO_TAXAGENT_URL, dismiss_dialogs,
+            get_clients_with_biz_from_taxagent,
+        )
         from src.batch.db import BatchDB, ClientRepository
         from src.batch.models import Client
 
@@ -196,18 +199,38 @@ class AutomationRunner(AsyncWorker):
             self.error_occurred.emit("Chrome 연결 실패")
             return
 
-        # 로그인 대기 (로그인 후 #/main에 카드 로드됨)
+        # 로그인 대기
         if not await self._wait_for_login("wehago"):
             self.error_occurred.emit("WEHAGO 로그인 실패 또는 시간 초과")
             return
 
+        page = self._page
         try:
-            clients_data = await get_clients_from_main_page(self._page)
+            # 수임처관리 페이지로 이동
+            self.log_message.emit("수임처관리 페이지로 이동...")
+            await page.goto(WEHAGO_TAXAGENT_URL, wait_until="domcontentloaded", timeout=30000)
+            await dismiss_dialogs(page)
+
+            try:
+                await page.wait_for_selector(
+                    'ul.acceptance_list li span.company_name_text',
+                    timeout=15000,
+                )
+            except Exception:
+                self.log_message.emit("리스트 로딩 재시도...")
+                await dismiss_dialogs(page)
+                await page.wait_for_selector(
+                    'ul.acceptance_list li span.company_name_text',
+                    timeout=20000,
+                )
+
+            # 카드 클릭하며 이름+사업자번호 수집
+            clients_data = await get_clients_with_biz_from_taxagent(page)
             clients_data = [c for c in clients_data if c["name"]]
 
             self.log_message.emit(f"수임처 {len(clients_data)}건 조회 완료")
 
-            # DB 교체: 일반 sqlite3로 전체 삭제 후 BatchDB로 upsert
+            # DB 교체
             import sqlite3
             os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
             conn = sqlite3.connect(self._db_path)

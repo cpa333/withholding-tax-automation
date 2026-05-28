@@ -509,28 +509,84 @@ async def get_all_clients_from_management(page):
     return names or []
 
 
-async def get_clients_from_main_page(page):
-    """WEHAGO 메인 페이지(#/main)에서 수임처명 + 사업자등록번호 스크래핑.
+async def get_clients_with_biz_from_taxagent(page):
+    """taxagent에서 카드를 클릭하며 수임처명 + 사업자등록번호 수집.
 
-    ul.inner_list > li 내 카드에서 이름과 사업자번호를 동시 추출.
-    이 선택자는 WEHAGO SPA의 가상 스크롤과 무관하게 항상 전체 목록을 포함.
+    각 카드를 클릭하면 상세 영역에 사업자등록번호가 표시됨.
+    전체 카드를 순회하며 이름과 사업자번호를 수집.
     """
-    clients = await page.evaluate(r'''() => {
-        const items = document.querySelectorAll('ul.inner_list > li');
-        const results = [];
-        for (const li of items) {
-            const nameEl = li.querySelector('a[id^="tooltip_"]');
-            const bizEl = li.querySelector('p.company_num');
-            if (!nameEl) continue;
-            let name = nameEl.textContent.trim();
-            name = name.replace('[테스트] ', '');
-            const bizNum = bizEl ? bizEl.textContent.trim() : '';
-            if (name) results.push({name: name, business_number: bizNum});
+    # 스크롤로 전체 카드 로드
+    for _ in range(10):
+        await page.evaluate("""() => {
+            const container = document.querySelector('div.cl_lnb_bottom');
+            if (container) container.scrollTop = container.scrollHeight;
+        }""")
+        await asyncio.sleep(0.5)
+
+    # 카드 목록 수집
+    total_cards = await page.evaluate(r'''() => {
+        const allLists = document.querySelectorAll('ul.acceptance_list');
+        for (const list of allLists) {
+            const items = list.querySelectorAll(':scope > li');
+            if (items.length === 0) continue;
+            return items.length;
         }
-        return results;
+        return 0;
     }''')
-    log(f"  메인 페이지 스크랩: {len(clients or [])}건")
-    return clients or []
+
+    results = []
+    for i in range(total_cards):
+        # i번째 카드 클릭
+        clicked = await page.evaluate(r'''(idx) => {
+            const allLists = document.querySelectorAll('ul.acceptance_list');
+            for (const list of allLists) {
+                const cards = list.querySelectorAll('a.acceptance_card');
+                if (cards.length === 0) continue;
+                if (cards[idx]) {
+                    cards[idx].click();
+                    return true;
+                }
+            }
+            return false;
+        }''', i)
+        if not clicked:
+            continue
+
+        await asyncio.sleep(0.5)
+
+        # 상세 영역에서 이름과 사업자번호 추출
+        info = await page.evaluate(r'''() => {
+            // cl_basicinfo_section에 상세 정보 표시됨
+            const infoEl = document.querySelector('.cl_basicinfo_section');
+            if (!infoEl) return null;
+
+            const text = infoEl.textContent;
+
+            // 사업자등록번호 패턴 (XXX-XX-XXXXX)
+            const bizMatch = text.match(/(\d{3}-\d{2}-\d{5})/);
+            const bizNum = bizMatch ? bizMatch[1] : '';
+
+            // 수임처명: 클릭된 li.selected의 company_name_text에서
+            const selectedLi = document.querySelector('li.is_linkbtn.selected');
+            let name = '';
+            if (selectedLi) {
+                const nameEl = selectedLi.querySelector('span.company_name_text');
+                if (nameEl) name = nameEl.textContent.trim();
+            }
+
+            return {name, business_number: bizNum};
+        }''')
+
+        if info and info["name"]:
+            name = info["name"].replace("[테스트] ", "")
+            if name:
+                results.append({
+                    "name": name,
+                    "business_number": info.get("business_number", ""),
+                })
+
+    log(f"  taxagent 스크랩: {len(results)}건 (이름+사업자번호)")
+    return results
 
 
 async def goto_salary_page(page, company_name):
