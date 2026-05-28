@@ -521,6 +521,10 @@ NPS EDI, NHIS EDI는 **Nexacro** 기반으로, URL 리디렉션 직후에도
 해결: 모든 포털의 로그인 감지를 각 포털 모듈의 `wait_for_login()`으로 위임,
 NPS EDI에 `wait_for_nexacro_ready()` 추가.
 
+4. **초기 실행 DB 스키마 누락:** `_handle_refresh_clients()`가 raw `sqlite3.connect()`로
+   빈 DB 파일만 생성하고 `DELETE FROM steps` 실행 → "no such table: steps" 에러.
+   해결: `BatchDB.connect()`로 통합하여 `_ensure_schema()`가 자동으로 테이블 생성 후 DELETE 실행.
+
 ---
 
 ## 대규모 배치 자동화 아키텍처 (설계 문서)
