@@ -14,7 +14,7 @@ withholding-tax-automation/
 │   │   └── pdf_reader.py            # PDF 리더
 │   └── automation/
 │       └── wehago/
-│           ├── _common.py           # 15개 공통 함수 (모달, 기간, 메뉴 이동 등)
+│           ├── _common.py           # 16개 공통 함수 (모달, 기간, 메뉴 이동 등)
 │           ├── _nts.py              # WehagoNTS COM UIA 폴더 선택 (SWER 전용)
 │           ├── run_swsa0101.py      # 급여자료입력 (엑셀 다운로드→변환→업로드→PDF)
 │           ├── run_swta0101.py      # 원천징수이행상황신고서 (조회→마감/마감해제)
@@ -56,6 +56,7 @@ python src/automation/wehago/run_swer0101.py
 - `connect_page()`: Playwright CDP 연결
 - `wait_for_login()`: 수동 로그인 대기 (최대 10분)
 - `dismiss_dialogs()`: 초기 팝업 정리
+- `ensure_full_tab()`: 수임처 탭이 '전체'인지 확인, 아니면 '전체' 탭으로 전환
 
 ### Phase 2: 수임처 선택
 - `select_and_goto_company()`: WEHAGO 메인 이동 → 수임처 검색 → SmartA 급여 페이지 이동
@@ -201,6 +202,7 @@ python src/automation/wehago/run_swer0101.py
 | `connect_browser()` | CDP 연결, page 객체 반환 |
 | `wait_for_login()` | 수동 로그인 대기 |
 | `dismiss_dialogs()` | 모든 팝업/다이얼로그 닫기 |
+| `ensure_full_tab()` | 수임처 탭 '전체' 확인/전환 |
 | `get_client_salary_url()` | window.open 인터셉트로 SmartA URL 캡처 |
 | `goto_salary_page()` | 수임처 급여 페이지 이동 |
 | `click_menu(menu_id)` | 사이드 메뉴 클릭 (SPA 라우팅) |
@@ -357,6 +359,7 @@ python src/automation/wehago/run_swer0101.py
 | `log(msg)` | flush 포함 print 래퍼 |
 | `compute_target_period()` | 현재 기준 저번달 (year, month) 계산 |
 | `dismiss_dialogs(page)` | 모든 팝업/다이얼로그/z-index 오버레이 닫기 (최대 20회) |
+| `ensure_full_tab(page)` | 수임처 탭이 '전체'인지 확인 후 아니면 전환 |
 | `close_warning_overlay(page, keyword)` | 특정 키워드 포함 z-index 오버레이에서 확인 클릭 |
 | `click_codehelp_confirm(page)` | iframe 포함 코드도움 모달에서 확인(enter) 클릭 |
 | `click_dialog_button(page, button_text)` | 현재 모달에서 지정 텍스트 버튼 클릭 |
@@ -450,6 +453,16 @@ python src/automation/wehago/run_swer0101.py
   1. `page.mouse.click()` — 실제 CDP 마우스 이벤트 (신뢰된 사용자 제스처)
   2. `click_menu_item()` — 기존 JS evaluate 방식으로 재시도
   3. `input[type="file"]` 직접 설정 — `set_input_files()`로 숨겨진 file input에 파일 주입
+
+---
+
+## 2026-05-28 업데이트 내역
+
+### 로그인 후 '전체' 탭 보장 로직 추가
+- `ensure_full_tab(page)` 함수 추가: `ul.main_tab_bx > li`에서 '전체' 탭의 `active` 클래스 확인
+- 이미 '전체'면 스킵, 아니면 버튼 클릭 후 2초 대기
+- 탭이 존재하지 않으면(메인 페이지가 아닌 경우) 조용히 스킵
+- 호출 시점: `main.py`에서 로그인+팝업정리 직후, 수임처 변경 시 (`select_and_goto_company`)
 
 ---
 

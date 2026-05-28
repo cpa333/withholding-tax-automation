@@ -1,7 +1,6 @@
 """WEHAGO 자동화 공통 함수 모듈
 
 모든 자동화 플로우(SWSA0101, SWTA0101, SWER0101)에서 공유하는 함수들.
-각 함수는 최선의 구현 버전에서 추출함.
 """
 import asyncio
 import os
@@ -312,6 +311,40 @@ async def wait_for_login(page):
 
     log("로그인 대기 시간 초과 (15분).")
     return False
+
+
+async def ensure_full_tab(page):
+    """WEHAGO 메인 수임처 탭이 '전체'인지 확인 후, 아니면 '전체' 탭 클릭"""
+    is_active = await page.evaluate("""() => {
+        const tabs = document.querySelectorAll('ul.main_tab_bx > li');
+        for (const li of tabs) {
+            if (li.textContent.trim() === '전체') {
+                return li.classList.contains('active');
+            }
+        }
+        return null;  // 탭 자체를 못 찾음
+    }""")
+
+    if is_active is None:
+        log("  '전체' 탭을 찾을 수 없습니다 (메인 페이지가 아닐 수 있음)")
+        return
+    if is_active:
+        log("  '전체' 탭 확인됨")
+        return
+
+    log("  '전체' 탭으로 전환...")
+    await page.evaluate("""() => {
+        const tabs = document.querySelectorAll('ul.main_tab_bx > li');
+        for (const li of tabs) {
+            if (li.textContent.trim() === '전체') {
+                const btn = li.querySelector('button');
+                if (btn) btn.click();
+                return;
+            }
+        }
+    }""")
+    await asyncio.sleep(2)
+    log("  '전체' 탭 전환 완료")
 
 
 async def search_companies(page, keyword):

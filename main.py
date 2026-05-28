@@ -26,7 +26,7 @@ from playwright.async_api import async_playwright
 from src.utils.chrome_cdp import launch_chrome, connect_page
 from src.automation.wehago._common import (
     log, wait_for_login, goto_salary_page, dismiss_dialogs, WEHAGO_URL,
-    search_companies,
+    search_companies, ensure_full_tab,
 )
 from src.automation.wehago.run_swsa0101 import run_swsa0101
 from src.automation.wehago.run_swta0101 import run_swta0101
@@ -70,6 +70,7 @@ async def select_and_goto_company(page):
     await page.goto(WEHAGO_URL + "#/main", wait_until="domcontentloaded", timeout=30000)
     await asyncio.sleep(3)
     await dismiss_dialogs(page)
+    await ensure_full_tab(page)
 
     selected_company = None
     while not selected_company:
@@ -147,6 +148,7 @@ async def main():
             log("로그인 실패")
             return
         await dismiss_dialogs(page)
+        await ensure_full_tab(page)
 
         # ═══ Phase 2: 수임처 선택 ═══
         selected_company = await select_and_goto_company(page)
