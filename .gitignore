@@ -31,5 +31,18 @@ src/automation/wehago/_full_run.py
 # Results
 results/
 
+# Build artifacts
+build/
+dist/
+*.spec
+
+# Runtime data
+data/
+
+# Screenshots / debug captures
+*.png
+*_preview.txt
+*_debug.txt
+
 # Claude memory
 .claude/

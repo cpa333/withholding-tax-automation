@@ -2,6 +2,7 @@
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTableView, QLabel, QHBoxLayout,
+    QPushButton,
 )
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal
 from PySide6.QtGui import QColor
@@ -96,6 +97,8 @@ class CompanyTable(QWidget):
     """수임처 목록 테이블 + 에러 요약"""
 
     job_selected = Signal(int)  # job_id
+    refresh_requested = Signal()
+    delete_all_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -105,6 +108,36 @@ class CompanyTable(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(4)
+
+        # 수임처 관리 버튼 (Phase 1 모드)
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(6)
+
+        self.refresh_btn = QPushButton("새로 가져오기")
+        self.refresh_btn.setStyleSheet(
+            "QPushButton { background-color: #2196f3; color: white; "
+            "padding: 4px 12px; border-radius: 3px; font-size: 12px; }"
+            "QPushButton:hover { background-color: #1976d2; }"
+            "QPushButton:disabled { background-color: #bbb; }"
+        )
+        self.refresh_btn.clicked.connect(self.refresh_requested.emit)
+
+        self.delete_all_btn = QPushButton("모두 삭제")
+        self.delete_all_btn.setStyleSheet(
+            "QPushButton { background-color: #f44336; color: white; "
+            "padding: 4px 12px; border-radius: 3px; font-size: 12px; }"
+            "QPushButton:hover { background-color: #d32f2f; }"
+            "QPushButton:disabled { background-color: #bbb; }"
+        )
+        self.delete_all_btn.clicked.connect(self.delete_all_requested.emit)
+
+        btn_row.addWidget(self.refresh_btn)
+        btn_row.addWidget(self.delete_all_btn)
+        btn_row.addStretch()
+
+        self._btn_row_widget = QWidget()
+        self._btn_row_widget.setLayout(btn_row)
+        layout.addWidget(self._btn_row_widget)
 
         # 에러 요약 라벨
         self.error_summary = QLabel("")
@@ -131,9 +164,16 @@ class CompanyTable(QWidget):
         self.table.clicked.connect(self._on_clicked)
         layout.addWidget(self.table)
 
+    def update_clients(self, clients: list[dict]):
+        """수임처 마스터 목록 표시 (Phase 1 모드)"""
+        self.model.set_clients(clients)
+        self.error_summary.setText(f"등록된 수임처: {len(clients)}건")
+        self._btn_row_widget.setVisible(True)
+
     def update_jobs(self, jobs: list[dict], failed_info: list[dict] | None = None):
-        """수임처 목록 업데이트"""
+        """수임처 Job 목록 업데이트 (Phase 2+ 모드)"""
         self.model.set_jobs(jobs)
+        self._btn_row_widget.setVisible(False)
 
         if failed_info:
             errors = [f"  - {j['name']}: {j.get('error', '알 수 없음')}" for j in failed_info]
@@ -143,10 +183,14 @@ class CompanyTable(QWidget):
         else:
             self.error_summary.setText("")
 
-    def update_clients(self, clients: list[dict]):
-        """수임처 마스터 목록 표시 (Phase 1 완료 후)"""
-        self.model.set_clients(clients)
-        self.error_summary.setText(f"등록된 수임처: {len(clients)}건")
+    def set_client_mode(self, enabled: bool):
+        """수임처 관리 버튼 표시/숨김"""
+        self._btn_row_widget.setVisible(enabled)
+
+    def set_buttons_enabled(self, enabled: bool):
+        """버튼 활성/비활성 (실행 중 잠금)"""
+        self.refresh_btn.setEnabled(enabled)
+        self.delete_all_btn.setEnabled(enabled)
 
     def _on_clicked(self, index):
         job = self.model.get_job_at(index.row())

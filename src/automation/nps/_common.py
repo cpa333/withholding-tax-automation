@@ -127,6 +127,34 @@ async def wait_for_login(page):
     return False
 
 
+async def wait_for_nexacro_ready(page, max_wait=30):
+    """Nexacro 프레임워크가 완전히 로딩될 때까지 대기
+
+    로그인 후 Nexacro 애플리케이션이 초기화되어
+    mainframe.VFrameSet.FrameSdi 등의 컴포넌트에 접근 가능해질 때까지 폴링.
+    """
+    for i in range(max_wait):
+        await asyncio.sleep(1)
+        try:
+            ready = await page.evaluate("""() => {
+                try {
+                    var btn = document.getElementById(
+                        'mainframe.VFrameSet.FrameSdi.form.divHeader.form.divHeader.form.btnChangeBusi'
+                    );
+                    return !!btn;
+                } catch(e) {
+                    return false;
+                }
+            }""")
+            if ready:
+                log(f"  Nexacro 프레임워크 준비 완료 ({i+1}초)")
+                return True
+        except Exception:
+            pass
+    log("  ERROR: Nexacro 프레임워크 로딩 시간 초과")
+    return False
+
+
 async def ensure_login_page(page):
     """NPS EDI 메인 페이지로 이동하여 로그인 대기"""
     await page.goto(NPS_URL, wait_until="domcontentloaded", timeout=30000)

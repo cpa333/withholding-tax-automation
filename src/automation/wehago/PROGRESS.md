@@ -466,6 +466,31 @@ python src/automation/wehago/run_swer0101.py
 
 ---
 
+## 2026-05-28 GUI 통합 업데이트
+
+### PySide6 GUI 통합
+- `gui_main.py` 진입점으로 PySide6 앱 실행
+- 좌측 Phase 사이드바, 중앙 수임처 테이블, 우측 단계 상세, 하단 로그 패널
+- `AutomationRunner`(QThread + asyncio)로 Playwright 제어 — Qt Signal로 UI 업데이트
+- Phase 1: "새로 가져오기" 버튼으로 수임처 스크래핑
+- Phase 2+: BatchEngine으로 수임처별 배치 실행 (일시정지/정지 지원)
+
+### 로그인 대기 로직 통일
+- **문제:** `automation_runner.py`가 자체 로그인 감지(단순 URL/body 체크)를 사용하여
+  로그인 완료 전에 워크플로우 실행 시도 → 타임아웃/요소 미발견 에러
+- **해결:** 모든 포털을 각 포털 모듈의 `wait_for_login()`으로 위임
+  - WEHAGO: `#company_` 또는 "나의 수임처" 감지 (최대 15분)
+  - NHIS EDI: "사업장 관리번호"/"신규문서" 감지 (최대 15분) + 3초 안정화 대기
+  - NPS EDI: "nexacro" URL 감지 + `wait_for_nexacro_ready()` (btnChangeBusi DOM 등장, 최대 30초)
+  - Hometax: URL 기반 (기존 유지)
+
+### 수임처 가져오기 타임아웃 개선
+- 1차 wait_for_selector: 10초 → 15초
+- 2차 (재시도): 8초 → 20초
+- `_run_phase1_directly()` 제거, `_handle_refresh_clients()`로 통합
+
+---
+
 ## 다음 단계 (TODO)
 - 엑셀 변환 시 특정 셀 값 수정 로직 (수당/공제 항목 변경)
 - 근로소득원천징수영수증 발급

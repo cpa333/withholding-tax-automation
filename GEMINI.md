@@ -445,6 +445,84 @@ pause
 
 ---
 
+## PySide6 GUI 아키텍처
+
+> **진입점:** `gui_main.py` → `src/ui/main_window.py`
+> **상태:** Phase 1(수임처 가져오기) + Phase 2(NHIS EDI) + Phase 3(NPS EDI) 연동 완료
+
+### 구조
+
+```
+gui_main.py                           # PySide6 앱 진입점
+src/ui/
+├── main_window.py                    # QMainWindow — 전체 레이아웃, 시그널 연결
+├── widgets/
+│   ├── phase_sidebar.py              # 좌측 페이즈 선택 패널
+│   ├── company_table.py              # 수임처 테이블 + 새로가져오기/전체삭제 버튼
+│   ├── log_panel.py                  # 하단 로그 출력
+│   └── step_detail.py               # 우측 단계 상세 패널
+├── workers/
+│   ├── async_bridge.py               # QThread + asyncio 브릿지 (Signal 정의)
+│   └── automation_runner.py          # AutomationRunner — 포털별 페이즈 오케스트레이터
+└── workflows/
+    ├── registry.py                   # @register 데코레이터로 페이즈 등록
+    ├── base.py                       # BaseWorkflow 추상 클래스
+    ├── nhis_edi.py                   # Phase 2: 국민건강보험 EDI
+    └── nps_edi.py                    # Phase 3: 국민연금 EDI
+```
+
+### 스레드 모델
+
+- **메인 스레드:** PySide6 Qt 이벤트루프
+- **워커 스레드 (AsyncWorker):** QThread 내부에서 별도 asyncio 이벤트루프 실행
+- **명령 큐:** 메인 스레드 → `SimpleQueue.put()` → 워커 스레드에서 `get_nowait()` 폴링
+- **시그널:** 워커 → `log_message`, `phase_changed`, `batch_progress`, `job_changed`, `error_occurred`
+- **stdout 캡처:** `LogCapture`로 기존 `print()` 기반 log() 출력을 GUI 로그 패널에 전달
+
+### AutomationRunner 명령 흐름
+
+| 명령 | 트리거 | 흐름 |
+|------|--------|------|
+| `refresh_clients` | "새로 가져오기" 버튼 | `_ensure_browser("wehago")` → `_wait_for_login("wehago")` → 수임처 스크래핑 → DB 저장 |
+| `run_phase` (2+) | "시작" 버튼 | `_ensure_browser(portal)` → `_wait_for_login(portal)` → BatchEngine 배치 실행 |
+
+### 로그인 대기 전략 (포털별)
+
+모든 포털은 **포털별 전용 `wait_for_login()` 함수**를 위임 호출합니다.
+`automation_runner.py`에 자체 로그인 감지 로직을 두지 않습니다.
+
+| 포털 | 위임 함수 | 감지 방식 | 후속 처리 |
+|------|-----------|-----------|-----------|
+| WEHAGO | `wehago._common.wait_for_login()` | `#company_` 또는 "나의 수임처" 텍스트 (15분) | 없음 |
+| NHIS EDI | `nhis._common_edi.wait_for_login()` | "사업장 관리번호" 또는 "신규문서" 텍스트 (15분) | 3초 안정화 대기 |
+| NPS EDI | `nps._common.wait_for_login()` | URL에 "nexacro" 포함 (15분) | `wait_for_nexacro_ready()` (btnChangeBusi DOM 등장까지 최대 30초) |
+| Hometax | 인라인 | URL에 "login" 미포함 (15분) | 없음 |
+
+### Nexacro 프레임워크 로딩 대기
+
+NPS EDI, NHIS EDI는 **Nexacro** 기반으로, URL 리디렉션 직후에도
+프레임워크 초기화(컴포넌트 생성, 이벤트 바인딩)가 완료되지 않습니다.
+버튼 클릭 시도 전에 반드시 대기해야 합니다.
+
+| 포털 | 대기 함수 | 감지 대상 | 최대 대기 |
+|------|-----------|-----------|-----------|
+| NPS EDI | `nps._common.wait_for_nexacro_ready()` | `btnChangeBusi` DOM 요소 | 30초 |
+| NHIS EDI | `nhis._common_edi.wait_for_nexacro_ready()` | `nexacro.Application.mainframe.childframe.form.components.div_body` | 30초 |
+
+### 이전 문제 (해결됨)
+
+1. **WEHAGO 수임처 조회:** `_handle_refresh_clients()`가 `_wait_for_login()`을 호출하지 않아
+   로그인 전에 스크래핑 시도 → `Timeout 8000ms exceeded`
+2. **NPS EDI 사업장전환:** `_wait_for_login("nps_edi")`가 자체 URL 체크만 하고
+   Nexacro 프레임워크 로딩을 기다리지 않아 `btnChangeBusi element not found`
+3. **NHIS EDI:** `_wait_for_login("nhis_edi")`가 자체 URL/body 체크만 하고
+   포털 전용 감지 함수를 사용하지 않았음
+
+해결: 모든 포털의 로그인 감지를 각 포털 모듈의 `wait_for_login()`으로 위임,
+NPS EDI에 `wait_for_nexacro_ready()` 추가.
+
+---
+
 ## 대규모 배치 자동화 아키텍처 (설계 문서)
 
 > **상태:** 설계 완료, 코드 구현은 `src/batch/` 모듈에 베이스 코드만 존재.

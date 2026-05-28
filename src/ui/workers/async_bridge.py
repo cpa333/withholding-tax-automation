@@ -134,6 +134,12 @@ class AsyncWorker(QThread):
         if not self.isRunning():
             self.start()
 
+    def start_refresh_clients(self):
+        """수임처 새로 가져오기 명령 전송"""
+        self._command_queue.put({"type": "refresh_clients"})
+        if not self.isRunning():
+            self.start()
+
     def request_stop(self):
         """정지 요청"""
         self._stop_event.set()

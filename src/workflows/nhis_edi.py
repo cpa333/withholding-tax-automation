@@ -33,7 +33,7 @@ class NhisEdiWorkflow(BaseWorkflow):
         main_page = await close_popups(context)
         if not main_page:
             main_page = page
-        await asyncio.sleep(1)
+        await asyncio.sleep(3)
 
         # 사업장 선택 팝업 열기
         if not state.should_skip_step(job_id, "open_firm_selector"):

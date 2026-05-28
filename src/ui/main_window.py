@@ -3,7 +3,7 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout,
     QSplitter, QPushButton, QHBoxLayout,
-    QCheckBox, QSpinBox, QLabel,
+    QCheckBox, QSpinBox, QLabel, QMessageBox,
 )
 from PySide6.QtCore import Qt, QTimer
 
@@ -34,6 +34,17 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._load_phases()
+
+        # 수임처 관리 버튼 연결
+        self.company_table.refresh_requested.connect(self._on_refresh_clients)
+        self.company_table.delete_all_requested.connect(self._on_delete_all_clients)
+
+        # 시작 시 DB에서 수임처 목록 로드
+        self._load_client_list()
+
+        # Phase 1이 기본 선택 → 시작 버튼 비활성화
+        self.start_btn.setEnabled(False)
+        self.company_table.set_client_mode(True)
 
         # 진행 상황 폴링 타이머 (러너가 실행 중일 때)
         self._poll_timer = QTimer(self)
@@ -168,10 +179,14 @@ class MainWindow(QMainWindow):
 
         # 페이즈 완료/실패 시 버튼 상태 복원
         if status in ("completed", "failed"):
-            self.start_btn.setEnabled(True)
+            if self._selected_phase == 1:
+                self.start_btn.setEnabled(False)
+            else:
+                self.start_btn.setEnabled(True)
             self.pause_btn.setEnabled(False)
             self.stop_btn.setEnabled(False)
             self._poll_timer.stop()
+            self.company_table.set_buttons_enabled(True)
 
         if phase_id == 1 and status == "completed":
             self._load_client_list()
@@ -199,6 +214,11 @@ class MainWindow(QMainWindow):
         self._selected_phase = phase_id
         if phase_id == 1:
             self._load_client_list()
+            self.start_btn.setEnabled(False)
+            self.company_table.set_client_mode(True)
+        else:
+            self.start_btn.setEnabled(True)
+            self.company_table.set_client_mode(False)
 
     def _load_client_list(self):
         """DB에서 수임처 목록을 조회하여 테이블에 표시"""
@@ -287,6 +307,11 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("페이즈를 먼저 선택하세요")
             return
 
+        # Phase 1은 "새로 가져오기" 버튼으로만 실행
+        if self._selected_phase == 1:
+            self.statusBar().showMessage("수임처 리스트는 '새로 가져오기' 버튼을 사용하세요")
+            return
+
         self.start_btn.setEnabled(False)
         self.pause_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
@@ -317,3 +342,41 @@ class MainWindow(QMainWindow):
         self.runner.request_stop()
         self.runner.wait(3000)
         event.accept()
+
+    # ── 수임처 관리 ──
+
+    def _on_refresh_clients(self):
+        """WEHAGO에서 수임처 새로 가져오기"""
+        self.company_table.set_buttons_enabled(False)
+        self.runner.start_refresh_clients()
+
+    def _on_delete_all_clients(self):
+        """DB에서 수임처 모두 삭제"""
+        reply = QMessageBox.question(
+            self, "수임처 삭제",
+            "등록된 수임처를 모두 삭제하시겠습니까?\n(다른 페이즈의 배치 데이터도 함께 삭제됩니다)",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        import os, sqlite3
+        db_path = os.path.join(os.getcwd(), "data", "withholding_tax.db")
+        if not os.path.exists(db_path):
+            self.company_table.update_clients([])
+            return
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("DELETE FROM steps")
+            conn.execute("DELETE FROM jobs")
+            conn.execute("DELETE FROM batches")
+            conn.execute("DELETE FROM clients")
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.company_table.update_clients([])
+        self.sidebar.update_phase_status(1, "pending")
+        self.statusBar().showMessage("수임처 모두 삭제됨")

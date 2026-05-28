@@ -50,6 +50,8 @@ class AutomationRunner(AsyncWorker):
                     break
                 elif cmd.get("type") == "run_phase":
                     await self._handle_run_phase(cmd)
+                elif cmd.get("type") == "refresh_clients":
+                    await self._handle_refresh_clients()
 
         self.log_message.emit("자동화 러너 종료됨")
 
@@ -82,9 +84,13 @@ class AutomationRunner(AsyncWorker):
             self.error_occurred.emit("로그인 실패 또는 시간 초과")
             return
 
-        # Phase 1: BatchEngine 없이 직접 스크래핑
+        # 로그인 후 페이지 재연결 (인증 과정에서 탭이 바뀔 수 있음)
+        await self._reconnect_page(portal)
+
+        # Phase 1은 "새로 가져오기" 버튼으로만 실행
         if phase_id == 1:
-            await self._run_phase1_directly()
+            self.log_message.emit("수임처 리스트는 '새로 가져오기' 버튼을 사용하세요")
+            self.phase_changed.emit(1, "completed")
             return
 
         # Phase 2+: BatchEngine으로 배치 실행
@@ -176,8 +182,8 @@ class AutomationRunner(AsyncWorker):
         finally:
             engine.close()
 
-    async def _run_phase1_directly(self):
-        """Phase 1: 수임처 리스트 직접 스크래핑 (BatchEngine 미사용)"""
+    async def _handle_refresh_clients(self):
+        """새로 가져오기: WEHAGO에서 수임처 스크래핑 후 DB 업데이트"""
         from src.automation.wehago._common import (
             WEHAGO_TAXAGENT_URL, dismiss_dialogs,
             get_all_clients_from_management,
@@ -185,43 +191,45 @@ class AutomationRunner(AsyncWorker):
         from src.batch.db import BatchDB, ClientRepository
         from src.batch.models import Client
 
+        self.log_message.emit("[수임처 새로 가져오기] 시작...")
+
+        # Chrome 실행 + WEHAGO 연결
+        if not await self._ensure_browser("wehago"):
+            self.error_occurred.emit("Chrome 연결 실패")
+            return
+
+        # 로그인 대기
+        if not await self._wait_for_login("wehago"):
+            self.error_occurred.emit("WEHAGO 로그인 실패 또는 시간 초과")
+            return
         page = self._page
         try:
-            # 수임처관리 페이지 이동
-            self.log_message.emit("수임처관리 페이지로 이동 중...")
             await page.goto(WEHAGO_TAXAGENT_URL, wait_until="domcontentloaded", timeout=30000)
             await dismiss_dialogs(page)
 
-            # SPA 렌더링 대기: 수임처 리스트가 나타날 때까지
             try:
                 await page.wait_for_selector(
                     'ul.acceptance_list li span.company_name_text',
-                    timeout=10000,
+                    timeout=15000,
                 )
             except Exception:
                 self.log_message.emit("리스트 로딩 재시도...")
                 await dismiss_dialogs(page)
                 await page.wait_for_selector(
                     'ul.acceptance_list li span.company_name_text',
-                    timeout=8000,
+                    timeout=20000,
                 )
 
-            # 전체 수임처 스크래핑
-            self.log_message.emit("수임처 목록 조회 중...")
             companies = await get_all_clients_from_management(page)
             companies = [n.replace("[테스트] ", "") for n in companies]
             companies = [n for n in companies if n]
 
             self.log_message.emit(f"수임처 {len(companies)}건 조회 완료")
 
-            # DB에 저장 (wehago 단일 소스)
-            os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
-
-            # 기존 clients 전체 삭제 후 재등록
+            # DB 교체: 기존 clients 전체 삭제 후 재등록
             import sqlite3
             conn = sqlite3.connect(self._db_path)
             try:
-                # FK 해제 안전을 위해 관련 데이터도 정리
                 conn.execute("DELETE FROM steps")
                 conn.execute("DELETE FROM jobs")
                 conn.execute("DELETE FROM batches")
@@ -243,12 +251,11 @@ class AutomationRunner(AsyncWorker):
             finally:
                 db.close()
 
+            self.log_message.emit(f"수임처 새로 가져오기 완료: {len(companies)}건")
             self.phase_changed.emit(1, "completed")
-            self.log_message.emit(f"수임처 리스트 확보 완료: {len(companies)}건")
 
         except Exception as e:
             self.log_message.emit(f"수임처 조회 실패: {e}")
-            self.phase_changed.emit(1, "failed")
             self.error_occurred.emit(f"수임처 조회 실패: {e}")
 
     def _reset_batch(self, db_path: str, portal: str, phase_id: int):
@@ -328,13 +335,58 @@ class AutomationRunner(AsyncWorker):
             self.log_message.emit(f"Playwright 연결 실패: {e}")
             return False
 
+    async def _reconnect_page(self, portal: str):
+        """로그인 등으로 페이지가 바뀐 후 Playwright 연결 재확립"""
+        from src.utils.chrome_cdp import CDP_URL
+
+        portal_host = {
+            "nhis_edi": "edi.nhis",
+            "nps_edi": "edi.nps",
+            "hometax": "hometax.go.kr",
+            "wehago": "wehago.com",
+        }.get(portal, "")
+
+        try:
+            # 기존 페이지가 유효한지 확인
+            url = self._page.url
+            if url:
+                return  # 아직 유효함
+        except Exception:
+            pass
+
+        self.log_message.emit("페이지 재연결 중...")
+
+        try:
+            browser = await self._playwright.chromium.connect_over_cdp(CDP_URL)
+            context = browser.contexts[0]
+
+            # 포털에 맞는 탭 찾기
+            target_page = None
+            for pg in context.pages:
+                try:
+                    if portal_host in pg.url:
+                        target_page = pg
+                        break
+                except Exception:
+                    continue
+
+            if not target_page:
+                target_page = context.pages[0] if context.pages else await context.new_page()
+
+            self._browser = browser
+            self._context = context
+            self._page = target_page
+            self.log_message.emit(f"페이지 재연결 완료: {target_page.url[:60]}")
+        except Exception as e:
+            self.log_message.emit(f"페이지 재연결 실패: {e}")
+
     async def _wait_for_login(self, portal: str) -> bool:
         """포털별 로그인 완료 대기. 수동 로그인 필요 시 안내 메시지 출력."""
         import asyncio
 
         if portal == "nhis_edi":
+            from src.automation.nhis._common_edi import wait_for_login, wait_for_nexacro_ready
             self.log_message.emit("[국민건강보험 EDI] 로그인 대기 중... 공동인증서로 로그인해 주세요.")
-            # 페이지가 NHIS EDI 탭인지 확인, 아니면 올바른 탭 찾기
             page = self._page
             if "edi.nhis" not in page.url:
                 for pg in self._context.pages:
@@ -342,30 +394,20 @@ class AutomationRunner(AsyncWorker):
                         page = pg
                         self._page = page
                         break
-
-            for i in range(180):
-                await asyncio.sleep(5)
-                try:
-                    url = page.url
-                    self.log_message.emit(f"  로그인 확인 중... URL: {url[:80]}")
-                    if "retrieveMain" in url:
-                        self.log_message.emit("국민건강보험 EDI 로그인 확인됨 (retrieveMain)")
-                        return True
-                    # URL이 로그인 페이지가 아니면 로그인 완료로 간주
-                    if "edi.nhis.or.kr" in url and "login" not in url.lower() and "index" not in url.lower():
-                        body = await page.evaluate("() => document.body.innerText.substring(0, 100)")
-                        if body and len(body) > 30:
-                            self.log_message.emit(f"국민건강보험 EDI 로그인 확인됨")
-                            return True
-                except Exception as e:
-                    self.log_message.emit(f"  로그인 확인 오류: {e}")
-                if i % 6 == 5:
-                    self.log_message.emit(f"  로그인 대기 중... ({(i+1)*5}초)")
-            return False
+            logged_in = await wait_for_login(page)
+            if not logged_in:
+                self.log_message.emit("국민건강보험 EDI 로그인 대기 시간 초과")
+                return False
+            # 로그인으로 탭이 바뀔 수 있으므로 페이지 재연결
+            await self._reconnect_page(portal)
+            page = self._page
+            self.log_message.emit("국민건강보험 EDI 로그인 확인됨. 팝업 정리 및 페이지 안정화 대기...")
+            await asyncio.sleep(3)
+            return True
 
         elif portal == "nps_edi":
+            from src.automation.nps._common import wait_for_login, wait_for_nexacro_ready
             self.log_message.emit("[국민연금 EDI] 로그인 대기 중... 공동인증서로 로그인해 주세요.")
-            # 올바른 탭 찾기
             page = self._page
             if "edi.nps" not in page.url:
                 for pg in self._context.pages:
@@ -373,29 +415,18 @@ class AutomationRunner(AsyncWorker):
                         page = pg
                         self._page = page
                         break
-
-            for i in range(180):
-                await asyncio.sleep(5)
-                try:
-                    url = page.url
-                    if i < 3 or i % 6 == 5:
-                        self.log_message.emit(f"  로그인 확인 중... URL: {url[:80]}")
-
-                    if "edi.nps.or.kr" in url and "login" not in url.lower() and "index" not in url.lower():
-                        self.log_message.emit("국민연금 EDI 로그인 확인됨")
-                        return True
-
-                    # URL이 login/index가 아니면 body 확인
-                    if "edi.nps.or.kr" in url:
-                        body = await page.evaluate("() => document.body.innerText.substring(0, 200)")
-                        if body and len(body) > 30:
-                            self.log_message.emit("국민연금 EDI 로그인 확인됨 (body)")
-                            return True
-                except Exception as e:
-                    self.log_message.emit(f"  로그인 확인 오류: {e}")
-                if i % 6 == 5:
-                    self.log_message.emit(f"  로그인 대기 중... ({(i+1)*5}초)")
-            return False
+            logged_in = await wait_for_login(page)
+            if not logged_in:
+                self.log_message.emit("국민연금 EDI 로그인 대기 시간 초과")
+                return False
+            # 로그인으로 탭이 바뀔 수 있으므로 페이지 재연결
+            await self._reconnect_page(portal)
+            page = self._page
+            self.log_message.emit("국민연금 EDI 로그인 확인됨. Nexacro 로딩 대기...")
+            if not await wait_for_nexacro_ready(page):
+                self.error_occurred.emit("Nexacro 프레임워크 로딩 실패")
+                return False
+            return True
 
         elif portal == "hometax":
             self.log_message.emit("[홈택스] 로그인 대기 중... 인증서로 로그인해 주세요.")
@@ -412,8 +443,17 @@ class AutomationRunner(AsyncWorker):
                     self.log_message.emit(f"  로그인 대기 중... ({(i+1)*5}초)")
             return False
 
+        elif portal == "wehago":
+            from src.automation.wehago._common import wait_for_login
+            self.log_message.emit("[WEHAGO] 로그인 상태 확인 중...")
+            logged_in = await wait_for_login(self._page)
+            if logged_in:
+                self.log_message.emit("WEHAGO 로그인 확인됨")
+            else:
+                self.log_message.emit("WEHAGO 로그인 대기 시간 초과")
+            return logged_in
+
         else:
-            # wehago 등은 이미 로그인된 상태로 진행
             return True
 
     async def _poll_progress(self, engine, batch_id: int, phase_id: int):
