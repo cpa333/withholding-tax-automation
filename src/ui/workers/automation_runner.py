@@ -207,15 +207,22 @@ class AutomationRunner(AsyncWorker):
 
             self.log_message.emit(f"수임처 {len(clients_data)}건 조회 완료")
 
-            # DB 교체: 기존 clients 전체 삭제 후 재등록
+            # DB 교체: 일반 sqlite3로 전체 삭제 후 BatchDB로 upsert
+            import sqlite3
+            os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
+            conn = sqlite3.connect(self._db_path)
+            try:
+                conn.execute("DELETE FROM steps")
+                conn.execute("DELETE FROM jobs")
+                conn.execute("DELETE FROM batches")
+                conn.execute("DELETE FROM clients")
+                conn.commit()
+            finally:
+                conn.close()
+
             db = BatchDB(self._db_path)
             db.connect()
             try:
-                db.conn.execute("DELETE FROM steps")
-                db.conn.execute("DELETE FROM jobs")
-                db.conn.execute("DELETE FROM batches")
-                db.conn.execute("DELETE FROM clients")
-
                 client_repo = ClientRepository(db)
                 for c in clients_data:
                     client_repo.upsert(Client(
