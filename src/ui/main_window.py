@@ -141,6 +141,7 @@ class MainWindow(QMainWindow):
 
         self.pause_btn = QPushButton("일시정지")
         self.pause_btn.setEnabled(False)
+        self.pause_btn.setVisible(False)
         self.pause_btn.clicked.connect(self._on_pause)
         layout.addWidget(self.pause_btn)
 
