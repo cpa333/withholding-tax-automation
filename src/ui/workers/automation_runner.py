@@ -386,7 +386,9 @@ class AutomationRunner(AsyncWorker):
         self.phase_changed.emit(phase_id, "failed")
 
     def _cleanup_browser_refs(self):
-        """브라우저/Playwright 참조 해제"""
+        """브라우저/Playwright 참조 해제 + Chrome 프로세스 종료"""
+        from src.utils.chrome_cdp import kill_chrome
+        kill_chrome()
         self._browser = None
         self._context = None
         self._page = None
@@ -394,8 +396,6 @@ class AutomationRunner(AsyncWorker):
 
     def cleanup_session(self):
         """정지 버튼 클릭 시 호출 — Chrome 종료 + 세션 초기화"""
-        from src.utils.chrome_cdp import kill_chrome
-        kill_chrome()
         self._cleanup_browser_refs()
         self.log_message.emit("[세션 종료] Chrome 프로세스 종료 + 세션 초기화됨")
 
