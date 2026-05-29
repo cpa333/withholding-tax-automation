@@ -404,7 +404,12 @@ class AutomationRunner(AsyncWorker):
 
     def cleanup_session(self):
         """정지 버튼 클릭 시 호출 — Chrome 종료 + 세션 초기화"""
-        self._cleanup_browser_refs()
+        from src.utils.chrome_cdp import kill_chrome
+        kill_chrome()
+        self._browser = None
+        self._context = None
+        self._page = None
+        self._current_portal = None
         self.log_message.emit("[세션 종료] Chrome 프로세스 종료 + 세션 초기화됨")
 
     def start_single_client(self, phase_id: int, client_name: str,
@@ -442,24 +447,29 @@ class AutomationRunner(AsyncWorker):
             self.phase_changed.emit(phase_id, "failed")
             return
 
-        # Chrome 실행 + 로그인
-        if not await self._ensure_browser(portal):
-            self.phase_changed.emit(phase_id, "failed")
-            self.error_occurred.emit("Chrome 연결 실패")
-            return
+        # 기존 브라우저 세션 재사용 시도 (단건실행 전용)
+        reused = await self._try_reuse_browser(portal)
 
-        if self._stop_event.is_set():
-            self.phase_changed.emit(phase_id, "failed")
-            return
-
-        if not await self._wait_for_login(portal):
-            if self._stop_event.is_set():
-                self.log_message.emit("[사용자 중단] 로그인 대기 중단")
-            else:
+        if not reused:
+            # 세션 없음 또는 만료 → 전체 재시작
+            if not await self._ensure_browser(portal):
                 self.phase_changed.emit(phase_id, "failed")
-                self.error_occurred.emit("로그인 실패 또는 시간 초과")
-            return
+                self.error_occurred.emit("Chrome 연결 실패")
+                return
 
+            if self._stop_event.is_set():
+                self.phase_changed.emit(phase_id, "failed")
+                return
+
+            if not await self._wait_for_login(portal):
+                if self._stop_event.is_set():
+                    self.log_message.emit("[사용자 중단] 로그인 대기 중단")
+                else:
+                    self.phase_changed.emit(phase_id, "failed")
+                    self.error_occurred.emit("로그인 실패 또는 시간 초과")
+                return
+
+        # 재사용 시에도 올바른 탭 포커스 보장
         await self._reconnect_page(portal)
 
         # 워크플로우 직접 실행 (BatchEngine 없이)
@@ -578,6 +588,22 @@ class AutomationRunner(AsyncWorker):
         except Exception as e:
             self.log_message.emit(f"Playwright 연결 실패: {e}")
             return False
+
+    async def _try_reuse_browser(self, portal: str) -> bool:
+        """기존 브라우저 세션 재사용 가능 여부 확인 (단건실행 전용)
+
+        조건: browser 객체 존재 + 같은 포털 + 페이지 응답 정상
+        """
+        if self._browser is None:
+            return False
+        if self._current_portal != portal:
+            self.log_message.emit(f"포털 변경 ({self._current_portal} → {portal}), 브라우저 재시작")
+            return False
+        if not await self._is_page_alive():
+            self.log_message.emit("기존 브라우저 세션이 종료됨, 재연결 필요")
+            return False
+        self.log_message.emit("기존 브라우저 세션 재사용")
+        return True
 
     async def _reconnect_page(self, portal: str):
         """로그인 등으로 페이지가 바뀐 후 Playwright 연결 재확립"""
