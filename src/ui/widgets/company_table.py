@@ -200,7 +200,9 @@ class CompanyTable(QWidget):
             self.error_summary.setText("")
 
     def set_client_mode(self, enabled: bool):
-        """Phase 1 모드: 단건실행 숨김, 새로가져오기/모두삭제 유지"""
+        """Phase 1 모드: 새로가져오기/모두삭제 표시, 단건실행 숨김"""
+        self.refresh_btn.setVisible(enabled)
+        self.delete_all_btn.setVisible(enabled)
         self.single_run_btn.setVisible(not enabled)
         if enabled:
             self.single_run_btn.setEnabled(False)
