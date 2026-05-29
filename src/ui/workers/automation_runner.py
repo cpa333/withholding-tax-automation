@@ -7,8 +7,37 @@ Qt Signal로 UI에 진행 상황을 방출.
 
 import asyncio
 import os
+import traceback
 
 from src.ui.workers.async_bridge import AsyncWorker
+
+# 브라우저 연결 끊김을 나타내는 예외 메시지 패턴
+_BROWSER_DISCONNECT_PATTERNS = (
+    "Target page, context or browser has been closed",
+    "Target closed",
+    "Browser closed",
+    "Connection closed",
+    "Browser has been disconnected",
+    "Session expired",
+    "Execution context was destroyed",
+    "net::ERR_CONNECTION_REFUSED",
+    "No target found",
+    "Page navigated",
+    "Frame was detached",
+)
+
+
+def _is_browser_disconnected(error: Exception) -> bool:
+    """예외가 브라우저 연결 끊김인지 판별"""
+    if isinstance(error, _BrowserClosedError):
+        return True
+    msg = str(error).lower()
+    return any(p.lower() in msg for p in _BROWSER_DISCONNECT_PATTERNS)
+
+
+class _BrowserClosedError(Exception):
+    """브라우저가 사용자에 의해 종료되었을 때 발생하는 내부 예외"""
+    pass
 
 
 class AutomationRunner(AsyncWorker):
@@ -22,6 +51,7 @@ class AutomationRunner(AsyncWorker):
         self._context = None
         self._page = None
         self._current_portal = None
+        self._last_phase_id = 1  # 가장 최근 실행 페이즈 추적
 
     async def _async_main(self):
         """비동기 메인 — Playwright 초기화 후 명령 대기"""
@@ -48,18 +78,29 @@ class AutomationRunner(AsyncWorker):
 
                 if cmd.get("type") == "stop":
                     break
-                elif cmd.get("type") == "run_phase":
-                    await self._handle_run_phase(cmd)
-                elif cmd.get("type") == "refresh_clients":
-                    await self._handle_refresh_clients()
-                elif cmd.get("type") == "run_single_client":
-                    await self._handle_run_single_client(cmd)
+
+                try:
+                    if cmd.get("type") == "run_phase":
+                        await self._handle_run_phase(cmd)
+                    elif cmd.get("type") == "refresh_clients":
+                        await self._handle_refresh_clients()
+                    elif cmd.get("type") == "run_single_client":
+                        await self._handle_run_single_client(cmd)
+                except Exception as e:
+                    if _is_browser_disconnected(e):
+                        self._handle_browser_disconnect(cmd, e)
+                    else:
+                        tb = traceback.format_exc()
+                        self.log_message.emit(f"실행 오류: {e}\n{tb}")
+                        self.error_occurred.emit(str(e))
+                        self._reset_after_error(cmd)
 
         self.log_message.emit("자동화 러너 종료됨")
 
     async def _handle_run_phase(self, cmd: dict):
         """run_phase 명령 처리"""
         phase_id = cmd.get("phase_id", 0)
+        self._last_phase_id = phase_id
         kwargs = {k: v for k, v in cmd.items() if k not in ("type", "phase_id")}
 
         from src.workflows.registry import get_phase_info, get_workflow
@@ -187,6 +228,7 @@ class AutomationRunner(AsyncWorker):
 
     async def _handle_refresh_clients(self):
         """새로 가져오기: taxagent에서 수임처명 + 사업자등록번호 수집 후 DB 업데이트"""
+        self._last_phase_id = 1
         from src.automation.wehago._common import (
             WEHAGO_TAXAGENT_URL, dismiss_dialogs,
             get_clients_with_biz_from_taxagent,
@@ -266,6 +308,36 @@ class AutomationRunner(AsyncWorker):
             self.log_message.emit(f"수임처 조회 실패: {e}")
             self.error_occurred.emit(f"수임처 조회 실패: {e}")
 
+    def _handle_browser_disconnect(self, cmd: dict, error: Exception):
+        """브라우저가 사용자에 의해 종료되었을 때 복구 처리
+
+        워커 스레드를 죽이지 않고 상태만 초기화하여
+        다음 명령(가져오기/시작)을 받을 수 있도록 함.
+        """
+        self.log_message.emit(f"[브라우저 종료 감지] {error}")
+        self.log_message.emit("브라우저가 종료되었습니다. 다시 시작하려면 '새로 가져오기' 또는 '시작'을 눌러주세요.")
+
+        # 브라우저 참조 해제
+        self._browser = None
+        self._context = None
+        self._page = None
+        self._current_portal = None
+
+        # 해당 페이즈 상태를 failed로 갱신하여 UI 버튼 재활성화
+        phase_id = cmd.get("phase_id", self._last_phase_id)
+        self.phase_changed.emit(phase_id, "failed")
+        self.error_occurred.emit("브라우저가 종료되었습니다. 다시 시작할 수 있습니다.")
+
+    def _reset_after_error(self, cmd: dict):
+        """일반 오류 후 상태 초기화"""
+        self._browser = None
+        self._context = None
+        self._page = None
+        self._current_portal = None
+
+        phase_id = cmd.get("phase_id", self._last_phase_id)
+        self.phase_changed.emit(phase_id, "failed")
+
     def start_single_client(self, phase_id: int, client_name: str,
                             management_number: str = ""):
         """단건 실행: 수임처 1개에 대해서만 자동화 실행"""
@@ -284,6 +356,7 @@ class AutomationRunner(AsyncWorker):
     async def _handle_run_single_client(self, cmd: dict):
         """단건 실행 명령 처리 — BatchEngine 없이 직접 워크플로우 실행"""
         phase_id = cmd.get("phase_id", 0)
+        self._last_phase_id = phase_id
         client_name = cmd.get("client_name", "")
         management_number = cmd.get("management_number", "")
 
@@ -461,12 +534,27 @@ class AutomationRunner(AsyncWorker):
         except Exception as e:
             self.log_message.emit(f"페이지 재연결 실패: {e}")
 
+    async def _is_page_alive(self) -> bool:
+        """현재 페이지가 유효한지 (브라우저가 살아있는지) 확인"""
+        try:
+            if self._page is None:
+                return False
+            _ = self._page.url
+            return True
+        except Exception:
+            return False
+
+    async def _check_browser_alive(self):
+        """브라우저가 닫혀있으면 예외 발생"""
+        if not await self._is_page_alive():
+            raise _BrowserClosedError()
+
     async def _wait_for_login(self, portal: str) -> bool:
-        """포털별 로그인 완료 대기. 수동 로그인 필요 시 안내 메시지 출력."""
+        """포털별 로그인 완료 대기. 브라우저 종료 시 즉시 예외 발생."""
         import asyncio
 
         if portal == "nhis_edi":
-            from src.automation.nhis._common_edi import wait_for_login, wait_for_nexacro_ready
+            from src.automation.nhis._common_edi import wait_for_nexacro_ready
             self.log_message.emit("[국민건강보험 EDI] 로그인 대기 중... 공동인증서로 로그인해 주세요.")
             page = self._page
             if "edi.nhis" not in page.url:
@@ -475,19 +563,37 @@ class AutomationRunner(AsyncWorker):
                         page = pg
                         self._page = page
                         break
-            logged_in = await wait_for_login(page)
-            if not logged_in:
+            # 직접 로그인 대기 루프 (except Exception: pass 우회)
+            for i in range(180):
+                await asyncio.sleep(5)
+                await self._check_browser_alive()
+                try:
+                    if "retrieveMain" in page.url:
+                        has_info = await page.evaluate("""() => {
+                            const text = document.body.innerText;
+                            return text.includes('사업장 관리번호') || text.includes('신규문서');
+                        }""")
+                        if has_info:
+                            self.log_message.emit("국민건강보험 EDI 로그인 확인됨.")
+                            break
+                except _BrowserClosedError:
+                    raise
+                except Exception:
+                    pass
+                if i % 6 == 5:
+                    self.log_message.emit(f"  로그인 대기 중... ({(i + 1) * 5}초)")
+            else:
                 self.log_message.emit("국민건강보험 EDI 로그인 대기 시간 초과")
                 return False
-            # 로그인으로 탭이 바뀔 수 있으므로 페이지 재연결
+
             await self._reconnect_page(portal)
             page = self._page
-            self.log_message.emit("국민건강보험 EDI 로그인 확인됨. 팝업 정리 및 페이지 안정화 대기...")
+            self.log_message.emit("팝업 정리 및 페이지 안정화 대기...")
             await asyncio.sleep(3)
             return True
 
         elif portal == "nps_edi":
-            from src.automation.nps._common import wait_for_login, wait_for_nexacro_ready
+            from src.automation.nps._common import wait_for_nexacro_ready
             self.log_message.emit("[국민연금 EDI] 로그인 대기 중... 공동인증서로 로그인해 주세요.")
             page = self._page
             if "edi.nps" not in page.url:
@@ -496,14 +602,27 @@ class AutomationRunner(AsyncWorker):
                         page = pg
                         self._page = page
                         break
-            logged_in = await wait_for_login(page)
-            if not logged_in:
+            # 직접 로그인 대기 루프
+            for i in range(180):
+                await asyncio.sleep(5)
+                await self._check_browser_alive()
+                try:
+                    if "nexacro" in page.url:
+                        self.log_message.emit("국민연금 EDI 로그인 확인됨.")
+                        break
+                except _BrowserClosedError:
+                    raise
+                except Exception:
+                    pass
+                if i % 6 == 5:
+                    self.log_message.emit(f"  로그인 대기 중... ({(i + 1) * 5}초)")
+            else:
                 self.log_message.emit("국민연금 EDI 로그인 대기 시간 초과")
                 return False
-            # 로그인으로 탭이 바뀔 수 있으므로 페이지 재연결
+
             await self._reconnect_page(portal)
             page = self._page
-            self.log_message.emit("국민연금 EDI 로그인 확인됨. Nexacro 로딩 대기...")
+            self.log_message.emit("Nexacro 로딩 대기...")
             if not await wait_for_nexacro_ready(page):
                 self.error_occurred.emit("Nexacro 프레임워크 로딩 실패")
                 return False
@@ -513,11 +632,14 @@ class AutomationRunner(AsyncWorker):
             self.log_message.emit("[홈택스] 로그인 대기 중... 인증서로 로그인해 주세요.")
             for i in range(180):
                 await asyncio.sleep(5)
+                await self._check_browser_alive()
                 try:
                     url = self._page.url
                     if "hometax.go.kr" in url and "login" not in url.lower():
                         self.log_message.emit("홈택스 로그인 확인됨")
                         return True
+                except _BrowserClosedError:
+                    raise
                 except Exception:
                     pass
                 if i % 12 == 11:
@@ -525,14 +647,68 @@ class AutomationRunner(AsyncWorker):
             return False
 
         elif portal == "wehago":
-            from src.automation.wehago._common import wait_for_login
             self.log_message.emit("[WEHAGO] 로그인 상태 확인 중...")
-            logged_in = await wait_for_login(self._page)
-            if logged_in:
-                self.log_message.emit("WEHAGO 로그인 확인됨")
-            else:
-                self.log_message.emit("WEHAGO 로그인 대기 시간 초과")
-            return logged_in
+
+            # 이미 로그인된 상태인지 먼저 확인
+            await self._check_browser_alive()
+            try:
+                await self._page.goto(
+                    "https://www.wehago.com/#/main",
+                    wait_until="domcontentloaded",
+                    timeout=15000,
+                )
+            except _BrowserClosedError:
+                raise
+            except Exception:
+                await self._check_browser_alive()
+
+            await asyncio.sleep(3)
+            try:
+                if (await self._page.locator("#company_").count() > 0
+                        or await self._page.locator("text=나의 수임처").count() > 0):
+                    self.log_message.emit("WEHAGO 이미 로그인되어 있습니다.")
+                    return True
+            except _BrowserClosedError:
+                raise
+            except Exception:
+                pass
+
+            self.log_message.emit("브라우저에서 WEHAGO 로그인을 진행해 주세요.")
+
+            # 초기 30초: 새로고침 없이 DOM만 조용히 확인
+            for _ in range(6):
+                await asyncio.sleep(5)
+                await self._check_browser_alive()
+                try:
+                    if await self._page.locator("text=나의 수임처").count() > 0:
+                        self.log_message.emit("WEHAGO 로그인 확인됨.")
+                        return True
+                except _BrowserClosedError:
+                    raise
+                except Exception:
+                    pass
+
+            # 이후: 15초 간격 DOM 확인, 45초마다 새로고침
+            for i in range(52):
+                await asyncio.sleep(15)
+                await self._check_browser_alive()
+                try:
+                    if await self._page.locator("text=나의 수임처").count() > 0:
+                        self.log_message.emit("WEHAGO 로그인 확인됨.")
+                        return True
+                    if i % 3 == 2:
+                        await self._page.reload(wait_until="domcontentloaded")
+                        await asyncio.sleep(3)
+                        if await self._page.locator("text=나의 수임처").count() > 0:
+                            self.log_message.emit("WEHAGO 로그인 확인됨.")
+                            return True
+                except _BrowserClosedError:
+                    raise
+                except Exception:
+                    pass
+
+            self.log_message.emit("WEHAGO 로그인 대기 시간 초과")
+            return False
 
         else:
             return True

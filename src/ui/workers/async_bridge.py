@@ -74,13 +74,18 @@ class AsyncWorker(QThread):
         self._command_queue: queue.SimpleQueue = queue.SimpleQueue()
         self._log_capture: Optional[LogCapture] = None
         self._original_stdout = None
+        self._dead = False  # 복구 불가능한 상태인지
 
     def run(self):
-        """QThread.run — 백그라운드 스레드 진입점"""
+        """QThread.run — 백그라운드 스레드 진입점
+
+        예외 발생 시 워커가 죽지 않고 재시작 가능한 상태로 유지.
+        새 명령이 들어오면 start()로 다시 실행 가능.
+        """
+        self._dead = False
         self._original_stdout = sys.stdout
         self._log_capture = LogCapture(self._original_stdout, self.log_message)
 
-        # stdout 교체 (이 스레드와 asyncio가 같은 stdout 사용)
         sys.stdout = self._log_capture
 
         self._loop = asyncio.new_event_loop()
@@ -89,9 +94,10 @@ class AsyncWorker(QThread):
         try:
             self._loop.run_until_complete(self._async_main())
         except Exception as e:
-            self.error_occurred.emit(f"치명적 에러: {e}")
+            # 치명적 에러: 워커는 죽지만, UI에서 재시작 가능하도록 상태 표시
+            self.error_occurred.emit(f"워커 오류: {e}")
+            self._dead = True
         finally:
-            # stdout 복원
             if self._original_stdout:
                 sys.stdout = self._original_stdout
             self._loop.close()
@@ -128,17 +134,22 @@ class AsyncWorker(QThread):
 
     # ── 외부에서 호출 (메인 스레드에서) ──
 
+    def _ensure_running(self):
+        """워커가 멈춰있으면 재시작. QThread는 start()로 재사용 가능."""
+        self._stop_event.clear()
+        self._pause_event.set()
+        if not self.isRunning():
+            self.start()
+
     def start_phase(self, phase_id: int, **kwargs):
         """페이즈 실행 명령 전송"""
         self._command_queue.put({"type": "run_phase", "phase_id": phase_id, **kwargs})
-        if not self.isRunning():
-            self.start()
+        self._ensure_running()
 
     def start_refresh_clients(self):
         """수임처 새로 가져오기 명령 전송"""
         self._command_queue.put({"type": "refresh_clients"})
-        if not self.isRunning():
-            self.start()
+        self._ensure_running()
 
     def request_stop(self):
         """정지 요청"""

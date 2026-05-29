@@ -182,6 +182,8 @@ class MainWindow(QMainWindow):
         if status in ("completed", "failed"):
             if self._selected_phase == 1:
                 self.start_btn.setEnabled(False)
+                # Phase 1이어도 버튼 재활성화 (브라우저 종료 후 재시작 가능)
+                self.company_table.set_buttons_enabled(True)
             else:
                 self.start_btn.setEnabled(True)
             self.pause_btn.setEnabled(False)
@@ -303,10 +305,16 @@ class MainWindow(QMainWindow):
         self._poll_step_detail()
 
     def _on_runner_finished(self):
-        self.start_btn.setEnabled(True)
+        if self._selected_phase == 1:
+            self.start_btn.setEnabled(False)
+        else:
+            self.start_btn.setEnabled(True)
         self.pause_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
         self._poll_timer.stop()
+        self.company_table.set_buttons_enabled(True)
+        if self._selected_phase >= 2:
+            self.company_table.set_single_run_mode(True)
 
     def _poll_step_detail(self):
         """선택된 Job의 세부 단계를 DB에서 조회하여 업데이트"""
