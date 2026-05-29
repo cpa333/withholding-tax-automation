@@ -135,9 +135,18 @@ class AsyncWorker(QThread):
     # ── 외부에서 호출 (메인 스레드에서) ──
 
     def _ensure_running(self):
-        """워커가 멈춰있으면 재시작. QThread는 start()로 재사용 가능."""
+        """워커가 멈춰있으면 재시작. QThread는 start()로 재사용 가능.
+
+        기존 큐에 남은 stop 명령 등 잔여 명령을 모두 비운 뒤 시작.
+        """
         self._stop_event.clear()
         self._pause_event.set()
+        # 큐에 남은 잔여 명령 제거
+        while not self._command_queue.empty():
+            try:
+                self._command_queue.get_nowait()
+            except Exception:
+                break
         if not self.isRunning():
             self.start()
 
