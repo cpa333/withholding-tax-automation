@@ -385,10 +385,13 @@ class MainWindow(QMainWindow):
 
     def _on_stop(self):
         self.runner.request_stop()
+        self.runner.cleanup_session()
         self.start_btn.setEnabled(True)
         self.pause_btn.setEnabled(False)
+        self.pause_btn.setText("일시정지")
         self.stop_btn.setEnabled(False)
         self._poll_timer.stop()
+        self.statusBar().showMessage("세션 종료됨. 다시 시작하려면 '시작'을 눌러주세요.")
 
     def closeEvent(self, event):
         self._poll_timer.stop()

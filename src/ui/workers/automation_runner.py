@@ -115,16 +115,27 @@ class AutomationRunner(AsyncWorker):
         self.log_message.emit(f"[{display_name}] 실행 시작")
         self.phase_changed.emit(phase_id, "running")
 
+        if self._stop_event.is_set():
+            self.phase_changed.emit(phase_id, "failed")
+            return
+
         # Chrome 실행 + 로그인
         if not await self._ensure_browser(portal):
             self.phase_changed.emit(phase_id, "failed")
             self.error_occurred.emit("Chrome 연결 실패")
             return
 
+        if self._stop_event.is_set():
+            self.phase_changed.emit(phase_id, "failed")
+            return
+
         # 포털별 로그인 대기
         if not await self._wait_for_login(portal):
-            self.phase_changed.emit(phase_id, "failed")
-            self.error_occurred.emit("로그인 실패 또는 시간 초과")
+            if self._stop_event.is_set():
+                self.log_message.emit("[사용자 중단] 로그인 대기 중단")
+            else:
+                self.phase_changed.emit(phase_id, "failed")
+                self.error_occurred.emit("로그인 실패 또는 시간 초과")
             return
 
         # 로그인 후 페이지 재연결 (인증 과정에서 탭이 바뀔 수 있음)
@@ -238,14 +249,21 @@ class AutomationRunner(AsyncWorker):
 
         self.log_message.emit("[수임처 새로 가져오기] 시작...")
 
+        if self._stop_event.is_set():
+            return
+
         # Chrome 실행 + WEHAGO 연결
         if not await self._ensure_browser("wehago"):
             self.error_occurred.emit("Chrome 연결 실패")
             return
 
+        if self._stop_event.is_set():
+            return
+
         # 로그인 대기
         if not await self._wait_for_login("wehago"):
-            self.error_occurred.emit("WEHAGO 로그인 실패 또는 시간 초과")
+            if not self._stop_event.is_set():
+                self.error_occurred.emit("WEHAGO 로그인 실패 또는 시간 초과")
             return
 
         page = self._page
@@ -317,26 +335,32 @@ class AutomationRunner(AsyncWorker):
         self.log_message.emit(f"[브라우저 종료 감지] {error}")
         self.log_message.emit("브라우저가 종료되었습니다. 다시 시작하려면 '새로 가져오기' 또는 '시작'을 눌러주세요.")
 
-        # 브라우저 참조 해제
-        self._browser = None
-        self._context = None
-        self._page = None
-        self._current_portal = None
+        self._cleanup_browser_refs()
 
-        # 해당 페이즈 상태를 failed로 갱신하여 UI 버튼 재활성화
         phase_id = cmd.get("phase_id", self._last_phase_id)
         self.phase_changed.emit(phase_id, "failed")
         self.error_occurred.emit("브라우저가 종료되었습니다. 다시 시작할 수 있습니다.")
 
     def _reset_after_error(self, cmd: dict):
         """일반 오류 후 상태 초기화"""
+        self._cleanup_browser_refs()
+
+        phase_id = cmd.get("phase_id", self._last_phase_id)
+        self.phase_changed.emit(phase_id, "failed")
+
+    def _cleanup_browser_refs(self):
+        """브라우저/Playwright 참조 해제"""
         self._browser = None
         self._context = None
         self._page = None
         self._current_portal = None
 
-        phase_id = cmd.get("phase_id", self._last_phase_id)
-        self.phase_changed.emit(phase_id, "failed")
+    def cleanup_session(self):
+        """정지 버튼 클릭 시 호출 — Chrome 종료 + 세션 초기화"""
+        from src.utils.chrome_cdp import kill_chrome
+        kill_chrome()
+        self._cleanup_browser_refs()
+        self.log_message.emit("[세션 종료] Chrome 프로세스 종료 + 세션 초기화됨")
 
     def start_single_client(self, phase_id: int, client_name: str,
                             management_number: str = ""):
@@ -372,15 +396,26 @@ class AutomationRunner(AsyncWorker):
         self.log_message.emit(f"[{display_name}] 단건 실행: {client_name}")
         self.phase_changed.emit(phase_id, "running")
 
+        if self._stop_event.is_set():
+            self.phase_changed.emit(phase_id, "failed")
+            return
+
         # Chrome 실행 + 로그인
         if not await self._ensure_browser(portal):
             self.phase_changed.emit(phase_id, "failed")
             self.error_occurred.emit("Chrome 연결 실패")
             return
 
-        if not await self._wait_for_login(portal):
+        if self._stop_event.is_set():
             self.phase_changed.emit(phase_id, "failed")
-            self.error_occurred.emit("로그인 실패 또는 시간 초과")
+            return
+
+        if not await self._wait_for_login(portal):
+            if self._stop_event.is_set():
+                self.log_message.emit("[사용자 중단] 로그인 대기 중단")
+            else:
+                self.phase_changed.emit(phase_id, "failed")
+                self.error_occurred.emit("로그인 실패 또는 시간 초과")
             return
 
         await self._reconnect_page(portal)
@@ -449,6 +484,9 @@ class AutomationRunner(AsyncWorker):
     async def _ensure_browser(self, portal: str) -> bool:
         """포털에 맞는 Chrome 인스턴스 실행"""
         from src.utils.chrome_cdp import launch_chrome, kill_chrome, CDP_URL
+
+        if self._stop_event.is_set():
+            return False
 
         # 포털별 URL
         portal_urls = {
@@ -550,7 +588,7 @@ class AutomationRunner(AsyncWorker):
             raise _BrowserClosedError()
 
     async def _wait_for_login(self, portal: str) -> bool:
-        """포털별 로그인 완료 대기. 브라우저 종료 시 즉시 예외 발생."""
+        """포털별 로그인 완료 대기. 브라우저 종료 / 정지 시 즉시 예외 발생."""
         import asyncio
 
         if portal == "nhis_edi":
@@ -563,8 +601,9 @@ class AutomationRunner(AsyncWorker):
                         page = pg
                         self._page = page
                         break
-            # 직접 로그인 대기 루프 (except Exception: pass 우회)
             for i in range(180):
+                if self._stop_event.is_set():
+                    return False
                 await asyncio.sleep(5)
                 await self._check_browser_alive()
                 try:
@@ -602,8 +641,9 @@ class AutomationRunner(AsyncWorker):
                         page = pg
                         self._page = page
                         break
-            # 직접 로그인 대기 루프
             for i in range(180):
+                if self._stop_event.is_set():
+                    return False
                 await asyncio.sleep(5)
                 await self._check_browser_alive()
                 try:
@@ -631,6 +671,8 @@ class AutomationRunner(AsyncWorker):
         elif portal == "hometax":
             self.log_message.emit("[홈택스] 로그인 대기 중... 인증서로 로그인해 주세요.")
             for i in range(180):
+                if self._stop_event.is_set():
+                    return False
                 await asyncio.sleep(5)
                 await self._check_browser_alive()
                 try:
@@ -649,7 +691,6 @@ class AutomationRunner(AsyncWorker):
         elif portal == "wehago":
             self.log_message.emit("[WEHAGO] 로그인 상태 확인 중...")
 
-            # 이미 로그인된 상태인지 먼저 확인
             await self._check_browser_alive()
             try:
                 await self._page.goto(
@@ -675,8 +716,9 @@ class AutomationRunner(AsyncWorker):
 
             self.log_message.emit("브라우저에서 WEHAGO 로그인을 진행해 주세요.")
 
-            # 초기 30초: 새로고침 없이 DOM만 조용히 확인
             for _ in range(6):
+                if self._stop_event.is_set():
+                    return False
                 await asyncio.sleep(5)
                 await self._check_browser_alive()
                 try:
@@ -688,8 +730,9 @@ class AutomationRunner(AsyncWorker):
                 except Exception:
                     pass
 
-            # 이후: 15초 간격 DOM 확인, 45초마다 새로고침
             for i in range(52):
+                if self._stop_event.is_set():
+                    return False
                 await asyncio.sleep(15)
                 await self._check_browser_alive()
                 try:
