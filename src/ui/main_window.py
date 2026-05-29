@@ -282,6 +282,18 @@ class MainWindow(QMainWindow):
             try:
                 client_repo = ClientRepository(db)
                 clients = client_repo.list_all()
+
+                # 대상 포털 클라이언트 우선, 없으면 WEHAGO 클라이언트 사용
+                portal_clients = [
+                    c for c in clients
+                    if c.name != "__전체수임처조회__" and c.portal == portal
+                ]
+                wehago_clients = [
+                    c for c in clients
+                    if c.name != "__전체수임처조회__" and c.portal == "wehago"
+                ]
+                source = portal_clients if portal_clients else wehago_clients
+
                 client_dicts = [
                     {
                         "name": c.name.replace("[테스트] ", ""),
@@ -289,9 +301,7 @@ class MainWindow(QMainWindow):
                         "portal": c.portal,
                         "enabled": c.enabled,
                     }
-                    for c in clients
-                    if c.name != "__전체수임처조회__"
-                    and c.portal in ("wehago", portal)
+                    for c in source
                 ]
                 self.company_table.update_clients(client_dicts)
             finally:

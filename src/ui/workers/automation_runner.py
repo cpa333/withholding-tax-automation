@@ -190,7 +190,7 @@ class AutomationRunner(AsyncWorker):
             engine.batch_repo.update_status(batch.id, BatchStatus.RUNNING)
 
             try:
-                # 수임처별 루프 — 일시정지/정지 체크
+                # 수임처별 루프 — 일시정지/정지/브라우저 종료 체크
                 while not self._stop_event.is_set():
                     # 일시정지 대기
                     while not self._pause_event.is_set() and not self._stop_event.is_set():
@@ -199,6 +199,13 @@ class AutomationRunner(AsyncWorker):
                     if self._stop_event.is_set():
                         engine.batch_repo.update_status(batch.id, BatchStatus.PAUSED)
                         self.log_message.emit("[사용자 중단] 배치 일시정지됨")
+                        break
+
+                    # 브라우저 종료 확인
+                    if not await self._is_page_alive():
+                        self.log_message.emit("브라우저가 닫혀서 세션이 중단되었습니다.")
+                        self.log_message.emit("다시 시작하려면 '시작' 버튼을 눌러주세요.")
+                        engine.batch_repo.update_status(batch.id, BatchStatus.PAUSED)
                         break
 
                     job = engine.job_repo.get_next_pending(batch.id)
@@ -210,6 +217,13 @@ class AutomationRunner(AsyncWorker):
                         page=self._page,
                         context=self._context,
                     )
+
+                    # 잡 실행 후 브라우저 종료 확인 (다음 잡 실행 전 감지)
+                    if not await self._is_page_alive():
+                        self.log_message.emit("브라우저가 닫혀서 세션이 중단되었습니다.")
+                        self.log_message.emit("다시 시작하려면 '시작' 버튼을 눌러주세요.")
+                        engine.batch_repo.update_status(batch.id, BatchStatus.PAUSED)
+                        break
 
                     self._emit_progress(engine, batch.id, phase_id)
             except asyncio.CancelledError:
