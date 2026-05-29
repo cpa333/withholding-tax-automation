@@ -396,6 +396,7 @@ class AutomationRunner(AsyncWorker):
     def start_single_client(self, phase_id: int, client_name: str,
                             management_number: str = ""):
         """단건 실행: 수임처 1개에 대해서만 자동화 실행"""
+        self._ensure_running()
         cmd = {
             "type": "run_single_client",
             "phase_id": phase_id,
@@ -403,10 +404,6 @@ class AutomationRunner(AsyncWorker):
             "management_number": management_number,
         }
         self._command_queue.put_nowait(cmd)
-        if not self._pause_event.is_set():
-            self._pause_event.set()
-        if not self.isRunning():
-            self.start()
 
     async def _handle_run_single_client(self, cmd: dict):
         """단건 실행 명령 처리 — BatchEngine 없이 직접 워크플로우 실행"""
