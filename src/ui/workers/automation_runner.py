@@ -89,12 +89,12 @@ class AutomationRunner(AsyncWorker):
                 except Exception as e:
                     # 예외 메시지 패턴 또는 실제 브라우저 상태로 판별
                     if _is_browser_disconnected(e) or not await self._is_page_alive():
-                        self._handle_browser_disconnect(cmd, e)
+                        await self._handle_browser_disconnect(cmd, e)
                     else:
                         tb = traceback.format_exc()
                         self.log_message.emit(f"실행 오류: {e}\n{tb}")
                         self.error_occurred.emit(str(e))
-                        self._reset_after_error(cmd)
+                        await self._reset_after_error(cmd)
 
         self.log_message.emit("자동화 러너 종료됨")
 
@@ -363,7 +363,7 @@ class AutomationRunner(AsyncWorker):
             self.log_message.emit(f"수임처 조회 실패: {e}")
             self.error_occurred.emit(f"수임처 조회 실패: {e}")
 
-    def _handle_browser_disconnect(self, cmd: dict, error: Exception):
+    async def _handle_browser_disconnect(self, cmd: dict, error: Exception):
         """브라우저가 사용자에 의해 종료되었을 때 복구 처리
 
         워커 스레드를 죽이지 않고 상태만 초기화하여
@@ -372,21 +372,29 @@ class AutomationRunner(AsyncWorker):
         self.log_message.emit("브라우저가 닫혀서 세션이 중단되었습니다.")
         self.log_message.emit("다시 시작하려면 '시작' 버튼을 눌러주세요.")
 
-        self._cleanup_browser_refs()
+        await self._disconnect_browser()
 
         phase_id = cmd.get("phase_id", self._last_phase_id)
         self.phase_changed.emit(phase_id, "failed")
         self.error_occurred.emit("브라우저가 닫혀서 세션이 중단되었습니다. 다시 시작하려면 시작 버튼을 눌러주세요.")
 
-    def _reset_after_error(self, cmd: dict):
+    async def _reset_after_error(self, cmd: dict):
         """일반 오류 후 상태 초기화"""
-        self._cleanup_browser_refs()
+        await self._disconnect_browser()
 
         phase_id = cmd.get("phase_id", self._last_phase_id)
         self.phase_changed.emit(phase_id, "failed")
 
-    def _cleanup_browser_refs(self):
-        """브라우저/Playwright 참조 해제 + Chrome 프로세스 종료"""
+    async def _disconnect_browser(self):
+        """Playwright 브라우저 연결 정상 종료 + Chrome 프로세스 종료
+
+        누적 좀비 연결 방지를 위해 반드시 호출 필요.
+        """
+        if self._browser is not None:
+            try:
+                await self._browser.close()
+            except Exception:
+                pass
         from src.utils.chrome_cdp import kill_chrome
         kill_chrome()
         self._browser = None
@@ -521,6 +529,16 @@ class AutomationRunner(AsyncWorker):
 
         if self._stop_event.is_set():
             return False
+
+        # 기존 Playwright 연결 정리 (좀비 연결 방지)
+        if self._browser is not None:
+            try:
+                await self._browser.close()
+            except Exception:
+                pass
+            self._browser = None
+            self._context = None
+            self._page = None
 
         # 포털별 URL
         portal_urls = {
