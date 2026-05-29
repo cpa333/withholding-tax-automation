@@ -220,11 +220,15 @@ class MainWindow(QMainWindow):
         self._selected_phase = phase_id
         if phase_id == 1:
             self._load_client_list()
-            self.start_btn.setEnabled(False)
+            self.start_btn.setVisible(False)
+            self.stop_btn.setVisible(False)
             self.company_table.set_client_mode(True)
             self.company_table.set_single_run_mode(False)
         else:
+            self.start_btn.setVisible(True)
             self.start_btn.setEnabled(True)
+            self.stop_btn.setVisible(True)
+            self.stop_btn.setEnabled(False)
             self.company_table.set_client_mode(False)
             self._load_client_list_for_phase(phase_id)
             self.company_table.set_single_run_mode(True)
