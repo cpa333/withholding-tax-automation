@@ -150,7 +150,7 @@ class AutomationRunner(AsyncWorker):
 
         # Phase 2+: BatchEngine으로 배치 실행
         from src.batch.engine import BatchEngine
-        from src.batch.models import Client, BatchStatus
+        from src.batch.models import Client, BatchStatus, biz_to_mgmt_no
 
         os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
 
@@ -212,18 +212,34 @@ class AutomationRunner(AsyncWorker):
                     if not job:
                         break
 
-                    await engine._run_job(
-                        job, workflow_func,
-                        page=self._page,
-                        context=self._context,
-                    )
+                    # 직접 잡 실행 — 브라우저 종료 에러는 _run_job이 잡아주지만,
+                    # 에러 메시지가 무서운 traceback으로 표시되지 않도록 여기서 선제 감지
+                    engine.job_repo.mark_running(job.id)
 
-                    # 잡 실행 후 브라우저 종료 확인 (다음 잡 실행 전 감지)
-                    if not await self._is_page_alive():
-                        self.log_message.emit("브라우저가 닫혀서 세션이 중단되었습니다.")
-                        self.log_message.emit("다시 시작하려면 '시작' 버튼을 눌러주세요.")
-                        engine.batch_repo.update_status(batch.id, BatchStatus.PAUSED)
-                        break
+                    mgmt_no = ""
+                    if job.client_id:
+                        client = engine.client_repo.get(job.client_id)
+                        if client and client.business_number:
+                            mgmt_no = biz_to_mgmt_no(client.business_number)
+
+                    try:
+                        success = await workflow_func(
+                            self._page, self._context, job, engine.state,
+                            management_number=mgmt_no,
+                        )
+                        if success:
+                            engine.job_repo.mark_completed(job.id)
+                        else:
+                            engine.job_repo.mark_failed(job.id, "워크플로우 False 반환")
+                    except Exception as e:
+                        # 브라우저 종료 → 즉시 루프 중단
+                        if not await self._is_page_alive():
+                            engine.job_repo.mark_failed(job.id, "브라우저 종료")
+                            self.log_message.emit("브라우저가 닫혀서 세션이 중단되었습니다.")
+                            self.log_message.emit("다시 시작하려면 '시작' 버튼을 눌러주세요.")
+                            engine.batch_repo.update_status(batch.id, BatchStatus.PAUSED)
+                            break
+                        engine.job_repo.mark_failed(job.id, f"{type(e).__name__}: {e}")
 
                     self._emit_progress(engine, batch.id, phase_id)
             except asyncio.CancelledError:
@@ -588,11 +604,15 @@ class AutomationRunner(AsyncWorker):
             self.log_message.emit(f"페이지 재연결 실패: {e}")
 
     async def _is_page_alive(self) -> bool:
-        """현재 페이지가 유효한지 (브라우저가 살아있는지) 확인"""
+        """현재 페이지가 유효한지 (브라우저가 살아있는지) 확인
+
+        page.url은 캐시된 값을 반환할 수 있어 신뢰할 수 없으므로
+        page.evaluate()로 실제 브라우저 통신을 시도.
+        """
         try:
             if self._page is None:
                 return False
-            _ = self._page.url
+            await self._page.evaluate("1")
             return True
         except Exception:
             return False
