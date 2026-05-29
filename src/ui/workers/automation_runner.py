@@ -353,6 +353,8 @@ class AutomationRunner(AsyncWorker):
             self.log_message.emit(f"수임처 새로 가져오기 완료: {len(clients_data)}건")
             self.phase_changed.emit(1, "completed")
 
+        except _BrowserClosedError:
+            raise  # 바깥 try/except에서 브라우저 종료 처리하도록 전파
         except Exception as e:
             self.log_message.emit(f"수임처 조회 실패: {e}")
             self.error_occurred.emit(f"수임처 조회 실패: {e}")
