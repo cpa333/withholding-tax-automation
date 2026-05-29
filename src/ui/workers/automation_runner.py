@@ -609,13 +609,13 @@ class AutomationRunner(AsyncWorker):
     async def _is_page_alive(self) -> bool:
         """현재 페이지가 유효한지 (브라우저가 살아있는지) 확인
 
-        page.url은 캐시된 값을 반환할 수 있어 신뢰할 수 없으므로
-        page.evaluate()로 실제 브라우저 통신을 시도.
+        page.evaluate()로 실제 브라우저 통신을 시도하되
+        3초 타임아웃을 걸어 브라우저가 닫혀도 즉시 감지.
         """
         try:
             if self._page is None:
                 return False
-            await self._page.evaluate("1")
+            await asyncio.wait_for(self._page.evaluate("1"), timeout=3)
             return True
         except Exception:
             return False
