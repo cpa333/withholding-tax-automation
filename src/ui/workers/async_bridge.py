@@ -152,13 +152,13 @@ class AsyncWorker(QThread):
 
     def start_phase(self, phase_id: int, **kwargs):
         """페이즈 실행 명령 전송"""
-        self._command_queue.put({"type": "run_phase", "phase_id": phase_id, **kwargs})
         self._ensure_running()
+        self._command_queue.put({"type": "run_phase", "phase_id": phase_id, **kwargs})
 
     def start_refresh_clients(self):
         """수임처 새로 가져오기 명령 전송"""
-        self._command_queue.put({"type": "refresh_clients"})
         self._ensure_running()
+        self._command_queue.put({"type": "refresh_clients"})
 
     def request_stop(self):
         """정지 요청"""
