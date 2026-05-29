@@ -87,7 +87,8 @@ class AutomationRunner(AsyncWorker):
                     elif cmd.get("type") == "run_single_client":
                         await self._handle_run_single_client(cmd)
                 except Exception as e:
-                    if _is_browser_disconnected(e):
+                    # 예외 메시지 패턴 또는 실제 브라우저 상태로 판별
+                    if _is_browser_disconnected(e) or not await self._is_page_alive():
                         self._handle_browser_disconnect(cmd, e)
                     else:
                         tb = traceback.format_exc()
@@ -332,14 +333,14 @@ class AutomationRunner(AsyncWorker):
         워커 스레드를 죽이지 않고 상태만 초기화하여
         다음 명령(가져오기/시작)을 받을 수 있도록 함.
         """
-        self.log_message.emit(f"[브라우저 종료 감지] {error}")
-        self.log_message.emit("브라우저가 종료되었습니다. 다시 시작하려면 '새로 가져오기' 또는 '시작'을 눌러주세요.")
+        self.log_message.emit("브라우저가 닫혀서 세션이 중단되었습니다.")
+        self.log_message.emit("다시 시작하려면 '시작' 버튼을 눌러주세요.")
 
         self._cleanup_browser_refs()
 
         phase_id = cmd.get("phase_id", self._last_phase_id)
         self.phase_changed.emit(phase_id, "failed")
-        self.error_occurred.emit("브라우저가 종료되었습니다. 다시 시작할 수 있습니다.")
+        self.error_occurred.emit("브라우저가 닫혀서 세션이 중단되었습니다. 다시 시작하려면 시작 버튼을 눌러주세요.")
 
     def _reset_after_error(self, cmd: dict):
         """일반 오류 후 상태 초기화"""

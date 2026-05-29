@@ -171,8 +171,8 @@ class MainWindow(QMainWindow):
         self.log_panel.append_log(message)
 
     def _on_error(self, message: str):
-        self.log_panel.append_log(f"[에러] {message}")
-        self.statusBar().showMessage(f"에러: {message[:80]}")
+        self.log_panel.append_log(message)
+        self.statusBar().showMessage(message[:120])
 
     def _on_phase_changed(self, phase_id: int, status: str):
         self.sidebar.update_phase_status(phase_id, status)
