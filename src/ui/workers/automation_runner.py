@@ -285,6 +285,7 @@ class AutomationRunner(AsyncWorker):
 
         # Chrome 실행 + WEHAGO 연결
         if not await self._ensure_browser("wehago"):
+            self.phase_changed.emit(1, "failed")
             self.error_occurred.emit("Chrome 연결 실패")
             return
 
@@ -354,8 +355,11 @@ class AutomationRunner(AsyncWorker):
             self.phase_changed.emit(1, "completed")
 
         except _BrowserClosedError:
-            raise  # 바깥 try/except에서 브라우저 종료 처리하도록 전파
+            raise
         except Exception as e:
+            # Playwright 에러도 브라우저 종료일 수 있으므로 확인
+            if _is_browser_disconnected(e) or not await self._is_page_alive():
+                raise
             self.log_message.emit(f"수임처 조회 실패: {e}")
             self.error_occurred.emit(f"수임처 조회 실패: {e}")
 
