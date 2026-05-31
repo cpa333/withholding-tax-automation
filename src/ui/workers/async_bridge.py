@@ -32,12 +32,13 @@ class LogCapture(io.TextIOBase):
     def write(self, text):
         if text and text.strip():
             self._log_signal.emit(text.rstrip())
-        # 디버깅용 콘솔에도 출력
-        self._original.write(text)
+        if self._original is not None:
+            self._original.write(text)
         return len(text) if text else 0
 
     def flush(self):
-        self._original.flush()
+        if self._original is not None:
+            self._original.flush()
 
     @property
     def encoding(self):

@@ -4,4 +4,7 @@ import sys
 
 
 def log(msg):
-    print(msg, flush=True)
+    try:
+        print(msg, flush=True)
+    except (AttributeError, TypeError, ValueError):
+        pass

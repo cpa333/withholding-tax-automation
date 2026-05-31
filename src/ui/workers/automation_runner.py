@@ -336,7 +336,6 @@ class AutomationRunner(AsyncWorker):
                 conn.execute("DELETE FROM jobs")
                 conn.execute("DELETE FROM batches")
                 conn.execute("DELETE FROM clients")
-                conn.execute("COMMIT")
 
                 client_repo = ClientRepository(db)
                 for c in clients_data:
@@ -585,7 +584,6 @@ class AutomationRunner(AsyncWorker):
                     "DELETE FROM batches WHERE portal = ?",
                     (portal,),
                 )
-            conn.execute("COMMIT")
 
     async def _ensure_browser(self, portal: str) -> bool:
         """포털에 맞는 Chrome 인스턴스 실행"""

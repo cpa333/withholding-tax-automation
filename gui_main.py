@@ -4,6 +4,24 @@ import sys
 import os
 
 
+class _NullWriter:
+    """windowed 모드에서 sys.stdout/stderr가 None일 때 대체"""
+    def write(self, *args, **kwargs): pass
+    def flush(self): pass
+    def fileno(self): return -1
+    def detach(self):
+        import io
+        return io.BufferedWriter(io.BytesIO())
+    encoding = 'utf-8'
+
+
+# 모듈 로드 시점에 즉시 교체 — 다른 어떤 import보다 먼저 실행
+if sys.stdout is None:
+    sys.stdout = _NullWriter()
+if sys.stderr is None:
+    sys.stderr = _NullWriter()
+
+
 def resource_path(relative_path):
     """PyInstaller 번들 환경에서 리소스 경로 반환"""
     if hasattr(sys, '_MEIPASS'):
@@ -12,8 +30,8 @@ def resource_path(relative_path):
 
 
 def main():
-    # PyInstaller exe에서도 프로젝트 루트를 CWD로 유지
-    if hasattr(sys, '_MEIPASS'):
+    # PyInstaller onefile/onedir 모두: exe 위치를 CWD로
+    if getattr(sys, 'frozen', False):
         os.chdir(os.path.dirname(sys.executable))
 
     sys.path.insert(0, resource_path("."))
