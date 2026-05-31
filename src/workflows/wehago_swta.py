@@ -9,6 +9,7 @@ from src.batch.state import StateManager
     phase_id=5,
     portal="wehago",
     display_name="WEHAGO 원천이행상황신고서",
+    enabled=False,
 )
 class WehagoSwtaWorkflow(BaseWorkflow):
     steps = [

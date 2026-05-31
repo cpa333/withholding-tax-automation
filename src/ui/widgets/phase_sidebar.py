@@ -21,12 +21,13 @@ class PhaseButton(QWidget):
 
     clicked = Signal(int)  # phase_id
 
-    def __init__(self, phase_id: int, display_name: str, parent=None):
+    def __init__(self, phase_id: int, display_name: str, parent=None, *, enabled: bool = True):
         super().__init__(parent)
         self.phase_id = phase_id
         self._status = "pending"
         self._selected = False
         self._progress = (0, 0)
+        self._enabled = enabled
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
@@ -34,11 +35,21 @@ class PhaseButton(QWidget):
 
         self.btn = QPushButton(f"{phase_id}. {display_name}")
         self.btn.setFlat(True)
-        self.btn.setStyleSheet(
-            "QPushButton { text-align: left; padding: 6px; font-size: 13px; "
-            "color: #1a1a1a; background-color: transparent; border: none; }"
-        )
-        self.btn.clicked.connect(lambda: self.clicked.emit(self.phase_id))
+
+        if enabled:
+            self.btn.setStyleSheet(
+                "QPushButton { text-align: left; padding: 6px; font-size: 13px; "
+                "color: #1a1a1a; background-color: transparent; border: none; }"
+            )
+            self.btn.clicked.connect(lambda: self.clicked.emit(self.phase_id))
+        else:
+            self.btn.setEnabled(False)
+            self.btn.setStyleSheet(
+                "QPushButton { text-align: left; padding: 6px; font-size: 13px; "
+                "color: #b0b0b0; background-color: #e8e8e8; border: none; border-radius: 3px; } "
+                "QPushButton:disabled { color: #b0b0b0; background-color: #e8e8e8; }"
+            )
+
         layout.addWidget(self.btn)
 
         self.progress_label = QLabel("")
@@ -63,6 +74,13 @@ class PhaseButton(QWidget):
         self._update_style()
 
     def _update_style(self):
+        if not self._enabled:
+            self.setStyleSheet(
+                "PhaseButton { background-color: #ececec; "
+                "border-left: 4px solid #ccc; margin: 1px 4px; border-radius: 3px; }"
+            )
+            return
+
         fg, bg = _STATUS_COLORS.get(self._status, _STATUS_COLORS["pending"])
         if self._selected:
             bg = "#bbdefb"
@@ -120,7 +138,8 @@ class PhaseSidebar(QWidget):
         self._buttons.clear()
 
         for phase in phases:
-            btn = PhaseButton(phase["phase_id"], phase["display_name"])
+            btn = PhaseButton(phase["phase_id"], phase["display_name"],
+                              enabled=phase.get("enabled", True))
             btn.clicked.connect(self._on_phase_clicked)
             self.layout().addWidget(btn)
             self._buttons[phase["phase_id"]] = btn
@@ -131,11 +150,14 @@ class PhaseSidebar(QWidget):
             QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding)
         )
 
-        # 첫 번째 페이즈 자동 선택
-        if self._buttons:
-            first_id = phases[0]["phase_id"]
-            self._selected_phase = first_id
-            self._buttons[first_id].set_selected(True)
+        # 활성화된 첫 번째 페이즈 자동 선택
+        first_enabled = next(
+            (p["phase_id"] for p in phases if p.get("enabled", True)),
+            None,
+        )
+        if first_enabled is not None:
+            self._selected_phase = first_enabled
+            self._buttons[first_enabled].set_selected(True)
 
     def update_phase_status(self, phase_id: int, status: str,
                             completed: int = 0, total: int = 0):

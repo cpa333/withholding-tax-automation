@@ -14,6 +14,7 @@ from src.batch.state import StateManager
     phase_id=4,
     portal="wehago",
     display_name="WEHAGO 급여자료입력",
+    enabled=False,
 )
 class WehagoSwsaWorkflow(BaseWorkflow):
     steps = [

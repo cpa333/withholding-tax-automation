@@ -7,7 +7,7 @@ from src.workflows.base import BaseWorkflow
 _PHASE_REGISTRY: dict[int, dict] = {}
 
 
-def register(phase_id: int, portal: str, display_name: str):
+def register(phase_id: int, portal: str, display_name: str, *, enabled: bool = True):
     """워크플로우 클래스를 레지스트리에 등록하는 데코레이터."""
     def decorator(cls):
         cls.phase_id = phase_id
@@ -17,6 +17,7 @@ def register(phase_id: int, portal: str, display_name: str):
             "class": cls,
             "portal": portal,
             "display_name": display_name,
+            "enabled": enabled,
         }
         return cls
     return decorator
@@ -42,6 +43,7 @@ def get_all_phases() -> list[dict]:
             "phase_id": pid,
             "display_name": info["display_name"],
             "portal": info["portal"],
+            "enabled": info["enabled"],
         }
         for pid, info in sorted(_PHASE_REGISTRY.items())
     ]
