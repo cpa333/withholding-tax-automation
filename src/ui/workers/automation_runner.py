@@ -674,33 +674,42 @@ class AutomationRunner(AsyncWorker):
         import asyncio
 
         if portal == "nhis_edi":
-            from src.automation.nhis._common_edi import wait_for_nexacro_ready
             self.log_message.emit("[국민건강보험 EDI] 로그인 대기 중... 공동인증서로 로그인해 주세요.")
-            page = self._page
-            if "edi.nhis" not in page.url:
-                for pg in self._context.pages:
-                    if "edi.nhis" in pg.url:
-                        page = pg
-                        self._page = page
-                        break
+            from src.utils.chrome_cdp import check_cdp_available
+
+            found = False
             for i in range(180):
                 if self._stop_event.is_set():
                     return False
                 await asyncio.sleep(5)
-                await self._check_browser_alive()
+                # 페이지 이동 중 evaluate 실패를 방지하기 위해 CDP 포트 레벨에서 생존 확인
+                cdp_ok = await asyncio.to_thread(check_cdp_available)
+                if not cdp_ok:
+                    raise _BrowserClosedError()
                 try:
-                    if "retrieveMain" in page.url:
-                        has_info = await page.evaluate("""() => {
-                            const text = document.body.innerText;
-                            return text.includes('사업장 관리번호') || text.includes('신규문서');
-                        }""")
-                        if has_info:
-                            self.log_message.emit("국민건강보험 EDI 로그인 확인됨.")
-                            break
+                    # 매 반복마다 context의 모든 탭에서 retrieveMain 탭 탐색
+                    for pg in list(self._context.pages):
+                        try:
+                            if "retrieveMain" in pg.url:
+                                has_info = await pg.evaluate("""() => {
+                                    const text = document.body.innerText;
+                                    return text.includes('사업장 관리번호') || text.includes('신규문서');
+                                }""")
+                                if has_info:
+                                    self._page = pg
+                                    self.log_message.emit("국민건강보험 EDI 로그인 확인됨.")
+                                    found = True
+                                    break
+                        except Exception:
+                            continue
                 except _BrowserClosedError:
                     raise
                 except Exception:
                     pass
+
+                if found:
+                    break
+
                 if i % 6 == 5:
                     self.log_message.emit(f"  로그인 대기 중... ({(i + 1) * 5}초)")
             else:
@@ -708,7 +717,6 @@ class AutomationRunner(AsyncWorker):
                 return False
 
             await self._reconnect_page(portal)
-            page = self._page
             self.log_message.emit("팝업 정리 및 페이지 안정화 대기...")
             await asyncio.sleep(3)
             return True
