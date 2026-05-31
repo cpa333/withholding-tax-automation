@@ -9,6 +9,7 @@ import asyncio
 import os
 import traceback
 
+from src.config import DB_PATH, PORTAL_URLS
 from src.ui.workers.async_bridge import AsyncWorker
 
 # 브라우저 연결 끊김을 나타내는 예외 메시지 패턴
@@ -45,7 +46,7 @@ class AutomationRunner(AsyncWorker):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._db_path = os.path.join(os.getcwd(), "data", "withholding_tax.db")
+        self._db_path = DB_PATH
         self._playwright = None
         self._browser = None
         self._context = None
@@ -84,8 +85,6 @@ class AutomationRunner(AsyncWorker):
                         await self._handle_run_phase(cmd)
                     elif cmd.get("type") == "refresh_clients":
                         await self._handle_refresh_clients()
-                    elif cmd.get("type") == "run_single_client":
-                        await self._handle_run_single_client(cmd)
                     elif cmd.get("type") == "run_selected_clients":
                         await self._handle_run_selected_clients(cmd)
                 except Exception as e:
@@ -330,21 +329,15 @@ class AutomationRunner(AsyncWorker):
             self.log_message.emit(f"수임처 {len(clients_data)}건 조회 완료")
 
             # DB 교체
-            import sqlite3
             os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
-            conn = sqlite3.connect(self._db_path)
-            try:
+            with BatchDB(self._db_path) as db:
+                conn = db.conn
                 conn.execute("DELETE FROM steps")
                 conn.execute("DELETE FROM jobs")
                 conn.execute("DELETE FROM batches")
                 conn.execute("DELETE FROM clients")
-                conn.commit()
-            finally:
-                conn.close()
+                conn.execute("COMMIT")
 
-            db = BatchDB(self._db_path)
-            db.connect()
-            try:
                 client_repo = ClientRepository(db)
                 for c in clients_data:
                     client_repo.upsert(Client(
@@ -353,8 +346,6 @@ class AutomationRunner(AsyncWorker):
                         business_number=c["business_number"],
                         enabled=True,
                     ))
-            finally:
-                db.close()
 
             self.log_message.emit(f"수임처 새로 가져오기 완료: {len(clients_data)}건")
             self.phase_changed.emit(1, "completed")
@@ -417,16 +408,6 @@ class AutomationRunner(AsyncWorker):
         self._current_portal = None
         self.log_message.emit("[세션 종료] Chrome 프로세스 종료 + 세션 초기화됨")
 
-    def start_single_client(self, phase_id: int, client_name: str,
-                            management_number: str = "",
-                            year: int | None = None, month: int | None = None):
-        """선택건 실행 (1개): 기존 호환성 유지"""
-        self.start_selected_clients(
-            phase_id,
-            [{"name": client_name, "management_number": management_number}],
-            year=year, month=month,
-        )
-
     def start_selected_clients(self, phase_id: int,
                                client_infos: list[dict],
                                year: int | None = None,
@@ -441,20 +422,6 @@ class AutomationRunner(AsyncWorker):
             "month": month,
         }
         self._command_queue.put_nowait(cmd)
-
-    async def _handle_run_single_client(self, cmd: dict):
-        """단건 실행 — 선택건 실행으로 위임"""
-        client_infos = [{
-            "name": cmd.get("client_name", ""),
-            "management_number": cmd.get("management_number", ""),
-        }]
-        await self._handle_run_selected_clients({
-            "type": "run_selected_clients",
-            "phase_id": cmd.get("phase_id", 0),
-            "client_infos": client_infos,
-            "year": cmd.get("year"),
-            "month": cmd.get("month"),
-        })
 
     async def _handle_run_selected_clients(self, cmd: dict):
         """선택건 실행 — 여러 수임처를 순차 실행 (BatchEngine 없이)"""
@@ -591,20 +558,19 @@ class AutomationRunner(AsyncWorker):
 
     def _reset_batch(self, db_path: str, portal: str, phase_id: int):
         """이전 배치/잡/단계를 모두 삭제하여 깨끗한 상태로 초기화"""
-        import sqlite3
         if not os.path.exists(db_path):
             return
 
-        conn = sqlite3.connect(db_path)
-        try:
+        from src.batch.db import BatchDB
+
+        with BatchDB(db_path) as db:
+            conn = db.conn
             if phase_id == 1:
-                # Phase 1: 모든 포털 배치+수임처 초기화 (wehago가 소스이므로 전체 리셋)
                 conn.execute("DELETE FROM steps")
                 conn.execute("DELETE FROM jobs")
                 conn.execute("DELETE FROM batches")
                 conn.execute("DELETE FROM clients")
             else:
-                # 다른 페이즈: 해당 포털 배치만 삭제 (수임처는 유지)
                 conn.execute(
                     "DELETE FROM steps WHERE job_id IN "
                     "(SELECT j.id FROM jobs j JOIN batches b ON j.batch_id = b.id WHERE b.portal = ?)",
@@ -619,9 +585,7 @@ class AutomationRunner(AsyncWorker):
                     "DELETE FROM batches WHERE portal = ?",
                     (portal,),
                 )
-            conn.commit()
-        finally:
-            conn.close()
+            conn.execute("COMMIT")
 
     async def _ensure_browser(self, portal: str) -> bool:
         """포털에 맞는 Chrome 인스턴스 실행"""
@@ -641,13 +605,7 @@ class AutomationRunner(AsyncWorker):
             self._page = None
 
         # 포털별 URL
-        portal_urls = {
-            "wehago": "https://www.wehago.com/",
-            "nhis_edi": "https://edi.nhis.or.kr/",
-            "nps_edi": "https://edi.nps.or.kr/",
-            "hometax": "https://www.hometax.go.kr/",
-        }
-        url = portal_urls.get(portal, "https://www.wehago.com/")
+        url = PORTAL_URLS.get(portal, PORTAL_URLS["wehago"])
 
         # 포털이 변경되면 Chrome 재시작
         if portal != getattr(self, '_current_portal', None):
@@ -777,194 +735,188 @@ class AutomationRunner(AsyncWorker):
 
     async def _wait_for_login(self, portal: str) -> bool:
         """포털별 로그인 완료 대기. 브라우저 종료 / 정지 시 즉시 예외 발생."""
+        handler = {
+            "nhis_edi": self._wait_for_login_nhis,
+            "nps_edi": self._wait_for_login_nps,
+            "hometax": self._wait_for_login_hometax,
+            "wehago": self._wait_for_login_wehago,
+        }.get(portal)
+        return await handler() if handler else True
+
+    async def _wait_for_login_nhis(self) -> bool:
+        """국민건강보험 EDI 로그인 대기"""
         import asyncio
+        from src.utils.chrome_cdp import check_cdp_available
 
-        if portal == "nhis_edi":
-            self.log_message.emit("[국민건강보험 EDI] 로그인 대기 중... 공동인증서로 로그인해 주세요.")
-            from src.utils.chrome_cdp import check_cdp_available
+        self.log_message.emit("[국민건강보험 EDI] 로그인 대기 중... 공동인증서로 로그인해 주세요.")
 
-            found = False
-            for i in range(180):
-                if self._stop_event.is_set():
-                    return False
-                await asyncio.sleep(5)
-                # 페이지 이동 중 evaluate 실패를 방지하기 위해 CDP 포트 레벨에서 생존 확인
-                cdp_ok = await asyncio.to_thread(check_cdp_available)
-                if not cdp_ok:
-                    raise _BrowserClosedError()
-                try:
-                    # 매 반복마다 context의 모든 탭에서 retrieveMain 탭 탐색
-                    for pg in list(self._context.pages):
-                        try:
-                            if "retrieveMain" in pg.url:
-                                has_info = await pg.evaluate("""() => {
-                                    const text = document.body.innerText;
-                                    return text.includes('사업장 관리번호') || text.includes('신규문서');
-                                }""")
-                                if has_info:
-                                    self._page = pg
-                                    self.log_message.emit("국민건강보험 EDI 로그인 확인됨.")
-                                    found = True
-                                    break
-                        except Exception:
-                            continue
-                except _BrowserClosedError:
-                    raise
-                except Exception:
-                    pass
-
-                if found:
-                    break
-
-                if i % 6 == 5:
-                    self.log_message.emit(f"  로그인 대기 중... ({(i + 1) * 5}초)")
-            else:
-                self.log_message.emit("국민건강보험 EDI 로그인 대기 시간 초과")
+        for i in range(180):
+            if self._stop_event.is_set():
                 return False
+            await asyncio.sleep(5)
 
-            await self._reconnect_page(portal)
-            self.log_message.emit("팝업 정리 및 페이지 안정화 대기...")
-            await asyncio.sleep(3)
-            return True
+            cdp_ok = await asyncio.to_thread(check_cdp_available)
+            if not cdp_ok:
+                raise _BrowserClosedError()
 
-        elif portal == "nps_edi":
-            from src.automation.nps._common import wait_for_nexacro_ready
-            self.log_message.emit("[국민연금 EDI] 로그인 대기 중... 공동인증서로 로그인해 주세요.")
-            page = self._page
-            for i in range(180):
-                if self._stop_event.is_set():
-                    return False
-                await asyncio.sleep(5)
-                await self._check_browser_alive_soft()
-                try:
-                    # 모든 탭에서 nexacro 페이지 검색
-                    logged_in = False
-                    for pg in self._context.pages:
-                        try:
-                            if "nexacro" in pg.url:
-                                page = pg
-                                self._page = pg
-                                logged_in = True
-                                break
-                        except Exception:
-                            continue
-                    if logged_in:
-                        self.log_message.emit("국민연금 EDI 로그인 확인됨.")
-                        break
-                except _BrowserClosedError:
-                    raise
-                except Exception:
-                    pass
-                if i % 6 == 5:
-                    self.log_message.emit(f"  로그인 대기 중... ({(i + 1) * 5}초)")
-            else:
-                self.log_message.emit("국민연금 EDI 로그인 대기 시간 초과")
-                return False
-
-            await self._reconnect_page(portal)
-            page = self._page
-            self.log_message.emit("Nexacro 로딩 대기...")
-            if not await wait_for_nexacro_ready(page):
-                self.error_occurred.emit("Nexacro 프레임워크 로딩 실패")
-                return False
-            return True
-
-        elif portal == "hometax":
-            self.log_message.emit("[홈택스] 로그인 대기 중... 인증서로 로그인해 주세요.")
-            for i in range(180):
-                if self._stop_event.is_set():
-                    return False
-                await asyncio.sleep(5)
-                await self._check_browser_alive()
-                try:
-                    url = self._page.url
-                    if "hometax.go.kr" in url and "login" not in url.lower():
-                        self.log_message.emit("홈택스 로그인 확인됨")
-                        return True
-                except _BrowserClosedError:
-                    raise
-                except Exception:
-                    pass
-                if i % 12 == 11:
-                    self.log_message.emit(f"  로그인 대기 중... ({(i+1)*5}초)")
-            return False
-
-        elif portal == "wehago":
-            self.log_message.emit("[WEHAGO] 로그인 상태 확인 중...")
-
-            await self._check_browser_alive()
             try:
-                await self._page.goto(
-                    "https://www.wehago.com/#/main",
-                    wait_until="domcontentloaded",
-                    timeout=15000,
-                )
+                for pg in list(self._context.pages):
+                    try:
+                        if "retrieveMain" in pg.url:
+                            has_info = await pg.evaluate("""() => {
+                                const text = document.body.innerText;
+                                return text.includes('사업장 관리번호') || text.includes('신규문서');
+                            }""")
+                            if has_info:
+                                self._page = pg
+                                self.log_message.emit("국민건강보험 EDI 로그인 확인됨.")
+                                break
+                    except Exception:
+                        continue
+                else:
+                    if i % 6 == 5:
+                        self.log_message.emit(f"  로그인 대기 중... ({(i + 1) * 5}초)")
+                    continue
+                break  # found
             except _BrowserClosedError:
                 raise
             except Exception:
-                await self._check_browser_alive()
+                pass
+        else:
+            self.log_message.emit("국민건강보험 EDI 로그인 대기 시간 초과")
+            return False
 
-            await asyncio.sleep(3)
+        await self._reconnect_page("nhis_edi")
+        self.log_message.emit("팝업 정리 및 페이지 안정화 대기...")
+        await asyncio.sleep(3)
+        return True
+
+    async def _wait_for_login_nps(self) -> bool:
+        """국민연금 EDI 로그인 대기"""
+        from src.automation.nps._common import wait_for_nexacro_ready
+
+        self.log_message.emit("[국민연금 EDI] 로그인 대기 중... 공동인증서로 로그인해 주세요.")
+
+        for i in range(180):
+            if self._stop_event.is_set():
+                return False
+            await asyncio.sleep(5)
+            await self._check_browser_alive_soft()
             try:
-                if (await self._page.locator("#company_").count() > 0
-                        or await self._page.locator("text=나의 수임처").count() > 0):
-                    self.log_message.emit("WEHAGO 이미 로그인되어 있습니다.")
+                for pg in self._context.pages:
+                    try:
+                        if "nexacro" in pg.url:
+                            self._page = pg
+                            self.log_message.emit("국민연금 EDI 로그인 확인됨.")
+                            break
+                    except Exception:
+                        continue
+                else:
+                    if i % 6 == 5:
+                        self.log_message.emit(f"  로그인 대기 중... ({(i + 1) * 5}초)")
+                    continue
+                break
+            except _BrowserClosedError:
+                raise
+            except Exception:
+                pass
+        else:
+            self.log_message.emit("국민연금 EDI 로그인 대기 시간 초과")
+            return False
+
+        await self._reconnect_page("nps_edi")
+        self.log_message.emit("Nexacro 로딩 대기...")
+        if not await wait_for_nexacro_ready(self._page):
+            self.error_occurred.emit("Nexacro 프레임워크 로딩 실패")
+            return False
+        return True
+
+    async def _wait_for_login_hometax(self) -> bool:
+        """홈택스 로그인 대기"""
+        self.log_message.emit("[홈택스] 로그인 대기 중... 인증서로 로그인해 주세요.")
+        for i in range(180):
+            if self._stop_event.is_set():
+                return False
+            await asyncio.sleep(5)
+            await self._check_browser_alive()
+            try:
+                url = self._page.url
+                if "hometax.go.kr" in url and "login" not in url.lower():
+                    self.log_message.emit("홈택스 로그인 확인됨")
+                    return True
+            except _BrowserClosedError:
+                raise
+            except Exception:
+                pass
+            if i % 12 == 11:
+                self.log_message.emit(f"  로그인 대기 중... ({(i+1)*5}초)")
+        return False
+
+    async def _wait_for_login_wehago(self) -> bool:
+        """WEHAGO 로그인 대기"""
+        self.log_message.emit("[WEHAGO] 로그인 상태 확인 중...")
+
+        await self._check_browser_alive()
+        try:
+            await self._page.goto(
+                "https://www.wehago.com/#/main",
+                wait_until="domcontentloaded",
+                timeout=15000,
+            )
+        except _BrowserClosedError:
+            raise
+        except Exception:
+            await self._check_browser_alive()
+
+        await asyncio.sleep(3)
+        try:
+            if (await self._page.locator("#company_").count() > 0
+                    or await self._page.locator("text=나의 수임처").count() > 0):
+                self.log_message.emit("WEHAGO 이미 로그인되어 있습니다.")
+                return True
+        except _BrowserClosedError:
+            raise
+        except Exception:
+            pass
+
+        self.log_message.emit("브라우저에서 WEHAGO 로그인을 진행해 주세요.")
+
+        for _ in range(6):
+            if self._stop_event.is_set():
+                return False
+            await asyncio.sleep(5)
+            await self._check_browser_alive()
+            try:
+                if await self._page.locator("text=나의 수임처").count() > 0:
+                    self.log_message.emit("WEHAGO 로그인 확인됨.")
                     return True
             except _BrowserClosedError:
                 raise
             except Exception:
                 pass
 
-            self.log_message.emit("브라우저에서 WEHAGO 로그인을 진행해 주세요.")
-
-            for _ in range(6):
-                if self._stop_event.is_set():
-                    return False
-                await asyncio.sleep(5)
-                await self._check_browser_alive()
-                try:
+        for i in range(52):
+            if self._stop_event.is_set():
+                return False
+            await asyncio.sleep(15)
+            await self._check_browser_alive()
+            try:
+                if await self._page.locator("text=나의 수임처").count() > 0:
+                    self.log_message.emit("WEHAGO 로그인 확인됨.")
+                    return True
+                if i % 3 == 2:
+                    await self._page.reload(wait_until="domcontentloaded")
+                    await asyncio.sleep(3)
                     if await self._page.locator("text=나의 수임처").count() > 0:
                         self.log_message.emit("WEHAGO 로그인 확인됨.")
                         return True
-                except _BrowserClosedError:
-                    raise
-                except Exception:
-                    pass
+            except _BrowserClosedError:
+                raise
+            except Exception:
+                pass
 
-            for i in range(52):
-                if self._stop_event.is_set():
-                    return False
-                await asyncio.sleep(15)
-                await self._check_browser_alive()
-                try:
-                    if await self._page.locator("text=나의 수임처").count() > 0:
-                        self.log_message.emit("WEHAGO 로그인 확인됨.")
-                        return True
-                    if i % 3 == 2:
-                        await self._page.reload(wait_until="domcontentloaded")
-                        await asyncio.sleep(3)
-                        if await self._page.locator("text=나의 수임처").count() > 0:
-                            self.log_message.emit("WEHAGO 로그인 확인됨.")
-                            return True
-                except _BrowserClosedError:
-                    raise
-                except Exception:
-                    pass
-
-            self.log_message.emit("WEHAGO 로그인 대기 시간 초과")
-            return False
-
-        else:
-            return True
-
-    async def _poll_progress(self, engine, batch_id: int, phase_id: int):
-        """진행 상황 주기적 폴링 → Signal 방출"""
-        try:
-            while True:
-                await asyncio.sleep(2)
-                self._emit_progress(engine, batch_id, phase_id)
-        except asyncio.CancelledError:
-            pass
+        self.log_message.emit("WEHAGO 로그인 대기 시간 초과")
+        return False
 
     def _emit_progress(self, engine, batch_id: int, phase_id: int):
         """현재 진행 상황을 Signal로 방출"""

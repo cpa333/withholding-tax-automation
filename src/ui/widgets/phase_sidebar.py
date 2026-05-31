@@ -2,18 +2,11 @@
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QPushButton, QLabel,
+    QSpacerItem, QSizePolicy,
 )
 from PySide6.QtCore import Signal, Qt
 
-
-# 상태별 색상
-_STATUS_COLORS = {
-    "pending":  ("#9e9e9e", "#f5f5f5"),   # 회색
-    "running":  ("#2196f3", "#e3f2fd"),   # 파랑
-    "completed":("#4caf50", "#e8f5e9"),   # 초록
-    "failed":   ("#f44336", "#ffebee"),   # 빨강
-    "paused":   ("#ff9800", "#fff3e0"),   # 주황
-}
+from src.ui.styles import STATUS_COLORS
 
 
 class PhaseButton(QWidget):
@@ -81,7 +74,7 @@ class PhaseButton(QWidget):
             )
             return
 
-        fg, bg = _STATUS_COLORS.get(self._status, _STATUS_COLORS["pending"])
+        fg, bg = STATUS_COLORS.get(self._status, STATUS_COLORS["pending"])
         if self._selected:
             bg = "#bbdefb"
             border_fg = "#0d47a1"
@@ -145,7 +138,6 @@ class PhaseSidebar(QWidget):
             self._buttons[phase["phase_id"]] = btn
 
         # 빈 공간
-        from PySide6.QtWidgets import QSpacerItem, QSizePolicy
         self.layout().addSpacerItem(
             QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding)
         )

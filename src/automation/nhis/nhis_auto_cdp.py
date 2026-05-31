@@ -20,13 +20,10 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from src.utils.chrome_cdp import CDP_URL, CDP_PORT
 from src.utils.pdf_reader import postprocess_pdf
+from src.utils.log import log
 
 MINWON_URL = "https://www.nhis.or.kr/nhis/minwon/minwonServiceBoard.do"
 PDF_PASSWORD = "880718"
-
-
-def log(msg):
-    print(msg, flush=True)
 
 
 def is_valid_pdf(path):

@@ -13,19 +13,12 @@ if sys.platform == "win32":
 NHIS_URL = "https://www.nhis.or.kr"
 MINWON_URL = "https://www.nhis.or.kr/nhis/minwon/minwonServiceBoard.do"
 PDF_PASSWORD = "880718"
-LOG_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "results", "nhis_log.txt")
 
 # 프로젝트 루트 경로
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 sys.path.insert(0, PROJECT_ROOT)
 from src.utils.pdf_reader import postprocess_pdf
-
-
-def log(msg):
-    print(msg, flush=True)
-    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(msg + "\n")
+from src.utils.log import log
 
 
 async def run():

@@ -10,6 +10,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 from src.utils.chrome_cdp import launch_chrome, CDP_URL
+from src.utils.log import log
 
 NHIS_EDI_URL = "https://edi.nhis.or.kr/"
 NHIS_EDI_MAIN = "https://edi.nhis.or.kr/homeapp/wep/m/retrieveMain.xx"
@@ -23,10 +24,6 @@ CBO_DOCID = "mainframe_childframe_form_div_body_cbo_docid"
 
 # 인쇄 버튼 ID
 BTN_PRINT = "mainframe_childframe_form_div_top_img_print"
-
-
-def log(msg):
-    print(msg, flush=True)
 
 
 async def connect_page(playwright):

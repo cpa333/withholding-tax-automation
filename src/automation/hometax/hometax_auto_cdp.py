@@ -14,11 +14,8 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from playwright.async_api import async_playwright
 from src.utils.chrome_cdp import CDP_URL
+from src.utils.log import log
 HOMETAX_URL = "https://www.hometax.go.kr"
-
-
-def log(msg):
-    print(msg, flush=True)
 
 
 async def connect_browser(playwright):

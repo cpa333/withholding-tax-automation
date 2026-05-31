@@ -6,12 +6,13 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
+from src.ui.styles import STEP_STATUS_STYLE
 
-_STEP_STATUS_STYLE = {
-    "completed": ("✓", "#4caf50"),
-    "running":   ("▶", "#2196f3"),
-    "failed":    ("✗", "#f44336"),
-    "pending":   ("○", "#9e9e9e"),
+
+_PROGRESS_COLORS = {
+    "running": "#2196f3",
+    "completed": "#4caf50",
+    "failed": "#f44336",
 }
 
 
@@ -41,24 +42,14 @@ class StepRow(QWidget):
         layout.addWidget(self.progress)
 
     def set_status(self, status: str):
-        icon_text, color = _STEP_STATUS_STYLE.get(status, ("?", "#000"))
+        icon_text, color = STEP_STATUS_STYLE.get(status, ("?", "#000"))
         self.icon.setText(icon_text)
         self.icon.setStyleSheet(f"color: {color}; font-weight: bold;")
 
-        if status == "running":
-            self.progress.setValue(50)
+        if status in ("running", "completed", "failed"):
+            self.progress.setValue(50 if status == "running" else 100)
             self.progress.setStyleSheet(
-                "QProgressBar::chunk { background-color: #2196f3; }"
-            )
-        elif status == "completed":
-            self.progress.setValue(100)
-            self.progress.setStyleSheet(
-                "QProgressBar::chunk { background-color: #4caf50; }"
-            )
-        elif status == "failed":
-            self.progress.setValue(100)
-            self.progress.setStyleSheet(
-                "QProgressBar::chunk { background-color: #f44336; }"
+                f"QProgressBar::chunk {{ background-color: {_PROGRESS_COLORS[status]}; }}"
             )
         else:
             self.progress.setValue(0)
@@ -88,7 +79,7 @@ class StepDetail(QWidget):
 
         steps: [{"step_name": "...", "status": "pending|running|completed|failed"}, ...]
         """
-        # 기존 행 제거
+        # 기존 행 제거 (spacer 앞의 행들만)
         for row in self._rows:
             self._layout.removeWidget(row)
             row.deleteLater()
@@ -97,20 +88,10 @@ class StepDetail(QWidget):
         # 제목 업데이트
         self._title.setText(f"[{client_name}] 세부 단계")
 
-        # spacer 제거 후 재추가
-        item = self._layout.itemAt(self._layout.count() - 1)
-        if item and item.spacerItem():
-            self._layout.removeItem(item)
-
-        # 새 스텝 행 추가
-        for step in steps:
+        # 새 스텝 행 추가 (spacer 앞에 삽입)
+        insert_pos = self._layout.count() - 1  # 마지막은 spacer
+        for i, step in enumerate(steps):
             row = StepRow(step.get("step_name", ""))
             row.set_status(step.get("status", "pending"))
-            self._layout.addWidget(row)
+            self._layout.insertWidget(insert_pos + i, row)
             self._rows.append(row)
-
-        # spacer 재추가
-        from PySide6.QtWidgets import QSpacerItem, QSizePolicy
-        self._layout.addSpacerItem(
-            QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding)
-        )

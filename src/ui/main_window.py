@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer
 
+from src.config import DB_PATH
+from src.ui.styles import BTN_GREEN
 from src.ui.widgets.log_panel import LogPanel
 from src.ui.widgets.phase_sidebar import PhaseSidebar
 from src.ui.widgets.company_table import CompanyTable
@@ -132,10 +134,7 @@ class MainWindow(QMainWindow):
 
         # 제어 버튼
         self.start_btn = QPushButton("시작")
-        self.start_btn.setStyleSheet(
-            "QPushButton { background-color: #4caf50; color: white; "
-            "padding: 5px 15px; border-radius: 3px; font-weight: bold; }"
-        )
+        self.start_btn.setStyleSheet(BTN_GREEN)
         self.start_btn.clicked.connect(self._on_start)
         layout.addWidget(self.start_btn)
 
@@ -230,74 +229,40 @@ class MainWindow(QMainWindow):
             self.stop_btn.setVisible(True)
             self.stop_btn.setEnabled(False)
             self.company_table.set_client_mode(False)
-            self._load_client_list_for_phase(phase_id)
+            self._load_client_list(portal_override=self._get_portal_for_phase(phase_id))
             self.company_table.set_selected_run_mode(True)
 
-    def _load_client_list(self):
-        """DB에서 수임처 목록을 조회하여 테이블에 표시"""
-        try:
-            import os
-            from src.batch.db import BatchDB, ClientRepository
-
-            db_path = os.path.join(os.getcwd(), "data", "withholding_tax.db")
-            if not os.path.exists(db_path):
-                self.company_table.update_clients([])
-                return
-
-            db = BatchDB(db_path)
-            db.connect()
-            try:
-                client_repo = ClientRepository(db)
-                clients = client_repo.list_all()
-                client_dicts = [
-                    {
-                        "name": c.name.replace("[테스트] ", ""),
-                        "business_number": c.business_number,
-                        "portal": c.portal,
-                        "enabled": c.enabled,
-                    }
-                    for c in clients
-                    if c.name != "__전체수임처조회__"
-                    and c.portal == "wehago"
-                ]
-                self.company_table.update_clients(client_dicts)
-            finally:
-                db.close()
-        except Exception:
-            self.company_table.update_clients([])
-
-    def _load_client_list_for_phase(self, phase_id: int):
-        """Phase 2+ 선택 시 수임처 목록을 클라이언트 모드로 표시"""
+    def _get_portal_for_phase(self, phase_id: int) -> str | None:
+        """페이즈 ID에 해당하는 포털 반환"""
         from src.workflows.registry import get_phase_info
         info = get_phase_info(phase_id)
-        if not info:
-            return
-        portal = info["portal"]
-        try:
-            import os
-            from src.batch.db import BatchDB, ClientRepository
+        return info["portal"] if info else None
 
-            db_path = os.path.join(os.getcwd(), "data", "withholding_tax.db")
-            if not os.path.exists(db_path):
+    def _load_client_list(self, portal_override: str | None = None):
+        """DB에서 수임처 목록을 조회하여 테이블에 표시
+
+        portal_override가 None이면 Phase 1 모드 (wehago만).
+        portal_override가 지정되면 해당 포털 우선, 없으면 wehago fallback.
+        """
+        import os
+        from src.batch.db import BatchDB, ClientRepository
+
+        try:
+            if not os.path.exists(DB_PATH):
                 self.company_table.update_clients([])
                 return
 
-            db = BatchDB(db_path)
-            db.connect()
-            try:
+            with BatchDB(DB_PATH) as db:
                 client_repo = ClientRepository(db)
                 clients = client_repo.list_all()
+                filtered = [c for c in clients if c.name != "__전체수임처조회__"]
 
-                # 대상 포털 클라이언트 우선, 없으면 WEHAGO 클라이언트 사용
-                portal_clients = [
-                    c for c in clients
-                    if c.name != "__전체수임처조회__" and c.portal == portal
-                ]
-                wehago_clients = [
-                    c for c in clients
-                    if c.name != "__전체수임처조회__" and c.portal == "wehago"
-                ]
-                source = portal_clients if portal_clients else wehago_clients
+                if portal_override:
+                    portal_clients = [c for c in filtered if c.portal == portal_override]
+                    wehago_clients = [c for c in filtered if c.portal == "wehago"]
+                    source = portal_clients if portal_clients else wehago_clients
+                else:
+                    source = [c for c in filtered if c.portal == "wehago"]
 
                 client_dicts = [
                     {
@@ -309,8 +274,6 @@ class MainWindow(QMainWindow):
                     for c in source
                 ]
                 self.company_table.update_clients(client_dicts)
-            finally:
-                db.close()
         except Exception:
             self.company_table.update_clients([])
 
@@ -336,35 +299,26 @@ class MainWindow(QMainWindow):
         if not self._selected_job_id:
             return
 
-        try:
-            import os
-            from src.batch.db import BatchDB, StepRepository
+        import os
+        from src.batch.db import BatchDB, StepRepository, JobRepository
 
-            db_path = os.path.join(os.getcwd(), "data", "withholding_tax.db")
-            if not os.path.exists(db_path):
+        try:
+            if not os.path.exists(DB_PATH):
                 return
 
-            db = BatchDB(db_path)
-            db.connect()
-            try:
+            with BatchDB(DB_PATH) as db:
                 step_repo = StepRepository(db)
                 steps = step_repo.list_by_job(self._selected_job_id)
 
-                # 클라이언트명 찾기
-                client_name = ""
-                from src.batch.db import JobRepository
                 job_repo = JobRepository(db)
                 job = job_repo.get(self._selected_job_id)
-                if job:
-                    client_name = job.client_name
+                client_name = job.client_name if job else ""
 
                 step_dicts = [
                     {"step_name": s.step_name, "status": s.status}
                     for s in steps
                 ]
                 self.step_detail.set_steps(client_name, step_dicts)
-            finally:
-                db.close()
         except Exception:
             pass
 
@@ -462,12 +416,11 @@ class MainWindow(QMainWindow):
             return
 
         import os, sqlite3
-        db_path = os.path.join(os.getcwd(), "data", "withholding_tax.db")
-        if not os.path.exists(db_path):
+        if not os.path.exists(DB_PATH):
             self.company_table.update_clients([])
             return
 
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(DB_PATH)
         try:
             conn.execute("DELETE FROM steps")
             conn.execute("DELETE FROM jobs")

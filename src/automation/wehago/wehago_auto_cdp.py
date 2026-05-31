@@ -21,13 +21,10 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 sys.path.insert(0, PROJECT_ROOT)
 
 from src.utils.chrome_cdp import CDP_URL, CDP_PORT
+from src.utils.log import log
 
 WEHAGO_URL = "https://www.wehago.com/"
 SMARTA_BASE = "https://smarta.wehago.com"
-
-
-def log(msg):
-    print(msg, flush=True)
 
 
 def find_chrome():

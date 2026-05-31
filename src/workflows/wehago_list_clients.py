@@ -1,5 +1,6 @@
 """Phase 1: 수임처 리스트 확보 — WEHAGO에서 수임처 목록을 가져와 DB에 등록"""
 
+from src.config import DB_PATH
 from src.workflows.registry import register
 from src.workflows.base import BaseWorkflow
 from src.batch.state import StateManager
@@ -62,7 +63,7 @@ class WehagoListClientsWorkflow(BaseWorkflow):
         # DB에 저장
         if not state.should_skip_step(job_id, "save_to_db"):
             state.before_step(job_id, "save_to_db", 3)
-            db_path = kwargs.get("db_path", os.path.join(os.getcwd(), "data", "withholding_tax.db"))
+            db_path = kwargs.get("db_path", DB_PATH)
             os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
             db = BatchDB(db_path)

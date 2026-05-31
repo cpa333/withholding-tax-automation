@@ -26,20 +26,23 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from playwright.async_api import async_playwright
 from src.utils.chrome_cdp import CDP_URL
+from src.utils.log import log
+from src.config import WEHAGO_URL
+from src.automation.wehago._common import (
+    dismiss_dialogs,
+    close_warning_overlay,
+    click_codehelp_confirm,
+    goto_menu_page,
+)
 
 if sys.platform == "win32":
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding="utf-8")
     sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding="utf-8")
-WEHAGO_URL = "https://www.wehago.com/"
 PASSWORD = "asdfghjk"
 COMPANY_NAME = "[테스트] (주)리틀치프코리아"
 DESKTOP_PATH = os.path.join(os.environ.get("USERPROFILE", ""), "Desktop")
 NTS_FOLDER = "원천징수전자신고"
-
-
-def log(msg):
-    print(msg, flush=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -287,113 +290,6 @@ def _move_desktop_files_to_folder(target_path, folder_name):
         if f.endswith(".01") and os.path.isfile(os.path.join(DESKTOP_PATH, f)):
             os.rename(os.path.join(DESKTOP_PATH, f), os.path.join(target_path, f))
             log(f"  파일 이동: {f} → {folder_name}/")
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# 브라우저 모달 처리
-# ═══════════════════════════════════════════════════════════════════════
-
-async def dismiss_dialogs(page):
-    """_isDialog, LUX_basic_dialog, z-index overlay 모달 닫기"""
-    for _ in range(20):
-        closed = await page.evaluate("""() => {
-            const selectors = ['._isDialog', '.LUX_basic_dialog'];
-            let target = null;
-            for (const sel of selectors) {
-                for (const d of document.querySelectorAll(sel)) {
-                    const cs = window.getComputedStyle(d);
-                    if (cs.display !== 'none' && cs.visibility !== 'hidden'
-                        && d.offsetParent !== null && d.offsetWidth > 0) {
-                        target = d; break;
-                    }
-                }
-                if (target) break;
-            }
-            if (!target) {
-                const all = document.querySelectorAll('*');
-                for (const el of all) {
-                    const cs = window.getComputedStyle(el);
-                    if (cs.position !== 'fixed' || cs.display === 'none'
-                        || parseInt(cs.zIndex) < 1000 || el.offsetWidth < 100) continue;
-                    if (el.classList.contains('WSC_LUXSnackbar')) continue;
-                    if (el.textContent.trim().length === 0) continue;
-                    target = el; break;
-                }
-            }
-            if (!target) return null;
-            const allBtns = target.querySelectorAll('button, a');
-            for (const btn of allBtns) {
-                if (btn.textContent.trim() === '닫기') { btn.click(); return '닫기'; }
-            }
-            const luxBtns = target.querySelectorAll('button.WSC_LUXButton');
-            for (const btn of luxBtns) {
-                if (!btn.textContent.trim()) { btn.click(); return 'X'; }
-            }
-            const confirmBtn = target.querySelector('.dialog_btnbx button');
-            if (confirmBtn) { confirmBtn.click(); return '확인(btnbx)'; }
-            for (const btn of allBtns) {
-                if (btn.textContent.trim() === '확인' && btn.offsetWidth > 0) {
-                    btn.click(); return '확인';
-                }
-            }
-            for (const btn of allBtns) {
-                if (btn.textContent.trim() === '취소') { btn.click(); return '취소'; }
-            }
-            return 'stuck';
-        }""")
-        if not closed:
-            return
-        log(f"  팝업 닫음 ({closed})")
-        await asyncio.sleep(0.5)
-
-
-async def close_warning_overlay(page, keyword):
-    """특정 키워드가 포함된 z-index 고정 오버레이에서 확인 버튼 클릭"""
-    return await page.evaluate("""(kw) => {
-        const all = document.querySelectorAll('*');
-        for (const el of all) {
-            const cs = window.getComputedStyle(el);
-            if (cs.position !== 'fixed' || cs.display === 'none'
-                || parseInt(cs.zIndex) < 1000) continue;
-            if (!el.textContent.includes(kw)) continue;
-            const btns = el.querySelectorAll('button');
-            for (const btn of btns) {
-                if (btn.textContent.trim() === '확인' && btn.offsetWidth > 0) {
-                    btn.click(); return true;
-                }
-            }
-        }
-        return false;
-    }""", keyword)
-
-
-async def click_codehelp_confirm(page):
-    """iframe 포함 코드도움 모달에서 확인(enter) 클릭"""
-    for frame in page.frames:
-        try:
-            result = await frame.evaluate("""() => {
-                const all = document.querySelectorAll('*');
-                for (const el of all) {
-                    try {
-                        const cs = window.getComputedStyle(el);
-                        const z = parseInt(cs.zIndex) || 0;
-                        if (z < 1000 || cs.display === 'none' || el.offsetWidth < 100) continue;
-                        if (!el.textContent.includes('코드도움')) continue;
-                        const btns = el.querySelectorAll('button');
-                        for (const btn of btns) {
-                            if (btn.textContent.trim() === '확인(enter)' && btn.offsetWidth > 0) {
-                                btn.click(); return true;
-                            }
-                        }
-                    } catch(e) {}
-                }
-                return false;
-            }""")
-            if result:
-                return True
-        except Exception:
-            pass
-    return False
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -667,29 +563,6 @@ async def set_password_and_submit(page, password):
 # ═══════════════════════════════════════════════════════════════════════
 # 메인 플로우
 # ═══════════════════════════════════════════════════════════════════════
-
-async def goto_menu_page(page, menu_id):
-    """SmartA 내 메뉴 URL 해시 교체 이동
-
-    URL 패턴: /smarta/humanresource/{MENU_ID}?params
-    예: /smarta/humanresource/SWSA0101 → /smarta/humanresource/SWER0101
-    """
-    current_url = page.url
-    new_url = re.sub(
-        r'/smarta/humanresource/[A-Z]+\d+(?=[?#]|$)',
-        f'/smarta/humanresource/{menu_id}', current_url
-    )
-    if new_url == current_url:
-        new_url = re.sub(r'/[A-Z]+\d+(?=[?#]|$)', f'/{menu_id}', current_url)
-    if new_url == current_url:
-        log(f"  URL 교체 실패: {menu_id}")
-        return False
-    log(f"  메뉴 이동: {menu_id}")
-    await page.goto(new_url, wait_until="domcontentloaded", timeout=30000)
-    await asyncio.sleep(2)
-    log(f"  이동 완료: {await page.title()}")
-    return True
-
 
 async def main():
     async with async_playwright() as p:

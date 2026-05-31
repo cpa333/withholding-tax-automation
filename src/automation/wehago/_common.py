@@ -13,13 +13,8 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 sys.path.insert(0, PROJECT_ROOT)
 
 from src.utils.chrome_cdp import CDP_URL
-
-WEHAGO_URL = "https://www.wehago.com/"
-WEHAGO_TAXAGENT_URL = "https://www.wehago.com/tedge/#/taxagent"
-
-
-def log(msg):
-    print(msg, flush=True)
+from src.utils.log import log
+from src.config import WEHAGO_URL, WEHAGO_TAXAGENT_URL
 
 
 # ═══════════════════════════════════════════════════════════════════════

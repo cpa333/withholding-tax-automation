@@ -7,14 +7,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal
 from PySide6.QtGui import QColor
 
-
-_STATUS_DISPLAY = {
-    "pending":   ("대기",   "#9e9e9e"),
-    "running":   ("진행중", "#2196f3"),
-    "completed": ("완료",   "#4caf50"),
-    "failed":    ("실패",   "#f44336"),
-    "skipped":   ("건너뜀", "#ff9800"),
-}
+from src.ui.styles import STATUS_DISPLAY, BTN_BLUE, BTN_RED, BTN_ORANGE
 
 _HEADERS_JOBS = ["수임처명", "상태", "현재 단계", "소요시간", "에러"]
 _HEADERS_CLIENTS = ["수임처명", "사업자등록번호", "포털", "활성"]
@@ -73,7 +66,7 @@ class CompanyTableModel(QAbstractTableModel):
             if col == 0: return row_data.get("name", "")
             elif col == 1:
                 status = row_data.get("status", "pending")
-                return _STATUS_DISPLAY.get(status, (status,))[0]
+                return STATUS_DISPLAY.get(status, (status,))[0]
             elif col == 2: return row_data.get("current_step", "")
             elif col == 3:
                 dur = row_data.get("duration")
@@ -83,7 +76,7 @@ class CompanyTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.ForegroundRole and col == 1:
             status = row_data.get("status", "pending")
-            color_hex = _STATUS_DISPLAY.get(status, (None, "#000"))[1]
+            color_hex = STATUS_DISPLAY.get(status, (None, "#000"))[1]
             return QColor(color_hex)
 
         return None
@@ -107,6 +100,9 @@ class CompanyTable(QWidget):
         self._selected_clients: list[dict] = []
         self._setup_ui()
 
+        # 선택 변경 시그널 — 한 번만 연결
+        self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
+
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
@@ -117,30 +113,15 @@ class CompanyTable(QWidget):
         btn_row.setSpacing(6)
 
         self.refresh_btn = QPushButton("새로 가져오기")
-        self.refresh_btn.setStyleSheet(
-            "QPushButton { background-color: #2196f3; color: white; "
-            "padding: 4px 12px; border-radius: 3px; font-size: 12px; }"
-            "QPushButton:hover { background-color: #1976d2; }"
-            "QPushButton:disabled { background-color: #bbb; }"
-        )
+        self.refresh_btn.setStyleSheet(BTN_BLUE)
         self.refresh_btn.clicked.connect(self.refresh_requested.emit)
 
         self.delete_all_btn = QPushButton("모두 삭제")
-        self.delete_all_btn.setStyleSheet(
-            "QPushButton { background-color: #f44336; color: white; "
-            "padding: 4px 12px; border-radius: 3px; font-size: 12px; }"
-            "QPushButton:hover { background-color: #d32f2f; }"
-            "QPushButton:disabled { background-color: #bbb; }"
-        )
+        self.delete_all_btn.setStyleSheet(BTN_RED)
         self.delete_all_btn.clicked.connect(self.delete_all_requested.emit)
 
         self.selected_run_btn = QPushButton("선택건 실행")
-        self.selected_run_btn.setStyleSheet(
-            "QPushButton { background-color: #ff9800; color: white; "
-            "padding: 4px 12px; border-radius: 3px; font-size: 12px; }"
-            "QPushButton:hover { background-color: #f57c00; }"
-            "QPushButton:disabled { background-color: #bbb; }"
-        )
+        self.selected_run_btn.setStyleSheet(BTN_ORANGE)
         self.selected_run_btn.setEnabled(False)
         self.selected_run_btn.clicked.connect(self._on_selected_run)
         self.selected_run_btn.setVisible(False)
@@ -212,12 +193,6 @@ class CompanyTable(QWidget):
         self.selection_hint.setVisible(not enabled)
         if enabled:
             self.selected_run_btn.setEnabled(False)
-        # 선택 모델 변경 시 시그널 연결
-        if enabled:
-            try:
-                self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
-            except Exception:
-                pass
 
     def set_selected_run_mode(self, visible: bool):
         """Phase 2+ 선택건 실행 모드"""

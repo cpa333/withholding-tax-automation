@@ -15,13 +15,10 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from playwright.async_api import async_playwright
 from src.utils.chrome_cdp import CDP_URL
+from src.utils.log import log
 
 COMPANY_NAME = "근린커피 상암"
 SAVE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "results"))
-
-
-def log(msg):
-    print(msg, flush=True)
 
 
 async def dismiss_dialogs(page):

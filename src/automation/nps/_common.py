@@ -9,6 +9,7 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 from src.utils.chrome_cdp import launch_chrome, CDP_URL
+from src.utils.log import log
 
 NPS_URL = "https://edi.nps.or.kr"
 NPS_NEXACRO_URL = "https://edi.nps.or.kr/nexacro/index.html"
@@ -70,10 +71,6 @@ BTN_CHANGE_WORKPLACE = (
     "mainframe.VFrameSet.FrameSdi.form.divHeader.form.divHeader.form.btnChangeBusi"
 )
 # 사업장전환 모달 그리드 — 기존 GRID_WORKPLACE와 동일 (ChangeBusi.grdList)
-
-
-def log(msg):
-    print(msg, flush=True)
 
 
 async def connect_page(playwright):
