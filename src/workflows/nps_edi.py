@@ -33,6 +33,9 @@ class NpsEdiWorkflow(BaseWorkflow):
         )
         import asyncio
 
+        year = kwargs.get("year")
+        month = kwargs.get("month")
+
         folder_name = client_name.replace(" ", "_")
         firm_dir = os.path.join(
             os.path.expanduser("~"), "Desktop",
@@ -60,7 +63,8 @@ class NpsEdiWorkflow(BaseWorkflow):
         # 2차 상세 열기
         if not state.should_skip_step(job_id, "open_detail"):
             state.before_step(job_id, "open_detail", 2)
-            await open_decision_detail(page, round_filter="2차")
+            await open_decision_detail(page, round_filter="2차",
+                                       year=year, month=month)
             await asyncio.sleep(2)
             state.after_step(job_id, "open_detail")
 
@@ -79,6 +83,7 @@ class NpsEdiWorkflow(BaseWorkflow):
                     await process_tab_download(
                         page, context, firm_dir,
                         tab_idx, tab_label, grid_suffix,
+                        year=year, month=month,
                     )
                 except Exception as e:
                     pass  # 빈 탭은 무시

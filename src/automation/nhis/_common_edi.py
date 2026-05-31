@@ -744,7 +744,8 @@ async def select_doc_type(edi_page, doc_name="가입자 고지(산출) 내역서
     return True
 
 
-async def download_first_doc_pdf(edi_page, context, save_dir, firm_name):
+async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
+                                  year: int | None = None, month: int | None = None):
     """웹EDI 받은문서 목록에서 첫 행 더블클릭 → 인쇄 → PDF 다운로드
 
     Args:
@@ -849,7 +850,9 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name):
                 header = fh.read(5)
             if header == b"%PDF-":
                 now = datetime.now()
-                new_name = f"가입자고지내역서_건강_{now.strftime('%Y%m')}.pdf"
+                _y = year if year is not None else now.year
+                _m = month if month is not None else now.month
+                new_name = f"가입자고지내역서_건강_{_y}{_m:02d}.pdf"
                 new_path = os.path.join(save_dir, new_name)
                 if os.path.exists(new_path):
                     os.remove(new_path)
@@ -866,7 +869,9 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name):
     return None
 
 
-async def run_single_firm_workflow(page, context, firm_name):
+async def run_single_firm_workflow(page, context, firm_name,
+                                    year: int | None = None,
+                                    month: int | None = None):
     """수임처 1개에 대한 전체 워크플로우 수행
 
     플로우:
@@ -902,7 +907,8 @@ async def run_single_firm_workflow(page, context, firm_name):
 
     # Step 3: PDF 다운로드
     log("  [3/5] PDF 다운로드...")
-    pdf_path = await download_first_doc_pdf(edi_page, context, save_dir, firm_name)
+    pdf_path = await download_first_doc_pdf(edi_page, context, save_dir, firm_name,
+                                             year=year, month=month)
 
     # Step 4: 탭 정리
     log("  [4/5] 탭 정리...")

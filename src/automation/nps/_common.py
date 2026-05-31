@@ -336,7 +336,9 @@ async def navigate_to_decision_details(page):
     return True
 
 
-async def open_decision_detail(page, round_filter="2차"):
+async def open_decision_detail(page, round_filter="2차",
+                                year: int | None = None,
+                                month: int | None = None):
     """결정내역 목록에서 이번 달 + 지정 차수 행을 더블클릭하여 상세 진입
 
     결정내역 그리드(GRID_DECISION_LIST)에서:
@@ -353,7 +355,9 @@ async def open_decision_detail(page, round_filter="2차"):
     """
     from datetime import datetime
     now = datetime.now()
-    month_prefix = f"{now.year}.{now.month:02d}"
+    _y = year if year is not None else now.year
+    _m = month if month is not None else now.month
+    month_prefix = f"{_y}.{_m:02d}"
 
     log(f"결정내역에서 이번 달({month_prefix}) {round_filter} 행 검색...")
 
@@ -646,7 +650,9 @@ async def save_integrated(page, context, save_dir, filename):
     return None
 
 
-async def process_tab_download(page, context, save_dir, tab_index, tab_label, grid_suffix):
+async def process_tab_download(page, context, save_dir, tab_index, tab_label, grid_suffix,
+                                year: int | None = None,
+                                month: int | None = None):
     """결정내역 상세 탭에서 PDF + Excel 순차 다운로드
 
     그리드가 비어있으면 스킵.
@@ -664,7 +670,9 @@ async def process_tab_download(page, context, save_dir, tab_index, tab_label, gr
     """
     from datetime import datetime
     now = datetime.now()
-    base = f"국민연금보험료_결정내역_{now.strftime('%Y%m')}_{tab_label}"
+    _y = year if year is not None else now.year
+    _m = month if month is not None else now.month
+    base = f"국민연금보험료_결정내역_{_y}{_m:02d}_{tab_label}"
 
     # 탭 전환
     log(f"{tab_label} 탭 이동...")

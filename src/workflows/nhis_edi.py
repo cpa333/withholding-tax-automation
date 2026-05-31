@@ -29,6 +29,9 @@ class NhisEdiWorkflow(BaseWorkflow):
         )
         import asyncio
 
+        year = kwargs.get("year")
+        month = kwargs.get("month")
+
         # 매 실행 전 팝업 닫기 + 메인 페이지 확보
         main_page = await close_popups(context)
         if not main_page:
@@ -67,7 +70,8 @@ class NhisEdiWorkflow(BaseWorkflow):
         if not state.should_skip_step(job_id, "run_workflow"):
             state.before_step(job_id, "run_workflow", 3)
             try:
-                result = await run_single_firm_workflow(main_page, context, client_name)
+                result = await run_single_firm_workflow(main_page, context, client_name,
+                                                         year=year, month=month)
                 state.after_step(job_id, "run_workflow")
             except Exception as e:
                 state.fail_step(job_id, "run_workflow", str(e))

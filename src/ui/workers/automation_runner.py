@@ -86,6 +86,8 @@ class AutomationRunner(AsyncWorker):
                         await self._handle_refresh_clients()
                     elif cmd.get("type") == "run_single_client":
                         await self._handle_run_single_client(cmd)
+                    elif cmd.get("type") == "run_selected_clients":
+                        await self._handle_run_selected_clients(cmd)
                 except Exception as e:
                     # 예외 메시지 패턴 또는 실제 브라우저 상태로 판별
                     if _is_browser_disconnected(e) or not await self._is_page_alive():
@@ -176,7 +178,10 @@ class AutomationRunner(AsyncWorker):
                         ))
                 self.log_message.emit(f"  WEHAGO → {portal}: {len(wehago_clients)}개 수임처 동기화")
 
-            batch = engine.prepare_batch()
+            batch = engine.prepare_batch(
+                year=kwargs.get("year"),
+                month=kwargs.get("month"),
+            )
 
             # 워크플로우 실행
             workflow = get_workflow(phase_id)
@@ -413,23 +418,52 @@ class AutomationRunner(AsyncWorker):
         self.log_message.emit("[세션 종료] Chrome 프로세스 종료 + 세션 초기화됨")
 
     def start_single_client(self, phase_id: int, client_name: str,
-                            management_number: str = ""):
-        """단건 실행: 수임처 1개에 대해서만 자동화 실행"""
+                            management_number: str = "",
+                            year: int | None = None, month: int | None = None):
+        """선택건 실행 (1개): 기존 호환성 유지"""
+        self.start_selected_clients(
+            phase_id,
+            [{"name": client_name, "management_number": management_number}],
+            year=year, month=month,
+        )
+
+    def start_selected_clients(self, phase_id: int,
+                               client_infos: list[dict],
+                               year: int | None = None,
+                               month: int | None = None):
+        """선택건 실행: 여러 수임처에 대해 순차 자동화 실행"""
         self._ensure_running()
         cmd = {
-            "type": "run_single_client",
+            "type": "run_selected_clients",
             "phase_id": phase_id,
-            "client_name": client_name,
-            "management_number": management_number,
+            "client_infos": client_infos,
+            "year": year,
+            "month": month,
         }
         self._command_queue.put_nowait(cmd)
 
     async def _handle_run_single_client(self, cmd: dict):
-        """단건 실행 명령 처리 — BatchEngine 없이 직접 워크플로우 실행"""
+        """단건 실행 — 선택건 실행으로 위임"""
+        client_infos = [{
+            "name": cmd.get("client_name", ""),
+            "management_number": cmd.get("management_number", ""),
+        }]
+        await self._handle_run_selected_clients({
+            "type": "run_selected_clients",
+            "phase_id": cmd.get("phase_id", 0),
+            "client_infos": client_infos,
+            "year": cmd.get("year"),
+            "month": cmd.get("month"),
+        })
+
+    async def _handle_run_selected_clients(self, cmd: dict):
+        """선택건 실행 — 여러 수임처를 순차 실행 (BatchEngine 없이)"""
         phase_id = cmd.get("phase_id", 0)
         self._last_phase_id = phase_id
-        client_name = cmd.get("client_name", "")
-        management_number = cmd.get("management_number", "")
+        client_infos = cmd.get("client_infos", [])
+        year = cmd.get("year")
+        month = cmd.get("month")
+        total = len(client_infos)
 
         from src.workflows.registry import get_phase_info, get_workflow
 
@@ -440,18 +474,17 @@ class AutomationRunner(AsyncWorker):
 
         portal = info["portal"]
         display_name = info["display_name"]
-        self.log_message.emit(f"[{display_name}] 단건 실행: {client_name}")
+        self.log_message.emit(f"[{display_name}] 선택건 실행: {total}건")
         self.phase_changed.emit(phase_id, "running")
 
         if self._stop_event.is_set():
             self.phase_changed.emit(phase_id, "failed")
             return
 
-        # 기존 브라우저 세션 재사용 시도 (단건실행 전용)
+        # 브라우저 세션 재사용 시도
         reused = await self._try_reuse_browser(portal)
 
         if not reused:
-            # 세션 없음 또는 만료 → 전체 재시작
             if not await self._ensure_browser(portal):
                 self.phase_changed.emit(phase_id, "failed")
                 self.error_occurred.emit("Chrome 연결 실패")
@@ -469,34 +502,91 @@ class AutomationRunner(AsyncWorker):
                     self.error_occurred.emit("로그인 실패 또는 시간 초과")
                 return
 
-        # 재사용 시에도 올바른 탭 포커스 보장
         await self._reconnect_page(portal)
 
-        # 워크플로우 직접 실행 (BatchEngine 없이)
         workflow = get_workflow(phase_id)
         if not workflow:
             self.log_message.emit(f"워크플로우를 찾을 수 없음: phase {phase_id}")
             return
 
-        from src.batch.state import NoopStateManager
-        state = NoopStateManager()
+        results = []
+        for i, client_info in enumerate(client_infos):
+            client_name = client_info["name"]
+            management_number = client_info.get("management_number", "")
 
-        try:
-            success = await workflow.run_single(
-                self._page, self._context,
-                client_name, job_id=0,
-                state=state,
-                management_number=management_number,
-            )
-            if success:
-                self.log_message.emit(f"[{display_name}] {client_name} 단건 실행 완료")
-                self.phase_changed.emit(phase_id, "completed")
-            else:
-                self.log_message.emit(f"[{display_name}] {client_name} 단건 실행 실패")
-                self.phase_changed.emit(phase_id, "failed")
-        except Exception as e:
-            self.log_message.emit(f"[{display_name}] {client_name} 오류: {e}")
-            self.error_occurred.emit(str(e))
+            if self._stop_event.is_set():
+                self.log_message.emit(f"[{display_name}] 사용자 중단 ({i}/{total} 완료)")
+                break
+
+            if not await self._is_page_alive():
+                self.log_message.emit("브라우저가 종료되어 실행을 중단합니다.")
+                results.append({"name": client_name, "success": False, "error": "브라우저 종료"})
+                break
+
+            self.log_message.emit(f"[{display_name}] ({i+1}/{total}) {client_name} 처리 중...")
+
+            from src.batch.state import NoopStateManager
+            state = NoopStateManager()
+
+            try:
+                success = await workflow.run_single(
+                    self._page, self._context,
+                    client_name, job_id=0,
+                    state=state,
+                    management_number=management_number,
+                    year=year,
+                    month=month,
+                )
+                if success:
+                    self.log_message.emit(f"[{display_name}] ({i+1}/{total}) {client_name} 완료")
+                    results.append({"name": client_name, "success": True})
+                else:
+                    self.log_message.emit(f"[{display_name}] ({i+1}/{total}) {client_name} 실패")
+                    results.append({"name": client_name, "success": False, "error": "실패"})
+
+                    if not await self._is_page_alive():
+                        self.log_message.emit("브라우저가 종료되어 실행을 중단합니다.")
+                        break
+            except Exception as e:
+                self.log_message.emit(f"[{display_name}] ({i+1}/{total}) {client_name} 오류: {e}")
+                results.append({"name": client_name, "success": False, "error": str(e)})
+
+                if not await self._is_page_alive():
+                    self.log_message.emit("브라우저가 종료되어 실행을 중단합니다.")
+                    break
+
+        # 완료 요약
+        succeeded = sum(1 for r in results if r["success"])
+        failed_list = [r for r in results if not r["success"]]
+        self.log_message.emit(
+            f"[{display_name}] 선택건 실행 완료: 성공 {succeeded}건"
+            + (f", 실패 {len(failed_list)}건" if failed_list else "")
+        )
+        if failed_list:
+            names = [r["name"] for r in failed_list]
+            self.log_message.emit(f"  실패: {', '.join(names)}")
+
+        # 진행 상황 emit (사이드바 업데이트)
+        self.batch_progress.emit({
+            "phase_id": phase_id,
+            "jobs": [
+                {
+                    "name": r["name"],
+                    "status": "completed" if r["success"] else "failed",
+                    "current_step": "",
+                    "duration": None,
+                    "error": r.get("error", ""),
+                }
+                for r in results
+            ],
+            "failed": failed_list,
+        })
+
+        if succeeded == total:
+            self.phase_changed.emit(phase_id, "completed")
+        elif succeeded > 0:
+            self.phase_changed.emit(phase_id, "completed")
+        else:
             self.phase_changed.emit(phase_id, "failed")
 
     def _reset_batch(self, db_path: str, portal: str, phase_id: int):
@@ -669,6 +759,22 @@ class AutomationRunner(AsyncWorker):
         if not await self._is_page_alive():
             raise _BrowserClosedError()
 
+    async def _check_browser_alive_soft(self):
+        """로그인 대기 중 브라우저 체크 — 페이지 전환/로딩 오류는 무시
+
+        _check_browser_alive와 달리, 현재 페이지가 응답하지 않아도
+        다른 탭 중 하나라도 살아있으면 브라우저가 살아있는 것으로 간주.
+        """
+        if await self._is_page_alive():
+            return
+        for pg in self._context.pages:
+            try:
+                await asyncio.wait_for(pg.evaluate("1"), timeout=3)
+                return
+            except Exception:
+                continue
+        raise _BrowserClosedError()
+
     async def _wait_for_login(self, portal: str) -> bool:
         """포털별 로그인 완료 대기. 브라우저 종료 / 정지 시 즉시 예외 발생."""
         import asyncio
@@ -725,19 +831,24 @@ class AutomationRunner(AsyncWorker):
             from src.automation.nps._common import wait_for_nexacro_ready
             self.log_message.emit("[국민연금 EDI] 로그인 대기 중... 공동인증서로 로그인해 주세요.")
             page = self._page
-            if "edi.nps" not in page.url:
-                for pg in self._context.pages:
-                    if "edi.nps" in pg.url:
-                        page = pg
-                        self._page = page
-                        break
             for i in range(180):
                 if self._stop_event.is_set():
                     return False
                 await asyncio.sleep(5)
-                await self._check_browser_alive()
+                await self._check_browser_alive_soft()
                 try:
-                    if "nexacro" in page.url:
+                    # 모든 탭에서 nexacro 페이지 검색
+                    logged_in = False
+                    for pg in self._context.pages:
+                        try:
+                            if "nexacro" in pg.url:
+                                page = pg
+                                self._page = pg
+                                logged_in = True
+                                break
+                        except Exception:
+                            continue
+                    if logged_in:
                         self.log_message.emit("국민연금 EDI 로그인 확인됨.")
                         break
                 except _BrowserClosedError:

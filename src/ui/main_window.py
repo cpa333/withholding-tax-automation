@@ -38,7 +38,7 @@ class MainWindow(QMainWindow):
         # 수임처 관리 버튼 연결
         self.company_table.refresh_requested.connect(self._on_refresh_clients)
         self.company_table.delete_all_requested.connect(self._on_delete_all_clients)
-        self.company_table.single_run_requested.connect(self._on_single_run)
+        self.company_table.selected_run_requested.connect(self._on_selected_run)
 
         # 시작 시 DB에서 수임처 목록 로드
         self._load_client_list()
@@ -192,7 +192,7 @@ class MainWindow(QMainWindow):
             self._poll_timer.stop()
             self.company_table.set_buttons_enabled(True)
             if self._selected_phase >= 2:
-                self.company_table.set_single_run_mode(True)
+                self.company_table.set_selected_run_mode(True)
 
         if phase_id == 1 and status == "completed":
             self._load_client_list()
@@ -223,7 +223,7 @@ class MainWindow(QMainWindow):
             self.start_btn.setVisible(False)
             self.stop_btn.setVisible(False)
             self.company_table.set_client_mode(True)
-            self.company_table.set_single_run_mode(False)
+            self.company_table.set_selected_run_mode(False)
         else:
             self.start_btn.setVisible(True)
             self.start_btn.setEnabled(True)
@@ -231,7 +231,7 @@ class MainWindow(QMainWindow):
             self.stop_btn.setEnabled(False)
             self.company_table.set_client_mode(False)
             self._load_client_list_for_phase(phase_id)
-            self.company_table.set_single_run_mode(True)
+            self.company_table.set_selected_run_mode(True)
 
     def _load_client_list(self):
         """DB에서 수임처 목록을 조회하여 테이블에 표시"""
@@ -329,7 +329,7 @@ class MainWindow(QMainWindow):
         self._poll_timer.stop()
         self.company_table.set_buttons_enabled(True)
         if self._selected_phase >= 2:
-            self.company_table.set_single_run_mode(True)
+            self.company_table.set_selected_run_mode(True)
 
     def _poll_step_detail(self):
         """선택된 Job의 세부 단계를 DB에서 조회하여 업데이트"""
@@ -387,6 +387,8 @@ class MainWindow(QMainWindow):
         self.runner.start_phase(
             self._selected_phase,
             dry_run=self.dry_run_check.isChecked(),
+            year=self.year_spin.value(),
+            month=self.month_spin.value(),
         )
         self._poll_timer.start()
 
@@ -416,22 +418,30 @@ class MainWindow(QMainWindow):
 
     # ── 수임처 관리 ──
 
-    def _on_single_run(self, client_name: str, business_number: str):
-        """단건 실행: 선택된 수임처 1개에 대해서만 자동화 실행"""
+    def _on_selected_run(self, clients: list[dict]):
+        """선택건 실행: 선택된 수임처 여러 건에 대해 순차 자동화 실행"""
         if not self._selected_phase or self._selected_phase == 1:
             return
 
         from src.batch.models import biz_to_mgmt_no
-        management_number = biz_to_mgmt_no(business_number)
+        client_infos = []
+        for c in clients:
+            mgmt_no = biz_to_mgmt_no(c["business_number"])
+            client_infos.append({
+                "name": c["name"],
+                "management_number": mgmt_no,
+            })
 
         self.start_btn.setEnabled(False)
         self.pause_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.company_table.set_buttons_enabled(False)
-        self.company_table.set_single_run_mode(False)
+        self.company_table.set_selected_run_mode(False)
 
-        self.runner.start_single_client(
-            self._selected_phase, client_name, management_number,
+        self.runner.start_selected_clients(
+            self._selected_phase, client_infos,
+            year=self.year_spin.value(),
+            month=self.month_spin.value(),
         )
         self._poll_timer.start()
 

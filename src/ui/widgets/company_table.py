@@ -100,12 +100,11 @@ class CompanyTable(QWidget):
     job_selected = Signal(int)  # job_id
     refresh_requested = Signal()
     delete_all_requested = Signal()
-    single_run_requested = Signal(str, str)  # client_name, management_number
+    selected_run_requested = Signal(list)  # [{"name": str, "business_number": str}, ...]
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._selected_client_name = ""
-        self._selected_business_number = ""
+        self._selected_clients: list[dict] = []
         self._setup_ui()
 
     def _setup_ui(self):
@@ -135,25 +134,32 @@ class CompanyTable(QWidget):
         )
         self.delete_all_btn.clicked.connect(self.delete_all_requested.emit)
 
-        self.single_run_btn = QPushButton("단건 실행")
-        self.single_run_btn.setStyleSheet(
+        self.selected_run_btn = QPushButton("선택건 실행")
+        self.selected_run_btn.setStyleSheet(
             "QPushButton { background-color: #ff9800; color: white; "
             "padding: 4px 12px; border-radius: 3px; font-size: 12px; }"
             "QPushButton:hover { background-color: #f57c00; }"
             "QPushButton:disabled { background-color: #bbb; }"
         )
-        self.single_run_btn.setEnabled(False)
-        self.single_run_btn.clicked.connect(self._on_single_run)
-        self.single_run_btn.setVisible(False)
+        self.selected_run_btn.setEnabled(False)
+        self.selected_run_btn.clicked.connect(self._on_selected_run)
+        self.selected_run_btn.setVisible(False)
 
         btn_row.addWidget(self.refresh_btn)
         btn_row.addWidget(self.delete_all_btn)
-        btn_row.addWidget(self.single_run_btn)
+        btn_row.addWidget(self.selected_run_btn)
         btn_row.addStretch()
 
         self._btn_row_widget = QWidget()
         self._btn_row_widget.setLayout(btn_row)
         layout.addWidget(self._btn_row_widget)
+
+        # 선택 방법 안내 (Phase 2+ 모드에서만 표시)
+        self.selection_hint = QLabel("")
+        self.selection_hint.setStyleSheet("color: #777; font-size: 11px; padding-left: 4px;")
+        self.selection_hint.setWordWrap(True)
+        self.selection_hint.setVisible(False)
+        layout.addWidget(self.selection_hint)
 
         # 에러 요약 라벨
         self.error_summary = QLabel("")
@@ -167,7 +173,7 @@ class CompanyTable(QWidget):
         self.table.setModel(self.model)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableView.SelectRows)
-        self.table.setSelectionMode(QTableView.SingleSelection)
+        self.table.setSelectionMode(QTableView.ExtendedSelection)
         self.table.setEditTriggers(QTableView.NoEditTriggers)
 
         # 컬럼 너비 (Job 모드 기준)
@@ -177,7 +183,6 @@ class CompanyTable(QWidget):
         self.table.setColumnWidth(3, 70)   # 활성 / 소요시간
         self.table.horizontalHeader().setStretchLastSection(True)
 
-        self.table.clicked.connect(self._on_clicked)
         layout.addWidget(self.table)
 
     def update_clients(self, clients: list[dict]):
@@ -189,7 +194,7 @@ class CompanyTable(QWidget):
     def update_jobs(self, jobs: list[dict], failed_info: list[dict] | None = None):
         """수임처 Job 목록 업데이트 (Phase 2+ 모드)"""
         self.model.set_jobs(jobs)
-        self.single_run_btn.setEnabled(False)
+        self.selected_run_btn.setEnabled(False)
 
         if failed_info:
             errors = [f"  - {j['name']}: {j.get('error', '알 수 없음')}" for j in failed_info]
@@ -200,39 +205,55 @@ class CompanyTable(QWidget):
             self.error_summary.setText("")
 
     def set_client_mode(self, enabled: bool):
-        """Phase 1 모드: 새로가져오기/모두삭제 표시, 단건실행 숨김"""
+        """Phase 1 모드: 새로가져오기/모두삭제 표시, 선택건실행 숨김"""
         self.refresh_btn.setVisible(enabled)
         self.delete_all_btn.setVisible(enabled)
-        self.single_run_btn.setVisible(not enabled)
+        self.selected_run_btn.setVisible(not enabled)
+        self.selection_hint.setVisible(not enabled)
         if enabled:
-            self.single_run_btn.setEnabled(False)
+            self.selected_run_btn.setEnabled(False)
+        # 선택 모델 변경 시 시그널 연결
+        if enabled:
+            try:
+                self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
+            except Exception:
+                pass
 
-    def set_single_run_mode(self, visible: bool):
-        """Phase 2+ 단건 실행 모드"""
-        self.single_run_btn.setVisible(visible)
-        self.single_run_btn.setEnabled(False)
-        self._selected_client_name = ""
-        self._selected_business_number = ""
+    def set_selected_run_mode(self, visible: bool):
+        """Phase 2+ 선택건 실행 모드"""
+        self.selected_run_btn.setVisible(visible)
+        self.selected_run_btn.setEnabled(False)
+        self._selected_clients = []
+        if visible:
+            self.selection_hint.setVisible(True)
+            self.selection_hint.setText(
+                "수임처를 선택하세요: 개별 선택은 Ctrl + 클릭, "
+                "연속 범위 선택은 Shift + 클릭"
+            )
+        else:
+            self.selection_hint.setVisible(False)
 
     def set_buttons_enabled(self, enabled: bool):
         """버튼 활성/비활성 (실행 중 잠금)"""
         self.refresh_btn.setEnabled(enabled)
         self.delete_all_btn.setEnabled(enabled)
 
-    def _on_clicked(self, index):
-        job = self.model.get_job_at(index.row())
-        if not job:
-            return
-        if "job_id" in job:
-            self.job_selected.emit(job["job_id"])
-        if "name" in job and self.model._clients_mode:
-            self._selected_client_name = job.get("name", "")
-            self._selected_business_number = job.get("business_number", "")
-            self.single_run_btn.setEnabled(bool(self._selected_client_name))
+    def _on_selection_changed(self, selected, deselected):
+        """멀티 선택 변경 시 선택된 수임처 목록 업데이트"""
+        self._update_selected_clients()
 
-    def _on_single_run(self):
-        if self._selected_client_name:
-            self.single_run_requested.emit(
-                self._selected_client_name,
-                self._selected_business_number,
-            )
+    def _update_selected_clients(self):
+        indexes = self.table.selectionModel().selectedRows()
+        self._selected_clients = []
+        for idx in indexes:
+            job = self.model.get_job_at(idx.row())
+            if job and "name" in job and self.model._clients_mode:
+                self._selected_clients.append({
+                    "name": job.get("name", ""),
+                    "business_number": job.get("business_number", ""),
+                })
+        self.selected_run_btn.setEnabled(len(self._selected_clients) > 0)
+
+    def _on_selected_run(self):
+        if self._selected_clients:
+            self.selected_run_requested.emit(self._selected_clients)
