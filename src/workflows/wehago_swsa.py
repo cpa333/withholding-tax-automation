@@ -5,6 +5,7 @@
 
 import os
 
+from src.config import RESULTS_DIR
 from src.workflows.registry import register
 from src.workflows.base import BaseWorkflow
 from src.batch.state import StateManager
@@ -35,7 +36,7 @@ class WehagoSwsaWorkflow(BaseWorkflow):
         )
         from src.automation.wehago.run_swsa0101 import run_swsa0101
 
-        save_dir = kwargs.get("save_dir", os.path.join(os.getcwd(), "results"))
+        save_dir = kwargs.get("save_dir", RESULTS_DIR)
         dry_run = kwargs.get("dry_run", True)
 
         # 수임처 급여 페이지로 이동

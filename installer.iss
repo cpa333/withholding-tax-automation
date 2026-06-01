@@ -1,9 +1,16 @@
 ﻿; 원천징수 자동화 Inno Setup 설치 스크립트
-; 빌드: python build.py (ISCC 자동 실행)
+; 빌드: python build.py (ISCC 자동 실행 — /DAppVersion 으로 버전 주입)
+
+; 버전은 build.py가 src/version.py를 읽어 /DAppVersion 으로 전달한다.
+; 직접 ISCC 실행 시(define 없음) 폴백값 사용.
+#ifndef AppVersion
+  #define AppVersion "0.0.0"
+#endif
 
 [Setup]
 AppName=원천징수 자동화
-AppVersion=1.0.0
+AppVersion={#AppVersion}
+VersionInfoVersion={#AppVersion}
 AppPublisher=세무법인
 AppPublisherURL=https://example.com
 AppSupportURL=https://example.com
@@ -28,6 +35,14 @@ Uninstallable=yes
 
 ; 관리자 권한 불필요 (localappdata에 설치)
 PrivilegesRequired=lowest
+
+; 자동 업데이트: 실행 중인 앱을 감지/종료하여 파일 잠금 충돌(반쪽 덮어쓰기) 방지.
+; AppMutex는 앱(gui_main)이 생성하는 명명 뮤텍스와 반드시 일치해야 함.
+; 재실행은 cmd 래퍼가 담당하므로 RestartApplications=no (이중 실행 방지).
+CloseApplications=yes
+CloseApplicationsFilter=*.exe,*.dll
+RestartApplications=no
+AppMutex=WithholdingTaxAutomation_SingleInstance
 
 ; 항상 개인 시작 메뉴 그룹 사용
 AlwaysUsePersonalGroup=yes
@@ -98,7 +113,6 @@ Filename: "taskkill"; Parameters: "/F /IM 원천징수자동화.exe"; Flags: run
 ; 설치 완료 후 실행 체크박스
 Filename: "{app}\원천징수자동화.exe"; Description: "프로그램 실행"; Flags: nowait postinstall skipifsilent
 
-[UninstallDelete]
-; 설치 경로 하위 데이터 전체 삭제
-Type: filesandordirs; Name: "{app}\data"
-Type: filesandordirs; Name: "{app}\results"
+; [UninstallDelete] 제거됨 — 사용자 데이터(DB/결과)는
+; %LOCALAPPDATA%\원천징수자동화-data 에 저장되므로 설치 폴더 삭제(업그레이드/제거)와
+; 무관하게 보존된다.

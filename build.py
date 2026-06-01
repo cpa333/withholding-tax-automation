@@ -7,6 +7,8 @@
 """
 
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,6 +17,27 @@ import urllib.request
 
 ISCC_PATH = r"C:\Users\cobaetoo\AppData\Local\Programs\Inno Setup 6\ISCC.exe"
 INNO_SETUP_URL = "https://jrsoftware.org/isdl.php"  # 공식 다운로드 페이지
+
+
+def read_version():
+    """src/version.py 에서 __version__ 파싱 (버전 단일 소스)."""
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src", "version.py")
+    try:
+        with open(p, encoding="utf-8") as f:
+            m = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', f.read())
+        if m:
+            return m.group(1)
+    except OSError:
+        pass
+    print("[ERROR] src/version.py 에서 __version__ 을 찾을 수 없습니다.")
+    sys.exit(1)
+
+
+def resolve_iscc():
+    """ISCC.exe 경로 해석: 환경변수(ISCC_PATH) → 하드코딩 경로 → PATH(which)."""
+    return os.environ.get("ISCC_PATH") or (
+        ISCC_PATH if os.path.exists(ISCC_PATH) else (shutil.which("ISCC") or ISCC_PATH)
+    )
 
 
 def find_playwright_driver():
@@ -79,7 +102,10 @@ def build_pyinstaller(driver_dir):
 
         # src 패키지 (워크플로우, 자동화, 유틸)
         "--hidden-import=src",
+        "--hidden-import=src.version",
         "--hidden-import=src.utils",
+        "--hidden-import=src.utils.updater",
+        "--hidden-import=src.ui.workers.update_worker",
         "--hidden-import=src.utils.save_path",
         "--hidden-import=src.utils.chrome_cdp",
         "--hidden-import=src.utils.stealth",
@@ -131,7 +157,7 @@ def build_pyinstaller(driver_dir):
 
 def ensure_inno_setup():
     """Inno Setup 설치 확인 — 없으면 winget 또는 직접 다운로드로 설치"""
-    if os.path.exists(ISCC_PATH):
+    if os.path.exists(resolve_iscc()):
         return True
 
     print("\n[2/3] Inno Setup이 설치되어 있지 않습니다. 자동 설치 중...")
@@ -189,8 +215,10 @@ def build_installer():
         print("\n[WARN] installer.iss 파일이 없습니다. installer 생성을 건너뜁니다.")
         return False
 
-    print("\n[3/3] Inno Setup installer 생성 중...")
-    result = subprocess.run([ISCC_PATH, iss_path])
+    version = read_version()
+    iscc = resolve_iscc()
+    print(f"\n[3/3] Inno Setup installer 생성 중... (v{version})")
+    result = subprocess.run([iscc, f"/DAppVersion={version}", iss_path])
 
     if result.returncode != 0:
         print(f"[ERROR] Installer 생성 실패 (exit code: {result.returncode})")

@@ -29,6 +29,28 @@ def resource_path(relative_path):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
 
 
+_MUTEX_HANDLE = None
+
+
+def _create_single_instance_mutex():
+    """installer.iss 의 AppMutex 와 일치하는 명명 뮤텍스 생성.
+
+    Inno Setup이 업그레이드/제거 시 실행 중인 인스턴스를 감지해
+    파일 잠금 충돌(반쪽 덮어쓰기)을 막을 수 있게 한다.
+    핸들은 프로세스 종료 시 자동 해제되도록 일부러 닫지 않는다.
+    """
+    global _MUTEX_HANDLE
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        _MUTEX_HANDLE = ctypes.windll.kernel32.CreateMutexW(
+            None, False, "WithholdingTaxAutomation_SingleInstance"
+        )
+    except Exception:
+        pass
+
+
 def main():
     # PyInstaller onefile/onedir 모두: exe 위치를 CWD로
     if getattr(sys, 'frozen', False):
@@ -36,11 +58,19 @@ def main():
 
     sys.path.insert(0, resource_path("."))
 
+    _create_single_instance_mutex()
+
     from PySide6.QtWidgets import QApplication
     from src.ui.main_window import MainWindow
+    from src.version import __version__
+    from src.config import migrate_legacy_data
+
+    # 구버전 데이터(설치 폴더 내) → %LOCALAPPDATA% 1회 이전 (DB 접근 전에)
+    migrate_legacy_data()
 
     app = QApplication(sys.argv)
     app.setApplicationName("원천징수 자동화")
+    app.setApplicationVersion(__version__)
     app.setStyle("Fusion")
 
     # 스타일시트 로드

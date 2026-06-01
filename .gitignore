@@ -35,6 +35,7 @@ results/
 build/
 dist/
 *.spec
+installer_output/
 
 # Runtime data
 data/

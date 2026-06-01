@@ -2,6 +2,7 @@
 
 import os
 
+from src.config import RESULTS_DIR
 from src.workflows.registry import register
 from src.workflows.base import BaseWorkflow
 from src.batch.state import StateManager
@@ -32,7 +33,7 @@ class HometaxWorkflow(BaseWorkflow):
         """
         import glob
 
-        save_dir = kwargs.get("save_dir", os.path.join(os.getcwd(), "results"))
+        save_dir = kwargs.get("save_dir", RESULTS_DIR)
         dry_run = kwargs.get("dry_run", True)
 
         # 신고파일 찾기
