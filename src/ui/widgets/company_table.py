@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal
 from PySide6.QtGui import QColor
 
-from src.ui.styles import STATUS_DISPLAY, BTN_BLUE, BTN_RED, BTN_ORANGE
+from src.ui.styles import STATUS_DISPLAY, BTN_BLUE, BTN_RED, BTN_ORANGE, BTN_GREEN
 
 _HEADERS_JOBS = ["수임처명", "상태", "현재 단계", "소요시간", "에러"]
 _HEADERS_CLIENTS = ["수임처명", "사업자등록번호", "포털", "활성"]
@@ -94,10 +94,13 @@ class CompanyTable(QWidget):
     refresh_requested = Signal()
     delete_all_requested = Signal()
     selected_run_requested = Signal(list)  # [{"name": str, "business_number": str}, ...]
+    full_run_requested = Signal()
+    stop_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._selected_clients: list[dict] = []
+        self._is_running = False
         self._setup_ui()
 
         # 선택 변경 시그널 — 한 번만 연결
@@ -120,6 +123,11 @@ class CompanyTable(QWidget):
         self.delete_all_btn.setStyleSheet(BTN_RED)
         self.delete_all_btn.clicked.connect(self.delete_all_requested.emit)
 
+        self.full_run_btn = QPushButton("전체실행")
+        self.full_run_btn.setStyleSheet(BTN_GREEN)
+        self.full_run_btn.clicked.connect(self._on_full_run_clicked)
+        self.full_run_btn.setVisible(False)
+
         self.selected_run_btn = QPushButton("선택건 실행")
         self.selected_run_btn.setStyleSheet(BTN_ORANGE)
         self.selected_run_btn.setEnabled(False)
@@ -128,6 +136,7 @@ class CompanyTable(QWidget):
 
         btn_row.addWidget(self.refresh_btn)
         btn_row.addWidget(self.delete_all_btn)
+        btn_row.addWidget(self.full_run_btn)
         btn_row.addWidget(self.selected_run_btn)
         btn_row.addStretch()
 
@@ -186,20 +195,24 @@ class CompanyTable(QWidget):
             self.error_summary.setText("")
 
     def set_client_mode(self, enabled: bool):
-        """Phase 1 모드: 새로가져오기/모두삭제 표시, 선택건실행 숨김"""
+        """Phase 1 모드: 새로가져오기/모두삭제 표시, 전체실행/선택건실행 숨김"""
         self.refresh_btn.setVisible(enabled)
         self.delete_all_btn.setVisible(enabled)
+        self.full_run_btn.setVisible(not enabled)
         self.selected_run_btn.setVisible(not enabled)
         self.selection_hint.setVisible(not enabled)
         if enabled:
+            self.full_run_btn.setEnabled(False)
             self.selected_run_btn.setEnabled(False)
 
     def set_selected_run_mode(self, visible: bool):
-        """Phase 2+ 선택건 실행 모드"""
+        """Phase 2+ 전체실행/선택건실행 모드"""
+        self.full_run_btn.setVisible(visible)
         self.selected_run_btn.setVisible(visible)
         self.selected_run_btn.setEnabled(False)
         self._selected_clients = []
         if visible:
+            self.full_run_btn.setEnabled(True)
             self.selection_hint.setVisible(True)
             self.selection_hint.setText(
                 "수임처를 선택하세요: 개별 선택은 Ctrl + 클릭, "
@@ -212,6 +225,7 @@ class CompanyTable(QWidget):
         """버튼 활성/비활성 (실행 중 잠금)"""
         self.refresh_btn.setEnabled(enabled)
         self.delete_all_btn.setEnabled(enabled)
+        self.full_run_btn.setEnabled(enabled)
 
     def _on_selection_changed(self, selected, deselected):
         """멀티 선택 변경 시 선택된 수임처 목록 업데이트"""
@@ -231,4 +245,24 @@ class CompanyTable(QWidget):
 
     def _on_selected_run(self):
         if self._selected_clients:
+            self.full_run_btn.setEnabled(False)
             self.selected_run_requested.emit(self._selected_clients)
+
+    def _on_full_run_clicked(self):
+        """전체실행/정지 토글 — 실행 중이면 정지, 대기 중이면 전체실행"""
+        if self._is_running:
+            self.stop_requested.emit()
+        else:
+            self.full_run_requested.emit()
+
+    def set_run_active(self, active: bool):
+        """실행 상태 전환: 버튼이 '전체실행'(초록) ↔ '정지'(빨강) 로 토글"""
+        self._is_running = active
+        if active:
+            self.full_run_btn.setText("정지")
+            self.full_run_btn.setStyleSheet(BTN_RED)
+            self.full_run_btn.setEnabled(True)
+        else:
+            self.full_run_btn.setText("전체실행")
+            self.full_run_btn.setStyleSheet(BTN_GREEN)
+            self.full_run_btn.setEnabled(True)

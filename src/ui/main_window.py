@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 
 from src.config import DB_PATH
-from src.ui.styles import BTN_GREEN
 from src.ui.widgets.log_panel import LogPanel
 from src.ui.widgets.phase_sidebar import PhaseSidebar
 from src.ui.widgets.company_table import CompanyTable
@@ -41,12 +40,14 @@ class MainWindow(QMainWindow):
         self.company_table.refresh_requested.connect(self._on_refresh_clients)
         self.company_table.delete_all_requested.connect(self._on_delete_all_clients)
         self.company_table.selected_run_requested.connect(self._on_selected_run)
+        self.company_table.full_run_requested.connect(self._on_start)
+        self.company_table.stop_requested.connect(self._on_stop)
 
         # 시작 시 DB에서 수임처 목록 로드
         self._load_client_list()
 
-        # Phase 1이 기본 선택 → 시작 버튼 비활성화
-        self.start_btn.setEnabled(False)
+        # Phase 1이 기본 선택 → 전체실행 버튼 비활성화
+        self.company_table.full_run_btn.setEnabled(False)
         self.company_table.set_client_mode(True)
 
         # 진행 상황 폴링 타이머 (러너가 실행 중일 때)
@@ -133,21 +134,11 @@ class MainWindow(QMainWindow):
         layout.addStretch()
 
         # 제어 버튼
-        self.start_btn = QPushButton("시작")
-        self.start_btn.setStyleSheet(BTN_GREEN)
-        self.start_btn.clicked.connect(self._on_start)
-        layout.addWidget(self.start_btn)
-
         self.pause_btn = QPushButton("일시정지")
         self.pause_btn.setEnabled(False)
         self.pause_btn.setVisible(False)
         self.pause_btn.clicked.connect(self._on_pause)
         layout.addWidget(self.pause_btn)
-
-        self.stop_btn = QPushButton("정지")
-        self.stop_btn.setEnabled(False)
-        self.stop_btn.clicked.connect(self._on_stop)
-        layout.addWidget(self.stop_btn)
 
         return toolbar
 
@@ -180,16 +171,12 @@ class MainWindow(QMainWindow):
 
         # 페이즈 완료/실패 시 버튼 상태 복원
         if status in ("completed", "failed"):
-            if self._selected_phase == 1:
-                self.start_btn.setEnabled(False)
-                # Phase 1이어도 버튼 재활성화 (브라우저 종료 후 재시작 가능)
-                self.company_table.set_buttons_enabled(True)
-            else:
-                self.start_btn.setEnabled(True)
+            self.company_table.set_run_active(False)
             self.pause_btn.setEnabled(False)
-            self.stop_btn.setEnabled(False)
             self._poll_timer.stop()
             self.company_table.set_buttons_enabled(True)
+            if self._selected_phase == 1:
+                self.company_table.full_run_btn.setEnabled(False)
             if self._selected_phase >= 2:
                 self.company_table.set_selected_run_mode(True)
 
@@ -219,15 +206,11 @@ class MainWindow(QMainWindow):
         self._selected_phase = phase_id
         if phase_id == 1:
             self._load_client_list()
-            self.start_btn.setVisible(False)
-            self.stop_btn.setVisible(False)
+            self.company_table.full_run_btn.setVisible(False)
             self.company_table.set_client_mode(True)
             self.company_table.set_selected_run_mode(False)
         else:
-            self.start_btn.setVisible(True)
-            self.start_btn.setEnabled(True)
-            self.stop_btn.setVisible(True)
-            self.stop_btn.setEnabled(False)
+            self.company_table.full_run_btn.setVisible(True)
             self.company_table.set_client_mode(False)
             self._load_client_list(portal_override=self._get_portal_for_phase(phase_id))
             self.company_table.set_selected_run_mode(True)
@@ -283,12 +266,10 @@ class MainWindow(QMainWindow):
         self._poll_step_detail()
 
     def _on_runner_finished(self):
+        self.company_table.set_run_active(False)
         if self._selected_phase == 1:
-            self.start_btn.setEnabled(False)
-        else:
-            self.start_btn.setEnabled(True)
+            self.company_table.full_run_btn.setEnabled(False)
         self.pause_btn.setEnabled(False)
-        self.stop_btn.setEnabled(False)
         self._poll_timer.stop()
         self.company_table.set_buttons_enabled(True)
         if self._selected_phase >= 2:
@@ -334,9 +315,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("수임처 리스트는 '새로 가져오기' 버튼을 사용하세요")
             return
 
-        self.start_btn.setEnabled(False)
+        self.company_table.set_run_active(True)
         self.pause_btn.setEnabled(True)
-        self.stop_btn.setEnabled(True)
 
         self.runner.start_phase(
             self._selected_phase,
@@ -357,12 +337,11 @@ class MainWindow(QMainWindow):
     def _on_stop(self):
         self.runner.request_stop()
         self.runner.cleanup_session()
-        self.start_btn.setEnabled(True)
+        self.company_table.set_run_active(False)
         self.pause_btn.setEnabled(False)
         self.pause_btn.setText("일시정지")
-        self.stop_btn.setEnabled(False)
         self._poll_timer.stop()
-        self.statusBar().showMessage("세션 종료됨. 다시 시작하려면 '시작'을 눌러주세요.")
+        self.statusBar().showMessage("세션 종료됨. 다시 시작하려면 '전체실행'을 눌러주세요.")
 
     def closeEvent(self, event):
         self._poll_timer.stop()
@@ -386,9 +365,8 @@ class MainWindow(QMainWindow):
                 "management_number": mgmt_no,
             })
 
-        self.start_btn.setEnabled(False)
+        self.company_table.set_run_active(True)
         self.pause_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
         self.company_table.set_buttons_enabled(False)
         self.company_table.set_selected_run_mode(False)
 
