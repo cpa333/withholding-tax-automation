@@ -348,7 +348,7 @@ python build.py
 | **랜덤 지터 (±30%)** | 행동 sleep 48개를 `human_delay()`로 교체. `sleep(3)` → 2.1~3.9초 랜덤 |
 | 짧은 딜레이 보호 | `base < 1s`면 jitter를 15%로 자동 축소 (기능 유지) |
 | 폴링 sleep 유지 | 로그인/다운로드/Nexacro 대기 등 21개는 고정 간격 유지 (불규칙 폴링 자체가 탐지 대상) |
-| **수임처 간 휴식** | 5~8건 처리 후 30~120초 무작위 휴식 (`human_break()`). stop 이벤트로 중단 가능 |
+| **수임처 간 휴식** | 5~8건 처리 후 5~15초 무작위 휴식 (`human_break()`). stop 이벤트로 중단 가능 |
 
 적용 파일: `_common.py`(NPS), `_common_edi.py`(NHIS), `nps_auto_cdp.py`, `nhis_auto_cdp.py`, `nps_edi.py`, `nhis_edi.py`, `automation_runner.py`
 
@@ -389,7 +389,7 @@ mousemove(detail=0, buttons=0) → [30~80ms] → click(1) → [30~80ms] → clic
  navigator.webdriver       →  playwright-stealth 패치
  핑거프린트 불일치          →  실제 Chrome 프로필 + 실제 하드웨어
  규칙적 요청 간격           →  human_delay ±30% 랜덤 지터
- 연속 처리 패턴             →  5~8건마다 30~120초 무작위 휴식
+ 연속 처리 패턴             →  5~8건마다 5~15초 무작위 휴식
  완벽한 클릭 좌표           →  ±2px 랜덤 오프셋
  마우스 이동 없는 클릭       →  mousemove 선행 이벤트
  일정한 클릭 간격           →  30~80ms 랜덤 지연

@@ -24,8 +24,8 @@ async def human_delay(base: float, jitter: float = 0.3) -> None:
 
 
 async def human_break(
-    min_s: float = 30,
-    max_s: float = 120,
+    min_s: float = 5,
+    max_s: float = 15,
     check_stop=None,
     check_interval: float = 5,
     log_fn=None,
