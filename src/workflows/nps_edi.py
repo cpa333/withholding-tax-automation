@@ -37,8 +37,6 @@ class NpsEdiWorkflow(BaseWorkflow):
         year = kwargs.get("year")
         month = kwargs.get("month")
 
-        firm_dir = make_save_dir("국민연금", client_name, year=year, month=month)
-
         # 사업장 전환
         if not state.should_skip_step(job_id, "switch_workplace"):
             state.before_step(job_id, "switch_workplace", 0)
@@ -48,6 +46,9 @@ class NpsEdiWorkflow(BaseWorkflow):
                 return False
             await asyncio.sleep(3)
             state.after_step(job_id, "switch_workplace")
+
+        # 사업장 전환 성공 후에만 폴더 생성 (검색 실패 시 빈 폴더 방지)
+        firm_dir = make_save_dir("국민연금", client_name, year=year, month=month)
 
         # 결정내역 이동
         if not state.should_skip_step(job_id, "navigate_to_decision"):
