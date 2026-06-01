@@ -15,7 +15,8 @@ import tempfile
 import urllib.request
 
 
-ISCC_PATH = r"C:\Users\cobaetoo\AppData\Local\Programs\Inno Setup 6\ISCC.exe"
+_local = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+ISCC_PATH = os.path.join(_local, "Programs", "Inno Setup 6", "ISCC.exe")
 INNO_SETUP_URL = "https://jrsoftware.org/isdl.php"  # 공식 다운로드 페이지
 
 
