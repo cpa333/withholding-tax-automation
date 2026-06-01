@@ -319,3 +319,79 @@ python build.py
 | QThread + asyncio 분리 | Playwright(asyncio)와 Qt 이벤트루프를 직접 섞을 수 없음. |
 | 사업장관리번호로 수임처 검색 | 동명 수임처 구분 및 정확한 매칭. 사업자등록번호에서 `-` 제거 후 `0` 추가. |
 | 단건 실행에 NoopStateManager 사용 | BatchEngine 오버헤드 없이 단일 수임처 즉시 실행. |
+
+## 12. 안티디텍션 (Anti-Bot Detection)
+
+자동화 세션이 서버 측 행동 분석에 탐지되는 것을 방지하기 위해 다계층 방어 적용.
+
+### 12.1 브라우저 핑거프린트 보호
+
+`src/utils/stealth.py` — playwright-stealth 기반, 핑거프린트 불일치를 최소화하는 보수적 설정:
+
+| 항목 | 처리 |
+|------|------|
+| `navigator.webdriver` | 패치 (자동화 탐지 1순위 지표) |
+| `navigator.plugins`, `permissions`, `vendor` | 패치 |
+| `chrome.app`, `chrome.csi`, `chrome.loadTimes` | 패치 |
+| `hairline`, `iframe contentWindow`, `Error.prototype` | 패치 |
+| GPU/CPU/플랫폼/UA/Language | **실제값 유지** (스푸핑 시 불일치로 역탐지 위험) |
+| Chrome 프로필 | **실제 사용자 프로필** 사용 (junction 링크) |
+
+핵심 철학: 핑거프린트를 위조하지 않고 **실제 브라우저 환경을 그대로 사용**하면서 자동화 흔적(`navigator.webdriver` 등)만 제거.
+
+### 12.2 타이밍 패턴 위장
+
+`src/utils/human.py` → 전체 자동화 모듈 적용:
+
+| 기법 | 설명 |
+|------|------|
+| **랜덤 지터 (±30%)** | 행동 sleep 48개를 `human_delay()`로 교체. `sleep(3)` → 2.1~3.9초 랜덤 |
+| 짧은 딜레이 보호 | `base < 1s`면 jitter를 15%로 자동 축소 (기능 유지) |
+| 폴링 sleep 유지 | 로그인/다운로드/Nexacro 대기 등 21개는 고정 간격 유지 (불규칙 폴링 자체가 탐지 대상) |
+| **수임처 간 휴식** | 5~8건 처리 후 30~120초 무작위 휴식 (`human_break()`). stop 이벤트로 중단 가능 |
+
+적용 파일: `_common.py`(NPS), `_common_edi.py`(NHIS), `nps_auto_cdp.py`, `nhis_auto_cdp.py`, `nps_edi.py`, `nhis_edi.py`, `automation_runner.py`
+
+### 12.3 마우스 이벤트 시뮬레이션
+
+Nexacro 그리드/버튼 클릭 시 `dispatchEvent`로 발생시키는 마우스 이벤트에 3가지 인간적 패턴 적용. NPS 2개 + NHIS 8개 JS 블록.
+
+| 기법 | 설명 |
+|------|------|
+| **mousemove 선행** | mousedown 전에 커서 도착 시뮬레이션 (`buttons: 0`) |
+| **좌표 랜덤 오프셋** | 요소 중앙에서 ±2px 무작위 편차 (정밀 클릭 탐지 회피) |
+| **클릭 간 인간적 지연** | mousedown↔mouseup 사이 30~80ms busy-wait (`performance.now()`) |
+
+이벤트 시퀀스 (단일 클릭):
+```
+mousemove(detail=0, buttons=0) → [30~80ms] → mousedown(1) → mouseup(1) → click(1)
+```
+
+이벤트 시퀀스 (더블클릭):
+```
+mousemove(detail=0, buttons=0) → [30~80ms] → click(1) → [30~80ms] → click(2) + dblclick(2)
+```
+
+### 12.4 세션/인증 관리
+
+| 기법 | 설명 |
+|------|------|
+| **수동 로그인** | 공동인증서 인증은 사용자가 직접 수행 (가장 강력한 방어선) |
+| 세션 연장 자동 처리 | NHIS 25분 비활동 시 연장 팝업 자동 클릭 |
+| Chrome `--start-maximized` | 최대화 창으로 실행 (인간 사용 패턴) |
+| 단계별 체크포인트 | StateManager로 진행 상황 저장 → 재시작 시 이어서 진행 (중복 요청 방지) |
+
+### 12.5 방어 계층도
+
+```
+서버 측 탐지 벡터              방어 기법
+────────────────────────     ────────────────────────
+ navigator.webdriver       →  playwright-stealth 패치
+ 핑거프린트 불일치          →  실제 Chrome 프로필 + 실제 하드웨어
+ 규칙적 요청 간격           →  human_delay ±30% 랜덤 지터
+ 연속 처리 패턴             →  5~8건마다 30~120초 무작위 휴식
+ 완벽한 클릭 좌표           →  ±2px 랜덤 오프셋
+ 마우스 이동 없는 클릭       →  mousemove 선행 이벤트
+ 일정한 클릭 간격           →  30~80ms 랜덤 지연
+ 인증서 없는 로그인         →  수동 공동인증서 (Human-in-the-loop)
+```
