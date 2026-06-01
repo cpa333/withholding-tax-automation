@@ -22,7 +22,14 @@ async def _safe_evaluate(page, expression, *args, timeout=10):
     try:
         return await asyncio.wait_for(page.evaluate(expression, *args), timeout=timeout)
     except (asyncio.TimeoutError, Exception) as e:
-        log(f"  page.evaluate 타임아웃/오류: {e}")
+        msg = str(e).lower()
+        # 브라우저 종료 관련 에러는 조용히 무시 (상위 핸들러가 처리)
+        _browser_closed = any(kw in msg for kw in (
+            "target closed", "browser", "disconnected",
+            "connection closed", "context was destroyed",
+        ))
+        if not _browser_closed:
+            log(f"  page.evaluate 오류: {type(e).__name__}")
         return None
 
 
