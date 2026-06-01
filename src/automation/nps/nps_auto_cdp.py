@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from playwright.async_api import async_playwright
 from src.utils.chrome_cdp import launch_chrome, connect_page as cdp_connect
+from src.utils.save_path import make_save_dir
 from src.automation.nps._common import (
     log, NPS_URL, connect_page, wait_for_login, ensure_login_page,
     open_workplace_selector, select_workplace, select_workplace_by_index,
@@ -54,7 +55,7 @@ def print_menu():
 
 
 async def handle_select_workplace(page):
-    """사업장 선택 대화형 처리"""
+    """사업장 선택 대화형 처리 — 선택된 사업장명 반환"""
     # 사업장 선택 모달 열기
     log("사업장 선택 모달 열기...")
     await open_workplace_selector(page)
@@ -64,7 +65,7 @@ async def handle_select_workplace(page):
     workplaces = await list_workplaces(page)
     if not workplaces:
         log("  사업장 목록을 불러오지 못했습니다.")
-        return
+        return None
 
     log(f"\n  총 {len(workplaces)}개 사업장:")
     for wp in workplaces[:10]:
@@ -74,19 +75,20 @@ async def handle_select_workplace(page):
 
     choice = input("\n  사업장명 또는 번호 입력 (0=취소): ").strip()
     if not choice or choice == "0":
-        return
+        return None
 
     # 번호로 선택 시도
     try:
         idx = int(choice) - 1
         if 0 <= idx < len(workplaces):
             await select_workplace_by_index(page, idx)
-            return
+            return workplaces[idx]["name"]
     except ValueError:
         pass
 
     # 이름으로 선택
     await select_workplace(page, choice)
+    return choice
 
 
 async def main():
@@ -239,7 +241,8 @@ async def switch_workplace_open(page):
     await nexacro_click_button(page, BTN_CHANGE_WORKPLACE)
 
 
-async def run_single_workplace(page, context, workplace_name, is_first=False):
+async def run_single_workplace(page, context, workplace_name, is_first=False,
+                                year: int | None = None, month: int | None = None):
     """단일 수임처에 대한 전체 워크플로우 수행
 
     사업장은 이미 선택된 상태여야 함 (run_full_auto에서 사전 선택).
@@ -251,10 +254,7 @@ async def run_single_workplace(page, context, workplace_name, is_first=False):
     4. 소급분내역 → PDF + 엑셀 (빈 경우 스킵)
     5. 국고지원내역 → PDF + 통합저장 (빈 경우 스킵)
     """
-    from datetime import datetime
-    now = datetime.now()
-    folder_name = workplace_name.replace(" ", "_")
-    save_dir = os.path.join(os.path.expanduser("~"), "Desktop", f"{folder_name}_국민연금")
+    save_dir = make_save_dir("국민연금", workplace_name, year=year, month=month)
 
     await asyncio.sleep(3)
 
@@ -295,6 +295,8 @@ async def run_single_workplace(page, context, workplace_name, is_first=False):
 
 async def run_interactive(page, context):
     """대화형 메뉴 모드"""
+    current_workplace = None  # 선택된 사업장명 추적
+
     # ═══ Phase 2: 메뉴 루프 ═══
     while True:
             print_menu()
@@ -302,7 +304,10 @@ async def run_interactive(page, context):
 
             if choice == "1":
                 try:
-                    await handle_select_workplace(page)
+                    name = await handle_select_workplace(page)
+                    if name:
+                        current_workplace = name
+                        log(f"  현재 사업장: {current_workplace}")
                 except Exception as e:
                     log(f"ERROR: {e}")
                     import traceback
@@ -346,10 +351,11 @@ async def run_interactive(page, context):
                     from datetime import datetime
                     now = datetime.now()
                     filename = f"국민연금보험료_결정내역_{now.strftime('%Y%m')}"
-                    save_dir = os.path.join(
-                        os.path.expanduser("~"), "Desktop",
-                        f"주식회사_제이에스_국민연금",
-                    )
+                    wp = current_workplace or input("  수임처명: ").strip()
+                    if not wp:
+                        log("  수임처명이 필요합니다.")
+                        continue
+                    save_dir = make_save_dir("국민연금", wp)
                     await download_pdf_from_preview(context, save_dir, filename)
                 except Exception as e:
                     log(f"ERROR: {e}")
@@ -360,10 +366,11 @@ async def run_interactive(page, context):
                 try:
                     from datetime import datetime
                     now = datetime.now()
-                    save_dir = os.path.join(
-                        os.path.expanduser("~"), "Desktop",
-                        f"주식회사_제이에스_국민연금",
-                    )
+                    wp = current_workplace or input("  수임처명: ").strip()
+                    if not wp:
+                        log("  수임처명이 필요합니다.")
+                        continue
+                    save_dir = make_save_dir("국민연금", wp)
                     filename = f"국민연금보험료_결정내역_{now.strftime('%Y%m')}_엑셀"
                     await save_excel(page, context, save_dir, filename)
                 except Exception as e:
@@ -373,10 +380,11 @@ async def run_interactive(page, context):
 
             elif choice == "7":
                 try:
-                    save_dir = os.path.join(
-                        os.path.expanduser("~"), "Desktop",
-                        f"주식회사_제이에스_국민연금",
-                    )
+                    wp = current_workplace or input("  수임처명: ").strip()
+                    if not wp:
+                        log("  수임처명이 필요합니다.")
+                        continue
+                    save_dir = make_save_dir("국민연금", wp)
                     result = await process_tab_download(
                         page, context, save_dir,
                         tab_index=TAB_RETRO,
@@ -392,10 +400,11 @@ async def run_interactive(page, context):
 
             elif choice == "8":
                 try:
-                    save_dir = os.path.join(
-                        os.path.expanduser("~"), "Desktop",
-                        f"주식회사_제이에스_국민연금",
-                    )
+                    wp = current_workplace or input("  수임처명: ").strip()
+                    if not wp:
+                        log("  수임처명이 필요합니다.")
+                        continue
+                    save_dir = make_save_dir("국민연금", wp)
                     tabs = [
                         (TAB_MEMBER, "가입자내역", "grdList2"),
                         (TAB_RETRO, "소급분내역", "grdList3"),
@@ -421,6 +430,8 @@ async def run_interactive(page, context):
                         pass
                     else:
                         await switch_workplace(page, name)
+                        current_workplace = name
+                        log(f"  현재 사업장: {current_workplace}")
                 except Exception as e:
                     log(f"ERROR: {e}")
                     import traceback

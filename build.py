@@ -77,6 +77,28 @@ def build_pyinstaller(driver_dir):
         # openpyxl
         "--hidden-import=openpyxl",
 
+        # src 패키지 (워크플로우, 자동화, 유틸)
+        "--hidden-import=src",
+        "--hidden-import=src.utils",
+        "--hidden-import=src.utils.save_path",
+        "--hidden-import=src.utils.chrome_cdp",
+        "--hidden-import=src.utils.stealth",
+        "--hidden-import=src.utils.log",
+        "--hidden-import=src.workflows",
+        "--hidden-import=src.workflows.base",
+        "--hidden-import=src.workflows.registry",
+        "--hidden-import=src.workflows.nps_edi",
+        "--hidden-import=src.workflows.nhis_edi",
+        "--hidden-import=src.batch",
+        "--hidden-import=src.batch.engine",
+        "--hidden-import=src.batch.state",
+        "--hidden-import=src.batch.models",
+        "--hidden-import=src.batch.db",
+        "--hidden-import=src.automation.nps",
+        "--hidden-import=src.automation.nps._common",
+        "--hidden-import=src.automation.nhis",
+        "--hidden-import=src.automation.nhis._common_edi",
+
         # Playwright Node.js 드라이버 (핵심)
         "--add-data", f"{driver_dir};playwright/driver",
 

@@ -11,6 +11,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 from src.utils.chrome_cdp import launch_chrome, CDP_URL
 from src.utils.log import log
+from src.utils.save_path import make_save_dir
 
 NHIS_EDI_URL = "https://edi.nhis.or.kr/"
 NHIS_EDI_MAIN = "https://edi.nhis.or.kr/homeapp/wep/m/retrieveMain.xx"
@@ -886,8 +887,7 @@ async def run_single_firm_workflow(page, context, firm_name,
     Returns:
         bool: 성공 여부
     """
-    folder_name = firm_name.replace(" ", "_")
-    save_dir = os.path.join(os.path.expanduser("~"), "Desktop", f"{folder_name}_국민건강보험")
+    save_dir = make_save_dir("국민건강보험", firm_name, year=year, month=month)
 
     # Step 1: 받은문서 열기
     log("  [1/5] 받은문서 열기...")

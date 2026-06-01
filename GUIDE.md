@@ -65,7 +65,7 @@
    - **사업장관리번호로 검색**: 콤보박스를 "사업장관리번호"로 변경 후 숫자만 입력 (사업자등록번호에서 `-` 제거 후 `0` 추가)
    - 사업장 선택 → 결정내역 이동 → 2차 상세 진입
    - 각 탭(PDF/Excel) 다운로드
-5. 저장 경로: `~/Desktop/{수임처명}_국민건강보험/`
+5. 저장 경로: `~/Desktop/국민건강보험_{YYYYMM}/{수임처명}/`
 
 ### Phase 3: 국민연금 EDI
 
@@ -78,7 +78,7 @@ Nexacro 기반 웹 프레임워크로 일반 DOM click이 동작하지 않음:
    - 사업장 전환 → 결정내역 이동 → 2차 상세 진입
    - 가입자내역(`grdList2`), 소급분내역(`grdList3`), 국고지원내역(`grdList4`) 탭 처리
 4. Nexacro 이벤트: `dispatchEvent(new MouseEvent(...))` 로 mousedown → mouseup → click 순차 발생
-5. 저장 경로: `~/Desktop/{수임처명}_국민연금/`
+5. 저장 경로: `~/Desktop/국민연금_{YYYYMM}/{수임처명}/`
 
 #### 사업장관리번호 변환 규칙
 
@@ -187,6 +187,7 @@ withholding-tax-automation/
 │   └── utils/
 │       ├── chrome_cdp.py           # Chrome CDP 실행/연결
 │       ├── stealth.py              # Playwright 안티디텍션
+│       ├── save_path.py            # 다운로드 저장 경로 생성 (사이트명_연월/수임처)
 │       └── pdf_reader.py           # PDF 텍스트 추출
 │
 ├── data/

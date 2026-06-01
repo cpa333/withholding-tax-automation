@@ -5,6 +5,7 @@ import os
 from src.workflows.registry import register
 from src.workflows.base import BaseWorkflow
 from src.batch.state import StateManager
+from src.utils.save_path import make_save_dir
 
 
 @register(
@@ -36,12 +37,7 @@ class NpsEdiWorkflow(BaseWorkflow):
         year = kwargs.get("year")
         month = kwargs.get("month")
 
-        folder_name = client_name.replace(" ", "_")
-        firm_dir = os.path.join(
-            os.path.expanduser("~"), "Desktop",
-            f"{folder_name}_국민연금",
-        )
-        os.makedirs(firm_dir, exist_ok=True)
+        firm_dir = make_save_dir("국민연금", client_name, year=year, month=month)
 
         # 사업장 전환
         if not state.should_skip_step(job_id, "switch_workplace"):
