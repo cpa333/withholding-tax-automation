@@ -1,24 +1,30 @@
 """메인 윈도우 — 전체 UI 레이아웃 관리"""
 
+import sys
+
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout,
     QSplitter, QPushButton, QHBoxLayout,
     QCheckBox, QSpinBox, QLabel, QMessageBox,
+    QProgressDialog, QApplication,
 )
 from PySide6.QtCore import Qt, QTimer
 
+from src.version import __version__
 from src.config import DB_PATH
 from src.ui.widgets.log_panel import LogPanel
 from src.ui.widgets.phase_sidebar import PhaseSidebar
 from src.ui.widgets.company_table import CompanyTable
 from src.ui.widgets.step_detail import StepDetail
 from src.ui.workers.automation_runner import AutomationRunner
+from src.ui.workers.update_worker import UpdateWorker
+from src.utils import updater
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("원천징수 자동화")
+        self.setWindowTitle(f"원천징수 자동화 v{__version__}")
         self.setMinimumSize(1100, 700)
         self.resize(1280, 800)
 
@@ -32,6 +38,14 @@ class MainWindow(QMainWindow):
 
         self._selected_phase = 1
         self._selected_job_id = 0
+
+        # 자동 업데이트 상태
+        self._automation_active = False
+        self._update_in_progress = False
+        self._update_worker = None
+        self._download_worker = None
+        self._progress_dialog = None
+        self._download_canceled = False
 
         self._setup_ui()
         self._load_phases()
@@ -54,6 +68,12 @@ class MainWindow(QMainWindow):
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(2000)
         self._poll_timer.timeout.connect(self._poll_step_detail)
+
+        # 도움말 메뉴 (업데이트 확인 / 정보)
+        self._create_help_menu()
+
+        # 시작 직후 자동 업데이트 확인 (무알림; dev 모드/스로틀 시 조기 반환)
+        QTimer.singleShot(2500, self._auto_check_for_update)
 
     def _setup_ui(self):
         central = QWidget()
@@ -166,6 +186,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(message[:120])
 
     def _on_phase_changed(self, phase_id: int, status: str):
+        self._automation_active = (status == "running")
         self.sidebar.update_phase_status(phase_id, status)
         self.statusBar().showMessage(f"Phase {phase_id}: {status}")
 
@@ -345,6 +366,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._poll_timer.stop()
+        # 업데이트 워커 정리
+        if self._download_worker:
+            self._download_worker.cancel()
+        self._cleanup_worker("_download_worker")
+        self._cleanup_worker("_update_worker")
         self.runner.request_stop()
         self.runner.wait(3000)
         event.accept()
@@ -411,3 +437,239 @@ class MainWindow(QMainWindow):
         self.company_table.update_clients([])
         self.sidebar.update_phase_status(1, "pending")
         self.statusBar().showMessage("수임처 모두 삭제됨")
+
+    # ── 자동 업데이트 ──
+
+    def _cleanup_worker(self, attr_name: str):
+        """QThread 워커를 안전하게 정리 (disconnect + deleteLater + null)."""
+        worker = getattr(self, attr_name, None)
+        if worker is None:
+            return
+        try:
+            worker.disconnect()
+        except RuntimeError:
+            pass
+        if worker.isRunning():
+            worker.quit()
+            worker.wait(2000)
+        worker.deleteLater()
+        setattr(self, attr_name, None)
+
+    def _create_help_menu(self):
+        """상단 '도움말' 메뉴: 업데이트 확인 / 정보"""
+        menu = self.menuBar().addMenu("도움말")
+        act_update = menu.addAction("업데이트 확인")
+        act_update.triggered.connect(self._manual_check_for_update)
+        act_about = menu.addAction("정보")
+        act_about.triggered.connect(self._show_about)
+
+    def _show_about(self):
+        QMessageBox.information(
+            self, "정보", f"원천징수 자동화\n버전 v{__version__}",
+        )
+
+    def _auto_check_for_update(self):
+        """시작 직후 자동 확인 — 무알림. dev 모드/스로틀 시 건너뜀."""
+        if not getattr(sys, "frozen", False):
+            return
+        if not updater.should_check_today():
+            return
+        updater.set_last_check()
+        self._start_update_check(silent=True)
+
+    def _manual_check_for_update(self):
+        """도움말>업데이트 확인 — 결과를 항상 사용자에게 알림."""
+        if not getattr(sys, "frozen", False):
+            QMessageBox.information(
+                self, "업데이트",
+                f"개발 모드에서는 업데이트 설치를 진행하지 않습니다.\n현재 버전 v{__version__}",
+            )
+            return
+        updater.set_last_check()
+        self._start_update_check(silent=False)
+
+    def _start_update_check(self, *, silent: bool):
+        if self._update_in_progress:
+            return
+        self._update_in_progress = True
+        self._update_worker = UpdateWorker(self)
+        self._update_worker.check_done.connect(
+            lambda res: self._on_update_check_result(res, silent)
+        )
+        self._update_worker.failed.connect(
+            lambda msg: self._on_update_failed(msg, silent)
+        )
+        self._update_worker.start_check()
+
+    def _on_update_failed(self, msg: str, silent: bool):
+        self._update_in_progress = False
+        self._cleanup_worker("_update_worker")
+        if not silent:
+            QMessageBox.warning(
+                self, "업데이트 확인 실패",
+                "업데이트 확인에 실패했습니다.\n인터넷 연결을 확인한 뒤 다시 시도해 주세요.",
+            )
+
+    def _on_update_check_result(self, res: dict, silent: bool):
+        action = (res or {}).get("action", "none")
+
+        if action == "none":
+            self._update_in_progress = False
+            self._cleanup_worker("_update_worker")
+            if not silent:
+                QMessageBox.information(
+                    self, "업데이트", f"현재 최신 버전입니다. (v{__version__})",
+                )
+            return
+
+        version = res.get("version", "")
+        mandatory = (action == "mandatory")
+
+        # 자동(무알림) 확인 시, 사용자가 건너뛴 버전이면 조용히 무시 (강제는 예외)
+        if silent and not mandatory and updater.get_skip_version() == version:
+            self._update_in_progress = False
+            self._cleanup_worker("_update_worker")
+            return
+
+        # 자동화 진행 중에는 적용 불가 → 보류
+        if self._automation_active:
+            self._update_in_progress = False
+            self._cleanup_worker("_update_worker")
+            if not silent:
+                QMessageBox.information(
+                    self, "업데이트 보류",
+                    "자동화 작업이 진행 중입니다.\n작업을 정지한 뒤 다시 시도해 주세요.",
+                )
+            return
+
+        self._prompt_update(res, mandatory)
+
+    def _prompt_update(self, res: dict, mandatory: bool):
+        version = res.get("version", "")
+        notes = res.get("notes", "")
+        prefix = "필수 업데이트입니다.\n\n" if mandatory else ""
+        text = (
+            prefix
+            + f"새 버전이 있습니다.\n\n현재: v{__version__}\n최신: v{version}\n"
+            + (f"\n{notes}\n" if notes else "")
+            + "\n지금 설치하시겠습니까?\n(설치 중 프로그램이 잠시 종료된 뒤 다시 실행됩니다.)"
+        )
+        box = QMessageBox(self)
+        box.setWindowTitle("업데이트")
+        box.setIcon(QMessageBox.Information)
+        box.setText(text)
+        btn_update = box.addButton("지금 업데이트", QMessageBox.AcceptRole)
+        btn_quit = btn_skip = None
+        if mandatory:
+            btn_quit = box.addButton("종료", QMessageBox.RejectRole)
+        else:
+            box.addButton("나중에", QMessageBox.RejectRole)
+            btn_skip = box.addButton("이 버전 건너뛰기", QMessageBox.DestructiveRole)
+        box.exec()
+        clicked = box.clickedButton()
+
+        if clicked == btn_update:
+            self._start_download(res)
+        elif mandatory and clicked == btn_quit:
+            self._update_in_progress = False
+            QApplication.quit()
+        elif (not mandatory) and btn_skip is not None and clicked == btn_skip:
+            updater.set_skip_version(version)
+            self._update_in_progress = False
+            self._cleanup_worker("_update_worker")
+        else:
+            self._update_in_progress = False  # 나중에
+            self._cleanup_worker("_update_worker")
+
+    def _start_download(self, res: dict):
+        size = int(res.get("size", 0) or 0)
+        # 다운로드 + 설치 압축해제 여유공간(대략 2배) 확인
+        if size and not updater.has_enough_disk(size * 2):
+            self._update_in_progress = False
+            QMessageBox.warning(
+                self, "디스크 공간 부족",
+                "업데이트에 필요한 디스크 여유 공간이 부족합니다.",
+            )
+            return
+
+        self._download_canceled = False
+        self._progress_dialog = QProgressDialog(
+            "업데이트 다운로드 중...", "취소", 0, 100, self
+        )
+        self._progress_dialog.setWindowTitle("업데이트")
+        self._progress_dialog.setWindowModality(Qt.WindowModal)
+        self._progress_dialog.setMinimumDuration(0)
+        self._progress_dialog.setAutoClose(False)
+        self._progress_dialog.setAutoReset(False)
+        self._progress_dialog.setValue(0)
+        self._progress_dialog.canceled.connect(self._on_download_cancel)
+
+        self._download_worker = UpdateWorker(self)
+        self._download_worker.download_progress.connect(self._on_download_progress)
+        self._download_worker.download_done.connect(self._on_download_done)
+        self._download_worker.failed.connect(lambda msg: self._on_download_done(""))
+        self._download_worker.start_download(
+            res.get("url", ""), size, res.get("sha256", ""),
+        )
+
+    def _on_download_cancel(self):
+        self._download_canceled = True
+        if self._download_worker:
+            self._download_worker.cancel()
+
+    def _on_download_progress(self, done: int, total: int):
+        if not self._progress_dialog:
+            return
+        if total > 0:
+            pct = min(int(done * 100 / total), 100)
+            self._progress_dialog.setValue(pct)
+            self._progress_dialog.setLabelText(
+                f"업데이트 다운로드 중... {pct}% "
+                f"({done // (1024 * 1024)}MB / {total // (1024 * 1024)}MB)"
+            )
+
+    def _on_download_done(self, path: str):
+        if self._progress_dialog:
+            self._progress_dialog.close()
+            self._progress_dialog = None
+
+        if not path:
+            self._update_in_progress = False
+            self._cleanup_worker("_download_worker")
+            if not self._download_canceled:
+                QMessageBox.warning(
+                    self, "업데이트 실패",
+                    "다운로드에 실패했습니다.\n잠시 후 다시 시도해 주세요.",
+                )
+            return
+
+        self._apply_update(path)
+
+    def _apply_update(self, installer_path: str):
+        if not getattr(sys, "frozen", False):
+            self._update_in_progress = False
+            QMessageBox.information(
+                self, "업데이트",
+                "개발 모드에서는 설치를 진행하지 않습니다.\n"
+                f"다운로드 위치: {installer_path}",
+            )
+            return
+
+        # 깔끔한 종료: 폴링 중지 → 자동화 워커 정지 → Chrome 종료
+        self._poll_timer.stop()
+        try:
+            self.runner.request_stop()
+            self.runner.cleanup_session()
+            self.runner.wait(3000)
+        except Exception:
+            pass
+
+        # 설치기를 분리 실행 (앱 종료 후 무인설치 → 재실행)
+        if not updater.spawn_installer_and_detach(installer_path):
+            self._update_in_progress = False
+            QMessageBox.warning(
+                self, "업데이트 실패", "설치 프로그램을 실행하지 못했습니다.",
+            )
+            return
+
+        QApplication.quit()

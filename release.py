@@ -1,0 +1,141 @@
+"""릴리스 헬퍼 (개발자 전용).
+
+새 버전 배포 절차:
+  1. src/version.py 의 __version__ 을 올린다 (예: "1.0.1").
+  2. python release.py              → 빌드 + sha256/size 계산 + version.json 생성 + 게시 명령 출력
+     python release.py --publish    → 추가로 `gh release create` 로 설치파일 에셋 업로드까지 실행
+     python release.py --mandatory  → version.json mandatory=true (강제 업데이트)
+     python release.py --notes "..."→ 릴리스 노트 지정
+
+전제:
+  - 개발자 PC에 gh(GitHub CLI) 로그인 + Inno Setup(ISCC) 설치.
+  - 설치파일과 version.json 은 '공개' 릴리스 저장소에 게시되고, 앱은 토큰 없이
+    공개 raw URL 로 version.json 만 읽는다. **클라이언트에는 어떤 비밀키도 없음.**
+
+주의: version.json 은 공개 저장소 main 브랜치 루트에 커밋되어야 앱이 조회한다
+(앱은 releases/latest API 가 아니라 고정 raw URL 을 읽음). 에셋(설치파일)은
+릴리스에 업로드한다.
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import subprocess
+import sys
+from datetime import date
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from src.version import __version__          # noqa: E402
+from src.utils import updater                # noqa: E402
+
+REPO = f"{updater.RELEASES_OWNER}/{updater.RELEASES_REPO}"
+INSTALLER = os.path.join("installer_output", "원천징수자동화_설치.exe")
+ASSET_NAME = "원천징수자동화_설치.exe"
+
+
+def sha256_of(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def main():
+    ap = argparse.ArgumentParser(description="원천징수 자동화 릴리스 헬퍼")
+    ap.add_argument("--skip-build", action="store_true",
+                    help="build.py 실행 생략 (기존 installer_output 사용)")
+    ap.add_argument("--publish", action="store_true",
+                    help="gh release create 로 에셋 업로드까지 실행")
+    ap.add_argument("--mandatory", action="store_true",
+                    help="version.json mandatory=true (강제 업데이트)")
+    ap.add_argument("--min-supported", default="",
+                    help="version.json min_supported (이 버전 미만은 강제 업데이트)")
+    ap.add_argument("--notes", default="버그 수정 및 기능 개선",
+                    help="릴리스 노트")
+    args = ap.parse_args()
+
+    version = __version__
+    tag = f"v{version}"
+    print(f"=== 릴리스 준비: {tag}  (공개 저장소: {REPO}) ===")
+
+    # [1] 빌드
+    if not args.skip_build:
+        print("\n[1] build.py 실행...")
+        if subprocess.run([sys.executable, "build.py"]).returncode != 0:
+            print("[ERROR] 빌드 실패")
+            sys.exit(1)
+
+    if not os.path.exists(INSTALLER):
+        print(f"[ERROR] 설치파일이 없습니다: {INSTALLER}")
+        sys.exit(1)
+
+    # [2] 해시 / 크기
+    size = os.path.getsize(INSTALLER)
+    digest = sha256_of(INSTALLER)
+    print(f"\n[2] {INSTALLER}")
+    print(f"    size   = {size:,} bytes")
+    print(f"    sha256 = {digest}")
+
+    # [3] version.json 생성
+    info = {
+        "version": version,
+        "mandatory": bool(args.mandatory),
+        "min_supported": args.min_supported,   # 빈 문자열이면 강제 아님
+        "url": f"https://github.com/{REPO}/releases/download/{tag}/{ASSET_NAME}",
+        "sha256": digest,
+        "size": size,
+        "notes": args.notes,
+        "released": date.today().isoformat(),
+    }
+    out = os.path.join("installer_output", "version.json")
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(info, f, ensure_ascii=False, indent=2)
+    print(f"\n[3] version.json 생성: {out}")
+    print(json.dumps(info, ensure_ascii=False, indent=2))
+
+    # [4] 게시 안내
+    print("\n[4] 게시")
+    print("  (a) 릴리스 에셋 업로드:")
+    print(f"      gh release create {tag} \"{INSTALLER}\" "
+          f"--repo {REPO} --title \"{tag}\" --notes \"{args.notes}\"")
+    print("  (b) version.json 을 공개 저장소 main 에 커밋 (앱이 raw URL 로 조회):")
+    print(f"      {out} → {REPO} 저장소 루트 version.json 으로 복사 후 commit/push")
+    print(f"      조회 URL: {updater.VERSION_JSON_URL}")
+
+    if args.publish:
+        print("\n[4-a] gh release create 실행...")
+        try:
+            rc = subprocess.run([
+                "gh", "release", "create", tag, INSTALLER,
+                "--repo", REPO, "--title", tag, "--notes", args.notes,
+            ]).returncode
+        except FileNotFoundError:
+            print("[ERROR] 'gh' CLI가 설치되어 있지 않습니다. https://cli.github.com/")
+            rc = 1
+        if rc != 0:
+            print("[WARN] gh release create 실패. 수동 확인 필요.")
+        else:
+            print("[OK] 에셋 업로드 완료.")
+        print("  ※ version.json 을 공개 저장소 main 에 커밋하세요:")
+        print(f"      {out} → {REPO} 루트 version.json")
+
+        # 게시 후 version.json 검증
+        print("\n[5] version.json 검증...")
+        try:
+            import urllib.request
+            with urllib.request.urlopen(updater.VERSION_JSON_URL, timeout=5) as resp:
+                remote_info = json.loads(resp.read().decode("utf-8"))
+            if remote_info.get("version") == version:
+                print(f"[OK] version.json 확인: v{version} ✓")
+            else:
+                print(f"[WARN] version.json 불일치! 원격={remote_info.get('version')}, 로컬={version}")
+                print("       공개 저장소에 아직 커밋하지 않은 것 같습니다.")
+        except Exception as e:
+            print(f"[INFO] version.json 조회 실패 ({e})")
+            print("       공개 저장소에 커밋 후 다시 실행하여 확인하세요.")
+
+
+if __name__ == "__main__":
+    main()
