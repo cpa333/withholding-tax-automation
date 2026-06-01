@@ -17,6 +17,15 @@ from src.utils.log import log
 from src.config import WEHAGO_URL, WEHAGO_TAXAGENT_URL
 
 
+async def _safe_evaluate(page, expression, *args, timeout=10):
+    """page.evaluate with timeout guard. Returns None on timeout/error."""
+    try:
+        return await asyncio.wait_for(page.evaluate(expression, *args), timeout=timeout)
+    except (asyncio.TimeoutError, Exception) as e:
+        log(f"  page.evaluate 타임아웃/오류: {e}")
+        return None
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # 기간 계산
 # ═══════════════════════════════════════════════════════════════════════
@@ -512,14 +521,14 @@ async def get_clients_with_biz_from_taxagent(page):
     """
     # 스크롤로 전체 카드 로드
     for _ in range(10):
-        await page.evaluate("""() => {
+        await _safe_evaluate(page, """() => {
             const container = document.querySelector('div.cl_lnb_bottom');
             if (container) container.scrollTop = container.scrollHeight;
         }""")
         await asyncio.sleep(0.5)
 
     # 카드 목록 수집
-    total_cards = await page.evaluate(r'''() => {
+    total_cards = await _safe_evaluate(page, r'''() => {
         const allLists = document.querySelectorAll('ul.acceptance_list');
         for (const list of allLists) {
             const items = list.querySelectorAll(':scope > li');
@@ -527,12 +536,12 @@ async def get_clients_with_biz_from_taxagent(page):
             return items.length;
         }
         return 0;
-    }''')
+    }''') or 0
 
     results = []
     for i in range(total_cards):
         # i번째 카드 클릭
-        clicked = await page.evaluate(r'''(idx) => {
+        clicked = await _safe_evaluate(page, r'''(idx) => {
             const allLists = document.querySelectorAll('ul.acceptance_list');
             for (const list of allLists) {
                 const cards = list.querySelectorAll('a.acceptance_card');
@@ -550,7 +559,7 @@ async def get_clients_with_biz_from_taxagent(page):
         await asyncio.sleep(0.5)
 
         # 상세 영역에서 이름과 사업자번호 추출
-        info = await page.evaluate(r'''() => {
+        info = await _safe_evaluate(page, r'''() => {
             // cl_basicinfo_section에 상세 정보 표시됨
             const infoEl = document.querySelector('.cl_basicinfo_section');
             if (!infoEl) return null;

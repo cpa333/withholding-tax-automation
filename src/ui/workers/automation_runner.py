@@ -308,20 +308,26 @@ class AutomationRunner(AsyncWorker):
         if self._stop_event.is_set():
             return
 
-        # Chrome 실행 + WEHAGO 연결
-        if not await self._ensure_browser("wehago"):
-            self.phase_changed.emit(1, "failed")
-            self.error_occurred.emit("Chrome 연결 실패")
-            return
+        # 브라우저 세션 재사용 시도 (기존 WEHAGO 세션이 살아있으면 재사용)
+        reused = await self._try_reuse_browser("wehago")
 
-        if self._stop_event.is_set():
-            return
+        if not reused:
+            if not await self._ensure_browser("wehago"):
+                self.phase_changed.emit(1, "failed")
+                self.error_occurred.emit("Chrome 연결 실패")
+                return
 
-        # 로그인 대기
-        if not await self._wait_for_login("wehago"):
-            if not self._stop_event.is_set():
-                self.error_occurred.emit("WEHAGO 로그인 실패 또는 시간 초과")
-            return
+            if self._stop_event.is_set():
+                return
+
+            # 로그인 대기
+            if not await self._wait_for_login("wehago"):
+                if not self._stop_event.is_set():
+                    self.error_occurred.emit("WEHAGO 로그인 실패 또는 시간 초과")
+                return
+
+            # 로그인 후 페이지 재연결
+            await self._reconnect_page("wehago")
 
         page = self._page
         try:
@@ -329,6 +335,10 @@ class AutomationRunner(AsyncWorker):
             self.log_message.emit("수임처관리 페이지로 이동...")
             await page.goto(WEHAGO_TAXAGENT_URL, wait_until="domcontentloaded", timeout=30000)
             await dismiss_dialogs(page)
+
+            # 페이지 건강성 확인 (크래시/세션 만료 감지)
+            if not await self._is_page_alive():
+                raise _BrowserClosedError()
 
             try:
                 await page.wait_for_selector(
