@@ -33,6 +33,7 @@ class NpsEdiWorkflow(BaseWorkflow):
             TAB_MEMBER, TAB_RETRO, TAB_GOVT,
         )
         import asyncio
+        from src.utils.human import human_delay
 
         year = kwargs.get("year")
         month = kwargs.get("month")
@@ -44,7 +45,7 @@ class NpsEdiWorkflow(BaseWorkflow):
             if not ok:
                 state.fail_step(job_id, "switch_workplace", f"'{client_name}' 전환 실패")
                 return False
-            await asyncio.sleep(3)
+            await human_delay(3)
             state.after_step(job_id, "switch_workplace")
 
         # 사업장 전환 성공 후에만 폴더 생성 (검색 실패 시 빈 폴더 방지)
@@ -54,7 +55,7 @@ class NpsEdiWorkflow(BaseWorkflow):
         if not state.should_skip_step(job_id, "navigate_to_decision"):
             state.before_step(job_id, "navigate_to_decision", 1)
             await navigate_to_decision_details(page)
-            await asyncio.sleep(2)
+            await human_delay(2)
             state.after_step(job_id, "navigate_to_decision")
 
         # 2차 상세 열기
@@ -62,7 +63,7 @@ class NpsEdiWorkflow(BaseWorkflow):
             state.before_step(job_id, "open_detail", 2)
             await open_decision_detail(page, round_filter="2차",
                                        year=year, month=month)
-            await asyncio.sleep(2)
+            await human_delay(2)
             state.after_step(job_id, "open_detail")
 
         # 각 탭 처리

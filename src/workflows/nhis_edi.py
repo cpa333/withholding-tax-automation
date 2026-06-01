@@ -28,6 +28,7 @@ class NhisEdiWorkflow(BaseWorkflow):
             run_single_firm_workflow, _close_edi_tabs,
         )
         import asyncio
+        from src.utils.human import human_delay
 
         year = kwargs.get("year")
         month = kwargs.get("month")
@@ -36,7 +37,7 @@ class NhisEdiWorkflow(BaseWorkflow):
         main_page = await close_popups(context)
         if not main_page:
             main_page = page
-        await asyncio.sleep(3)
+        await human_delay(3)
 
         # 사업장 선택 팝업 열기
         if not state.should_skip_step(job_id, "open_firm_selector"):
@@ -63,7 +64,7 @@ class NhisEdiWorkflow(BaseWorkflow):
         if not state.should_skip_step(job_id, "close_firm_popup"):
             state.before_step(job_id, "close_firm_popup", 2)
             await close_firm_popup(context, popup)
-            await asyncio.sleep(3)
+            await human_delay(3)
             state.after_step(job_id, "close_firm_popup")
 
         # 워크플로우 실행

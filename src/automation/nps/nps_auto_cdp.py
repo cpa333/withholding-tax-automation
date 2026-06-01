@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from playwright.async_api import async_playwright
 from src.utils.chrome_cdp import launch_chrome, connect_page as cdp_connect
 from src.utils.save_path import make_save_dir
+from src.utils.human import human_delay
 from src.automation.nps._common import (
     log, NPS_URL, connect_page, wait_for_login, ensure_login_page,
     open_workplace_selector, select_workplace, select_workplace_by_index,
@@ -59,7 +60,7 @@ async def handle_select_workplace(page):
     # 사업장 선택 모달 열기
     log("사업장 선택 모달 열기...")
     await open_workplace_selector(page)
-    await asyncio.sleep(2)
+    await human_delay(2)
 
     # 현재 목록 표시
     workplaces = await list_workplaces(page)
@@ -143,17 +144,17 @@ async def run_full_auto(page, context):
         log("  사업장전환 모달 열기...")
         try:
             await switch_workplace_open(page)
-            await asyncio.sleep(2)
+            await human_delay(2)
         except Exception as e:
             log(f"  WARN: 사업장전환 버튼 실패, 재시도... ({e})")
-            await asyncio.sleep(3)
+            await human_delay(3)
             await switch_workplace_open(page)
-            await asyncio.sleep(2)
+            await human_delay(2)
 
         workplaces = await list_workplaces(page)
         if not workplaces:
             log("  사업장 목록을 불러오지 못했습니다. 재시도...")
-            await asyncio.sleep(2)
+            await human_delay(2)
             continue
 
         log(f"\n  사업장 목록 ({len(workplaces)}개):")
@@ -212,7 +213,7 @@ async def run_full_auto(page, context):
             log(f"  '{wp_name}' 사업장을 찾을 수 없습니다. 다시 입력해주세요.")
             # 모달을 다시 열고 목록 새로고침
             await switch_workplace_open(page)
-            await asyncio.sleep(2)
+            await human_delay(2)
             workplaces = await list_workplaces(page)
             if workplaces:
                 log(f"\n  사업장 목록 ({len(workplaces)}개):")
@@ -256,7 +257,7 @@ async def run_single_workplace(page, context, workplace_name, is_first=False,
     """
     save_dir = make_save_dir("국민연금", workplace_name, year=year, month=month)
 
-    await asyncio.sleep(3)
+    await human_delay(3)
 
     # Step 1: 결정내역 이동
     log("  결정내역 메뉴 이동...")
@@ -284,13 +285,13 @@ async def run_single_workplace(page, context, workplace_name, is_first=False,
         )
         if result["skipped"]:
             log(f"  {label} 스킵 (데이터 없음)")
-        await asyncio.sleep(1)
+        await human_delay(1)
 
     log(f"  저장 경로: {save_dir}")
 
     # 페이지 상태 정리: 첫 번째 탭으로 복귀
     await click_detail_tab(page, TAB_MEMBER)
-    await asyncio.sleep(1)
+    await human_delay(1)
 
 
 async def run_interactive(page, context):
@@ -416,7 +417,7 @@ async def run_interactive(page, context):
                         )
                         if result["skipped"]:
                             log(f"  {label} 스킵 (데이터 없음)")
-                        await asyncio.sleep(1)
+                        await human_delay(1)
                     log("전체 탭 처리 완료")
                 except Exception as e:
                     log(f"ERROR: {e}")

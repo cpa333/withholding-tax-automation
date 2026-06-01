@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from src.utils.chrome_cdp import launch_chrome, CDP_URL
 from src.utils.log import log
 from src.utils.save_path import make_save_dir
+from src.utils.human import human_delay
 
 NHIS_EDI_URL = "https://edi.nhis.or.kr/"
 NHIS_EDI_MAIN = "https://edi.nhis.or.kr/homeapp/wep/m/retrieveMain.xx"
@@ -115,7 +116,7 @@ async def close_popups(context):
                 if checked:
                     log("  '하루동안 열지않기' 체크")
                 await pg.evaluate("() => { if (typeof closeWin === 'function') closeWin(); }")
-                await asyncio.sleep(0.5)
+                await human_delay(0.5)
             await pg.close()
             closed += 1
         except Exception:
@@ -150,7 +151,7 @@ async def open_firm_selector(page, context):
             var img = document.querySelector('img[src*="we_btn_relogin"]');
             if (img) img.click();
         }""")
-        await asyncio.sleep(3)
+        await human_delay(3)
         await close_popups(context)
 
     log("수임사업장선택 버튼 클릭...")
@@ -224,7 +225,7 @@ async def list_all_firms(popup):
     """
     # 1페이지로 리셋
     await popup.evaluate('() => { fn_next("1"); }')
-    await asyncio.sleep(2)
+    await human_delay(2)
 
     all_firms = []
 
@@ -297,7 +298,7 @@ async def search_firm(popup, keyword, search_type="name"):
         document.getElementById('cPage').value = '1';
         document.getElementById('btnSubmit').click();
     }""")
-    await asyncio.sleep(3)
+    await human_delay(3)
 
     return (await _parse_current_page_firms(popup))["firms"]
 
@@ -344,7 +345,7 @@ async def select_firm(popup, firm_name, management_number=""):
 
     # 1페이지로 리셋 후 전체 목록에서 찾기
     await popup.evaluate('() => { fn_next("1"); }')
-    await asyncio.sleep(2)
+    await human_delay(2)
 
     # 현재 페이지에서 찾기
     found = await popup.evaluate("""(name) => {
@@ -522,13 +523,16 @@ async def nexacro_click(page, element_id):
         const el = document.getElementById(elId);
         if (!el) return {error: 'not found: ' + elId};
         const rect = el.getBoundingClientRect();
-        const cx = rect.x + rect.width / 2;
-        const cy = rect.y + rect.height / 2;
+        const cx = rect.x + rect.width / 2 + (Math.random() * 4 - 2);
+        const cy = rect.y + rect.height / 2 + (Math.random() * 4 - 2);
         const base = {
             bubbles: true, cancelable: true, view: window,
             screenX: cx, screenY: cy, clientX: cx, clientY: cy,
             button: 0, buttons: 1, relatedTarget: null
         };
+        el.dispatchEvent(new MouseEvent('mousemove', {...base, detail: 0, buttons: 0}));
+        const t = performance.now();
+        while (performance.now() - t < 30 + Math.random() * 50) {}
         el.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
         el.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
         el.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
@@ -543,16 +547,21 @@ async def nexacro_dblclick_cell(page, grid_id, row, col):
         const cell = document.getElementById(cellId);
         if (!cell) return {error: 'cell not found'};
         const rect = cell.getBoundingClientRect();
-        const cx = rect.x + rect.width / 2;
-        const cy = rect.y + rect.height / 2;
+        const cx = rect.x + rect.width / 2 + (Math.random() * 4 - 2);
+        const cy = rect.y + rect.height / 2 + (Math.random() * 4 - 2);
         const base = {
             bubbles: true, cancelable: true, view: window,
             screenX: cx, screenY: cy, clientX: cx, clientY: cy,
             button: 0, buttons: 1, relatedTarget: null
         };
+        cell.dispatchEvent(new MouseEvent('mousemove', {...base, detail: 0, buttons: 0}));
+        let t = performance.now();
+        while (performance.now() - t < 30 + Math.random() * 50) {}
         cell.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
         cell.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
         cell.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
+        t = performance.now();
+        while (performance.now() - t < 30 + Math.random() * 50) {}
         cell.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 2}));
         cell.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 2}));
         cell.dispatchEvent(new MouseEvent('click', {...base, detail: 2}));
@@ -574,13 +583,16 @@ async def nexacro_select_combo(page, combo_id, item_text):
             var textEl = item.querySelector('[id*=TextBoxElement]');
             if (textEl && textEl.textContent.trim() === args.itemText) {
                 var rect = item.getBoundingClientRect();
-                var cx = rect.x + rect.width / 2;
-                var cy = rect.y + rect.height / 2;
+                var cx = rect.x + rect.width / 2 + (Math.random() * 4 - 2);
+                var cy = rect.y + rect.height / 2 + (Math.random() * 4 - 2);
                 var base = {
                     bubbles: true, cancelable: true, view: window,
                     screenX: cx, screenY: cy, clientX: cx, clientY: cy,
                     button: 0, buttons: 1, relatedTarget: null
                 };
+                item.dispatchEvent(new MouseEvent('mousemove', {...base, detail: 0, buttons: 0}));
+                var t = performance.now();
+                while (performance.now() - t < 30 + Math.random() * 50) {}
                 item.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
                 item.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
                 item.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
@@ -601,13 +613,16 @@ async def nexacro_click_radio(page, radio_id, item_text):
             var textEl = item.querySelector('[id*=TextBoxElement]');
             if (textEl && textEl.textContent.trim() === args.itemText) {
                 var rect = item.getBoundingClientRect();
-                var cx = rect.x + rect.width / 2;
-                var cy = rect.y + rect.height / 2;
+                var cx = rect.x + rect.width / 2 + (Math.random() * 4 - 2);
+                var cy = rect.y + rect.height / 2 + (Math.random() * 4 - 2);
                 var base = {
                     bubbles: true, cancelable: true, view: window,
                     screenX: cx, screenY: cy, clientX: cx, clientY: cy,
                     button: 0, buttons: 1, relatedTarget: null
                 };
+                item.dispatchEvent(new MouseEvent('mousemove', {...base, detail: 0, buttons: 0}));
+                var t = performance.now();
+                while (performance.now() - t < 30 + Math.random() * 50) {}
                 item.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
                 item.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
                 item.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
@@ -668,7 +683,7 @@ async def select_doc_type(edi_page, doc_name="가입자 고지(산출) 내역서
         log(f"  ERROR: 라디오 선택 실패 - {result}")
         return False
     log(f"  라디오: value=\"{result.get('value')}\" index={result.get('index')} text=\"{result.get('text')}\"")
-    await asyncio.sleep(2)
+    await human_delay(2)
 
     # 서식명 콤보 — combo 요소 대기
     log(f"  서식명 선택: {doc_name}")
@@ -683,9 +698,12 @@ async def select_doc_type(edi_page, doc_name="가입자 고지(산출) 내역서
         var btn = document.getElementById('mainframe_childframe_form_div_body_cbo_docid_dropbutton');
         if (!btn) return {ok: false, msg: 'dropbutton not found'};
         var rect = btn.getBoundingClientRect();
-        var cx = rect.x + rect.width / 2;
-        var cy = rect.y + rect.height / 2;
+        var cx = rect.x + rect.width / 2 + (Math.random() * 4 - 2);
+        var cy = rect.y + rect.height / 2 + (Math.random() * 4 - 2);
         var base = {bubbles: true, cancelable: true, view: window, screenX: cx, screenY: cy, clientX: cx, clientY: cy, button: 0, buttons: 1, relatedTarget: null};
+        btn.dispatchEvent(new MouseEvent('mousemove', {...base, detail: 0, buttons: 0}));
+        var t = performance.now();
+        while (performance.now() - t < 30 + Math.random() * 50) {}
         btn.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
         btn.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
         btn.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
@@ -714,9 +732,12 @@ async def select_doc_type(edi_page, doc_name="가입자 고지(산출) 내역서
             var textEl = item.querySelector('[id*=TextBoxElement]');
             if (textEl && textEl.textContent.trim() === docName) {
                 var rect = item.getBoundingClientRect();
-                var cx = rect.x + rect.width / 2;
-                var cy = rect.y + rect.height / 2;
+                var cx = rect.x + rect.width / 2 + (Math.random() * 4 - 2);
+                var cy = rect.y + rect.height / 2 + (Math.random() * 4 - 2);
                 var base = {bubbles: true, cancelable: true, view: window, screenX: cx, screenY: cy, clientX: cx, clientY: cy, button: 0, buttons: 1, relatedTarget: null};
+                item.dispatchEvent(new MouseEvent('mousemove', {...base, detail: 0, buttons: 0}));
+                var t = performance.now();
+                while (performance.now() - t < 30 + Math.random() * 50) {}
                 item.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
                 item.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
                 item.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
@@ -729,7 +750,7 @@ async def select_doc_type(edi_page, doc_name="가입자 고지(산출) 내역서
         log(f"  ERROR: 서식명 선택 실패 - {result}")
         return False
 
-    await asyncio.sleep(1)
+    await human_delay(1)
 
     # 확인
     value = await edi_page.evaluate("""() => {
@@ -761,12 +782,17 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
         var cell = document.getElementById('mainframe_childframe_form_div_body_grid_list_body_gridrow_0_cell_0_3');
         if (!cell) return {ok: false, msg: 'cell not found'};
         var rect = cell.getBoundingClientRect();
-        var cx = rect.x + rect.width / 2;
-        var cy = rect.y + rect.height / 2;
+        var cx = rect.x + rect.width / 2 + (Math.random() * 4 - 2);
+        var cy = rect.y + rect.height / 2 + (Math.random() * 4 - 2);
         var base = {bubbles: true, cancelable: true, view: window, screenX: cx, screenY: cy, clientX: cx, clientY: cy, button: 0, buttons: 1, relatedTarget: null};
+        cell.dispatchEvent(new MouseEvent('mousemove', {...base, detail: 0, buttons: 0}));
+        var t = performance.now();
+        while (performance.now() - t < 30 + Math.random() * 50) {}
         cell.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
         cell.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
         cell.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
+        t = performance.now();
+        while (performance.now() - t < 30 + Math.random() * 50) {}
         cell.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 2}));
         cell.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 2}));
         cell.dispatchEvent(new MouseEvent('click', {...base, detail: 2}));
@@ -777,7 +803,7 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
         log(f"  ERROR: 행 더블클릭 실패 - {result}")
         return None
     log(f"  문서: {result.get('text', '')[:60]}")
-    await asyncio.sleep(3)
+    await human_delay(3)
 
     # 인쇄 버튼 클릭
     log("  인쇄 버튼 클릭...")
@@ -785,9 +811,12 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
         var btn = document.getElementById('mainframe_childframe_form_div_top_img_print');
         if (!btn) return {ok: false, msg: 'print btn not found'};
         var rect = btn.getBoundingClientRect();
-        var cx = rect.x + rect.width / 2;
-        var cy = rect.y + rect.height / 2;
+        var cx = rect.x + rect.width / 2 + (Math.random() * 4 - 2);
+        var cy = rect.y + rect.height / 2 + (Math.random() * 4 - 2);
         var base = {bubbles: true, cancelable: true, view: window, screenX: cx, screenY: cy, clientX: cx, clientY: cy, button: 0, buttons: 1, relatedTarget: null};
+        btn.dispatchEvent(new MouseEvent('mousemove', {...base, detail: 0, buttons: 0}));
+        var t = performance.now();
+        while (performance.now() - t < 30 + Math.random() * 50) {}
         btn.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
         btn.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
         btn.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
@@ -796,7 +825,7 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
     if not result.get("ok"):
         log(f"  ERROR: 인쇄 버튼 클릭 실패 - {result}")
         return None
-    await asyncio.sleep(3)
+    await human_delay(3)
 
     # 미리보기 탭 찾기
     preview = None
@@ -917,7 +946,7 @@ async def run_single_firm_workflow(page, context, firm_name,
         var img = document.querySelector('img[src*="we_btn_relogin"]');
         if (img) img.click();
     }""")
-    await asyncio.sleep(3)
+    await human_delay(3)
 
     # 모달 닫기
     await close_popups(context)

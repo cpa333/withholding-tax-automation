@@ -21,6 +21,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from src.utils.chrome_cdp import CDP_URL, CDP_PORT
 from src.utils.pdf_reader import postprocess_pdf
 from src.utils.log import log
+from src.utils.human import human_delay
 
 MINWON_URL = "https://www.nhis.or.kr/nhis/minwon/minwonServiceBoard.do"
 PDF_PASSWORD = "880718"
@@ -201,7 +202,7 @@ async def run():
 
         # ===== 로그인 확인 =====
         await page.goto("https://www.nhis.or.kr/nhis/index.do", wait_until="domcontentloaded")
-        await asyncio.sleep(2)
+        await human_delay(2)
 
         if await page.locator("text=로그아웃").count() == 0:
             log("\n브라우저에서 로그인을 진행해 주세요.")
@@ -223,7 +224,7 @@ async def run():
         # ===== [1/3] 민원 서비스 → 발급 페이지 =====
         log("[1/3] 민원 서비스 → 보험료 납부확인서 발급 페이지 이동...")
         await page.goto(MINWON_URL, wait_until="domcontentloaded")
-        await asyncio.sleep(3)
+        await human_delay(3)
 
         href = await page.evaluate("""() => {
             const items = document.querySelectorAll('li');
@@ -243,7 +244,7 @@ async def run():
 
         log(f"  발급 페이지 이동: {href}")
         await page.goto(href, wait_until="domcontentloaded")
-        await asyncio.sleep(3)
+        await human_delay(3)
 
         # ===== [2/3] 출력 버튼 → 모달 확인 =====
         log("[2/3] 출력 버튼 클릭 → 확인 모달 처리...")
@@ -334,7 +335,7 @@ async def run():
 
         # ===== 정리 =====
         session_task.cancel()
-        await asyncio.sleep(2)
+        await human_delay(2)
         for pg in context.pages:
             if pg != page:
                 try:

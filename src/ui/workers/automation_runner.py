@@ -7,6 +7,7 @@ Qt Signal로 UI에 진행 상황을 방출.
 
 import asyncio
 import os
+import random
 import traceback
 
 from src.config import DB_PATH, PORTAL_URLS
@@ -195,6 +196,11 @@ class AutomationRunner(AsyncWorker):
 
             try:
                 # 수임처별 루프 — 일시정지/정지/브라우저 종료 체크
+                from src.utils.human import human_break
+                clients_done = 0
+                last_break_at = 0
+                break_gap = random.randint(5, 8)
+
                 while not self._stop_event.is_set():
                     # 일시정지 대기
                     while not self._pause_event.is_set() and not self._stop_event.is_set():
@@ -246,6 +252,21 @@ class AutomationRunner(AsyncWorker):
                         engine.job_repo.mark_failed(job.id, f"{type(e).__name__}: {e}")
 
                     self._emit_progress(engine, batch.id, phase_id)
+
+                    # 수임처 간 무작위 휴식 (탐지 패턴 방지)
+                    clients_done += 1
+                    if (clients_done - last_break_at) >= break_gap:
+                        next_peek = engine.job_repo.get_next_pending(batch.id)
+                        if next_peek is not None:
+                            took = await human_break(
+                                check_stop=lambda: self._stop_event.is_set(),
+                                log_fn=lambda m: self.log_message.emit(m),
+                            )
+                            if not took:
+                                engine.batch_repo.update_status(batch.id, BatchStatus.PAUSED)
+                                break
+                            last_break_at = clients_done
+                            break_gap = random.randint(5, 8)
             except asyncio.CancelledError:
                 engine.batch_repo.update_status(batch.id, BatchStatus.PAUSED)
                 self.log_message.emit("[작업 취소됨]")
@@ -476,6 +497,10 @@ class AutomationRunner(AsyncWorker):
             return
 
         results = []
+        from src.utils.human import human_break
+        sel_break_gap = random.randint(5, 8)
+        sel_last_break = 0
+
         for i, client_info in enumerate(client_infos):
             client_name = client_info["name"]
             management_number = client_info.get("management_number", "")
@@ -520,6 +545,17 @@ class AutomationRunner(AsyncWorker):
                 if not await self._is_page_alive():
                     self.log_message.emit("브라우저가 종료되어 실행을 중단합니다.")
                     break
+
+            # 수임처 간 무작위 휴식 (탐지 패턴 방지)
+            if (i + 1 < total and (i + 1 - sel_last_break) >= sel_break_gap):
+                took = await human_break(
+                    check_stop=lambda: self._stop_event.is_set(),
+                    log_fn=lambda m: self.log_message.emit(m),
+                )
+                if not took:
+                    break
+                sel_last_break = i + 1
+                sel_break_gap = random.randint(5, 8)
 
         # 완료 요약
         succeeded = sum(1 for r in results if r["success"])

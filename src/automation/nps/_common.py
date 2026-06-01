@@ -10,6 +10,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 from src.utils.chrome_cdp import launch_chrome, CDP_URL
 from src.utils.log import log
+from src.utils.human import human_delay
 
 NPS_URL = "https://edi.nps.or.kr"
 NPS_NEXACRO_URL = "https://edi.nps.or.kr/nexacro/index.html"
@@ -155,7 +156,7 @@ async def wait_for_nexacro_ready(page, max_wait=30):
 async def ensure_login_page(page):
     """NPS EDI 메인 페이지로 이동하여 로그인 대기"""
     await page.goto(NPS_URL, wait_until="domcontentloaded", timeout=30000)
-    await asyncio.sleep(3)
+    await human_delay(3)
     return await wait_for_login(page)
 
 
@@ -183,8 +184,8 @@ async def nexacro_dblclick_cell(page, grid_id, row, col):
         if (!target) return {error: 'cell not found'};
 
         const rect = target.getBoundingClientRect();
-        const cx = rect.x + rect.width / 2;
-        const cy = rect.y + rect.height / 2;
+        const cx = rect.x + rect.width / 2 + (Math.random() * 4 - 2);
+        const cy = rect.y + rect.height / 2 + (Math.random() * 4 - 2);
 
         const base = {
             bubbles: true, cancelable: true, view: window,
@@ -192,9 +193,17 @@ async def nexacro_dblclick_cell(page, grid_id, row, col):
             button: 0, buttons: 1, relatedTarget: null
         };
 
+        target.dispatchEvent(new MouseEvent('mousemove', {...base, detail: 0, buttons: 0}));
+        let t = performance.now();
+        while (performance.now() - t < 30 + Math.random() * 50) {}
+
         target.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
         target.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
         target.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
+
+        t = performance.now();
+        while (performance.now() - t < 30 + Math.random() * 50) {}
+
         target.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 2}));
         target.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 2}));
         target.dispatchEvent(new MouseEvent('click', {...base, detail: 2}));
@@ -283,14 +292,18 @@ async def nexacro_click_button(page, element_id):
         if (!btn) return {error: 'element not found: ' + elId};
 
         const rect = btn.getBoundingClientRect();
-        const cx = rect.x + rect.width / 2;
-        const cy = rect.y + rect.height / 2;
+        const cx = rect.x + rect.width / 2 + (Math.random() * 4 - 2);
+        const cy = rect.y + rect.height / 2 + (Math.random() * 4 - 2);
 
         const base = {
             bubbles: true, cancelable: true, view: window,
             screenX: cx, screenY: cy, clientX: cx, clientY: cy,
             button: 0, buttons: 1, relatedTarget: null
         };
+
+        btn.dispatchEvent(new MouseEvent('mousemove', {...base, detail: 0, buttons: 0}));
+        const t = performance.now();
+        while (performance.now() - t < 30 + Math.random() * 50) {}
 
         btn.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
         btn.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
@@ -320,14 +333,14 @@ async def navigate_to_decision_details(page):
     if not result.get("ok"):
         log(f"  ERROR: {result}")
         return False
-    await asyncio.sleep(2)
+    await human_delay(2)
 
     log("국민연금보험료 결정내역 서브메뉴 클릭...")
     result = await nexacro_click_button(page, SUB_MENU_ID)
     if not result.get("ok"):
         log(f"  ERROR: {result}")
         return False
-    await asyncio.sleep(3)
+    await human_delay(3)
 
     log("국민연금보험료 결정내역 페이지 이동 완료.")
     return True
@@ -392,7 +405,7 @@ async def open_decision_detail(page, round_filter="2차",
         log(f"  더블클릭 실패: {result}")
         return False
 
-    await asyncio.sleep(3)
+    await human_delay(3)
     log("결정내역 상세 페이지 진입 완료.")
     return True
 
@@ -414,7 +427,7 @@ async def click_detail_tab(page, tab_index):
         log(f"  탭 {tab_index} 전환 완료")
     else:
         log(f"  탭 전환 실패: {result}")
-    await asyncio.sleep(1)
+    await human_delay(1)
     return result.get("ok", False)
 
 
@@ -429,18 +442,18 @@ async def output_with_full_ssn(page):
     if not result.get("ok"):
         log(f"  ERROR: 출력 버튼 클릭 실패 - {result}")
         return False
-    await asyncio.sleep(2)
+    await human_delay(2)
 
     log("주민번호 전체표출 선택...")
     await nexacro_click_button(page, RADIO_FULL_SSN)
-    await asyncio.sleep(1)
+    await human_delay(1)
 
     log("확인 클릭...")
     result = await nexacro_click_button(page, BTN_MODAL_CONFIRM)
     if not result.get("ok"):
         log(f"  ERROR: 확인 클릭 실패 - {result}")
         return False
-    await asyncio.sleep(2)
+    await human_delay(2)
 
     log("출력 옵션 적용 완료.")
     return True
@@ -549,11 +562,11 @@ async def save_excel(page, context, save_dir, filename):
     if not result.get("ok"):
         log(f"  ERROR: 엑셀저장 버튼 클릭 실패 - {result}")
         return None
-    await asyncio.sleep(2)
+    await human_delay(2)
 
     log("주민번호 전체표출 선택 (엑셀 모달)...")
     await nexacro_click_button(page, EXCEL_RADIO_FULL_SSN)
-    await asyncio.sleep(1)
+    await human_delay(1)
 
     log("확인 클릭...")
     result = await nexacro_click_button(page, EXCEL_BTN_CONFIRM)
@@ -614,11 +627,11 @@ async def save_integrated(page, context, save_dir, filename):
     if not result.get("ok"):
         log(f"  ERROR: 통합저장 버튼 클릭 실패 - {result}")
         return None
-    await asyncio.sleep(2)
+    await human_delay(2)
 
     log("주민번호 전체표출 선택 (통합 모달)...")
     await nexacro_click_button(page, INTEGRATED_RADIO_FULL_SSN)
-    await asyncio.sleep(1)
+    await human_delay(1)
 
     log("확인 클릭...")
     result = await nexacro_click_button(page, INTEGRATED_BTN_CONFIRM)
@@ -723,7 +736,7 @@ async def switch_workplace(page, workplace_name, management_number=""):
     if not result.get("ok"):
         log(f"  ERROR: 사업장전환 버튼 실패 - {result}")
         return False
-    await asyncio.sleep(2)
+    await human_delay(2)
 
     ok = await select_workplace(page, workplace_name, management_number)
     if ok:
@@ -745,10 +758,10 @@ async def _search_workplace_in_modal(page, search_text, search_by_mgmt_no=False)
     )
     # 검색 필드 콤보 드롭다운 열기 → 항목 선택
     await nexacro_click_button(page, f"{MODAL_SEARCH}.cbo00.dropbutton")
-    await asyncio.sleep(0.5)
+    await human_delay(0.5)
     item = "item_1" if search_by_mgmt_no else "item_0"
     await nexacro_click_button(page, f"{MODAL_SEARCH}.cbo00.combolist.{item}")
-    await asyncio.sleep(0.5)
+    await human_delay(0.5)
 
     # 검색 입력란(edt08)에 텍스트 입력
     await page.evaluate("""(args) => {
@@ -761,7 +774,7 @@ async def _search_workplace_in_modal(page, search_text, search_by_mgmt_no=False)
         }
         return false;
     }""", {"inputId": f"{MODAL_SEARCH}.edt08", "text": search_text})
-    await asyncio.sleep(0.5)
+    await human_delay(0.5)
 
     # 검색 버튼(btn00) 클릭
     await nexacro_click_button(page, f"{MODAL_SEARCH}.btn00")
@@ -788,7 +801,7 @@ async def open_workplace_selector(page):
     }""")
     if clicked:
         log(f"  업무대행서비스 메뉴 클릭: {clicked}")
-    await asyncio.sleep(2)
+    await human_delay(2)
 
     # '위탁사업장' 하위 메뉴 클릭
     clicked2 = await page.evaluate("""() => {
@@ -806,7 +819,7 @@ async def open_workplace_selector(page):
     }""")
     if clicked2:
         log(f"  위탁사업장 메뉴 클릭: {clicked2}")
-    await asyncio.sleep(2)
+    await human_delay(2)
 
 
 async def select_workplace(page, workplace_name, management_number=""):
@@ -827,12 +840,12 @@ async def select_workplace(page, workplace_name, management_number=""):
         log(f"  사업장 검색: 관리번호 '{management_number}'")
         # 그리드는 하이픈 포함 형식이므로 모달 검색으로 바로 진행
         await _search_workplace_in_modal(page, management_number, search_by_mgmt_no=True)
-        await asyncio.sleep(2)
+        await human_delay(2)
         # 검색 후 첫 번째 행 선택 (관리번호 검색은 결과가 1건)
         result = await nexacro_dblclick_cell(page, GRID_WORKPLACE, row=0, col=2)
         if result.get("ok"):
             log(f"  사업장 선택 완료: {result.get('text', '')}")
-            await asyncio.sleep(3)
+            await human_delay(3)
             return True
         log(f"  사업장 선택 실패: {result}")
         return False
@@ -846,7 +859,7 @@ async def select_workplace(page, workplace_name, management_number=""):
     if row is None:
         log(f"  표시 목록에 없음 — 모달 검색으로 찾는 중...")
         await _search_workplace_in_modal(page, workplace_name)
-        await asyncio.sleep(2)
+        await human_delay(2)
         row = await nexacro_find_row(page, GRID_WORKPLACE, col=2, text=workplace_name)
 
     if row is None:
@@ -858,7 +871,7 @@ async def select_workplace(page, workplace_name, management_number=""):
 
     if result.get("ok"):
         log(f"  사업장 선택 완료: {result.get('text', '')}")
-        await asyncio.sleep(3)
+        await human_delay(3)
         return True
 
     log(f"  사업장 선택 실패: {result}")
@@ -880,7 +893,7 @@ async def select_workplace_by_index(page, index):
 
     if result.get("ok"):
         log(f"  사업장 선택 완료: {result.get('text', '')}")
-        await asyncio.sleep(3)
+        await human_delay(3)
         return True
 
     log(f"  사업장 선택 실패: {result}")
