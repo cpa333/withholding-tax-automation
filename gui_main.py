@@ -79,6 +79,32 @@ def main():
         with open(qss_path, "r", encoding="utf-8") as f:
             app.setStyleSheet(f.read())
 
+    # ── 인증 게이트 ────────────────────────────────────────────────────
+    from PySide6.QtWidgets import QMessageBox, QDialog
+
+    from src.utils.auth import is_beta_expired, validate_session, is_within_grace_period
+    from src.ui.resources.auth_config import BETA_EXPIRES
+
+    # 1) 베타 만료 확인
+    if is_beta_expired():
+        QMessageBox.critical(
+            None, "사용 기간 만료",
+            f"베타 사용 기간이 만료되었습니다.\n({BETA_EXPIRES})\n\n"
+            "새 버전을 설치해 주세요.",
+        )
+        sys.exit(1)
+
+    # 2) 세션 검증 → 유효하면 바로 MainWindow 진입
+    session_ok = validate_session()
+
+    if not session_ok and not is_within_grace_period():
+        # 3) 유예 기간도 초과 → 로그인 다이얼로그
+        from src.ui.widgets.login_dialog import LoginDialog
+        login_dlg = LoginDialog()
+        if login_dlg.exec() != QDialog.Accepted:
+            sys.exit(0)
+
+    # ── 메인 윈도우 ────────────────────────────────────────────────────
     window = MainWindow()
     window.show()
 

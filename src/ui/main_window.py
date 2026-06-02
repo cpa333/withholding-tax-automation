@@ -17,8 +17,11 @@ from src.ui.widgets.phase_sidebar import PhaseSidebar
 from src.ui.widgets.company_table import CompanyTable
 from src.ui.widgets.step_detail import StepDetail
 from src.ui.workers.automation_runner import AutomationRunner
+from src.ui.workers.auth_worker import AuthWorker
 from src.ui.workers.update_worker import UpdateWorker
+from src.ui.resources.auth_config import AUTH_REFRESH_INTERVAL_SECS
 from src.utils import updater
+from src.utils import auth
 
 
 class MainWindow(QMainWindow):
@@ -75,6 +78,12 @@ class MainWindow(QMainWindow):
         # 시작 직후 자동 업데이트 확인 (무알림; dev 모드/스로틀 시 조기 반환)
         QTimer.singleShot(2500, self._auto_check_for_update)
 
+        # 주기적 인증 갱신 (4시간마다)
+        self._auth_timer = QTimer(self)
+        self._auth_timer.setInterval(AUTH_REFRESH_INTERVAL_SECS * 1000)
+        self._auth_timer.timeout.connect(self._periodic_auth_check)
+        self._auth_timer.start()
+
     def _setup_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
@@ -121,6 +130,23 @@ class MainWindow(QMainWindow):
 
         # 상태바
         self.statusBar().showMessage("준비")
+
+        # 상태바 우측: 로그인 정보 + 로그아웃 버튼
+        self._user_label = QLabel()
+        self._user_label.setStyleSheet("color: #666; padding: 0 8px;")
+        self.statusBar().addPermanentWidget(self._user_label)
+
+        self._logout_btn = QPushButton("로그아웃")
+        self._logout_btn.setFlat(True)
+        self._logout_btn.setFixedHeight(20)
+        self._logout_btn.setStyleSheet(
+            "QPushButton { color: #666; border: none; padding: 0 8px; text-decoration: underline; }"
+            "QPushButton:hover { color: #f44336; }"
+        )
+        self._logout_btn.clicked.connect(self._on_logout)
+        self.statusBar().addPermanentWidget(self._logout_btn)
+
+        self._update_user_info()
 
     def _create_toolbar(self) -> QWidget:
         toolbar = QWidget()
@@ -366,6 +392,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._poll_timer.stop()
+        self._auth_timer.stop()
         # 업데이트 워커 정리
         if self._download_worker:
             self._download_worker.cancel()
@@ -374,6 +401,83 @@ class MainWindow(QMainWindow):
         self.runner.request_stop()
         self.runner.wait(3000)
         event.accept()
+
+    # ── 인증 ──
+
+    def _update_user_info(self):
+        """상태바에 현재 로그인된 이메일 표시."""
+        user = auth.get_current_user()
+        if user and user.get("email"):
+            self._user_label.setText(f"👤 {user['email']}")
+            self._logout_btn.setVisible(True)
+        else:
+            self._user_label.setText("")
+            self._logout_btn.setVisible(False)
+
+    def _periodic_auth_check(self):
+        """4시간 주기로 세션 유효성 재확인 (백그라운드)."""
+        self._auth_worker = AuthWorker(self)
+        self._auth_worker.validation_done.connect(self._on_periodic_auth_result)
+        self._auth_worker.start_validate()
+
+    def _on_periodic_auth_result(self, valid: bool):
+        """주기적 인증 검증 결과 처리."""
+        self._cleanup_worker("_auth_worker")
+        if valid:
+            return
+        # 검증 실패 → 유예 기간 확인
+        if auth.is_within_grace_period():
+            return
+        # 유예 기간도 초과 → 로그인 다이얼로그 재표시
+        self._prompt_relogin("인증이 만료되었습니다.\n다시 로그인해 주세요.")
+
+    def _prompt_relogin(self, message: str):
+        """세션을 초기화하고 로그인 다이얼로그를 표시.
+
+        성공 시 타이머 재시작, 취소 시 앱 종료.
+        """
+        auth.clear_session()
+        self._auth_timer.stop()
+
+        from PySide6.QtWidgets import QDialog
+        from src.ui.widgets.login_dialog import LoginDialog
+        login_dlg = LoginDialog(self)
+        if login_dlg.exec() != QDialog.Accepted:
+            QApplication.quit()
+            return
+
+        # 재로그인 성공 → 타이머 재시작
+        self._auth_timer.start()
+        self._update_user_info()
+        self.statusBar().showMessage("재로그인 완료")
+
+    def _on_logout(self):
+        """로그아웃 → 세션 삭제 → 로그인 다이얼로그 재표시."""
+        # 자동화 진행 중이면 확인
+        if self._automation_active:
+            reply = QMessageBox.warning(
+                self, "로그아웃",
+                "자동화 작업이 진행 중입니다.\n정말 로그아웃하시겠습니까?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        auth.clear_session()
+        self._auth_timer.stop()
+
+        from PySide6.QtWidgets import QDialog
+        from src.ui.widgets.login_dialog import LoginDialog
+        login_dlg = LoginDialog(self)
+        if login_dlg.exec() != QDialog.Accepted:
+            QApplication.quit()
+            return
+
+        # 재로그인 성공 → 타이머 재시작
+        self._auth_timer.start()
+        self._update_user_info()
+        self.statusBar().showMessage("재로그인 완료")
 
     # ── 수임처 관리 ──
 
@@ -447,7 +551,7 @@ class MainWindow(QMainWindow):
             return
         try:
             worker.disconnect()
-        except RuntimeError:
+        except (RuntimeError, TypeError):
             pass
         if worker.isRunning():
             worker.quit()
@@ -456,10 +560,14 @@ class MainWindow(QMainWindow):
         setattr(self, attr_name, None)
 
     def _create_help_menu(self):
-        """상단 '도움말' 메뉴: 업데이트 확인 / 정보"""
+        """상단 '도움말' 메뉴: 업데이트 확인 / 로그아웃 / 정보"""
         menu = self.menuBar().addMenu("도움말")
         act_update = menu.addAction("업데이트 확인")
         act_update.triggered.connect(self._manual_check_for_update)
+        menu.addSeparator()
+        act_logout = menu.addAction("로그아웃")
+        act_logout.triggered.connect(self._on_logout)
+        menu.addSeparator()
         act_about = menu.addAction("정보")
         act_about.triggered.connect(self._show_about)
 

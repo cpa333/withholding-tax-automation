@@ -38,6 +38,9 @@ PORTAL_URLS = {
     "hometax": "https://www.hometax.go.kr/",
 }
 
+# 인증 세션 파일
+AUTH_SESSION_PATH = os.path.join(APP_DATA_DIR, "auth_session.json")
+
 # WEHAGO
 WEHAGO_URL = "https://www.wehago.com/"
 WEHAGO_TAXAGENT_URL = "https://www.wehago.com/tedge/#/taxagent"
