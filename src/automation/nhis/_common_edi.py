@@ -270,6 +270,27 @@ async def search_firm(popup, keyword, search_type="name"):
     type_map = {"name": "사업장명", "number": "사업장관리번호"}
     type_value = "사업장명" if search_type == "name" else "사업장관리번호"
 
+    # 폼 요소 로드 대기
+    for i in range(10):
+        ready = await popup.evaluate("""() => {
+            return !!document.getElementById('srchType')
+                && !!document.getElementById('srchText')
+                && !!document.getElementById('btnSubmit');
+        }""")
+        if ready:
+            break
+        await asyncio.sleep(0.5)
+    else:
+        # 폼 요소가 없으면 현재 DOM 상태 로깅
+        ids = await popup.evaluate("""() => {
+            const inputs = document.querySelectorAll('input, select, button');
+            return Array.from(inputs).map(el =>
+                (el.id || el.name || el.type) + ':' + el.tagName
+            ).join(', ');
+        }""")
+        log(f"  ERROR: 검색 폼 요소를 찾지 못함. DOM: {ids}")
+        return []
+
     # 검색 유형 선택
     await popup.evaluate("""(args) => {
         const sel = document.getElementById('srchType');
@@ -277,6 +298,7 @@ async def search_firm(popup, keyword, search_type="name"):
             for (const opt of sel.options) {
                 if (opt.text.trim() === args.typeValue) {
                     sel.value = opt.value;
+                    sel.dispatchEvent(new Event('change', {bubbles: true}));
                     break;
                 }
             }
@@ -287,7 +309,10 @@ async def search_firm(popup, keyword, search_type="name"):
     await popup.evaluate("""(args) => {
         const input = document.getElementById('srchText');
         if (input) {
-            input.value = args.keyword;
+            const nativeSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype, 'value'
+            ).set;
+            nativeSetter.call(input, args.keyword);
             input.dispatchEvent(new Event('input', {bubbles: true}));
             input.dispatchEvent(new Event('change', {bubbles: true}));
         }
@@ -295,7 +320,8 @@ async def search_firm(popup, keyword, search_type="name"):
 
     # 폼 제출
     await popup.evaluate("""() => {
-        document.getElementById('cPage').value = '1';
+        const cPage = document.getElementById('cPage');
+        if (cPage) cPage.value = '1';
         document.getElementById('btnSubmit').click();
     }""")
     await human_delay(3)
@@ -485,6 +511,39 @@ async def nexacro_set_radio(page, index):
     Returns:
         dict: {ok, value, index, text}
     """
+    # 라디오 컴포넌트 대기 (최대 15초)
+    # 컴포넌트 객체 존재 + index 프로퍼티 접근 가능해야 준비 완료
+    for _ in range(15):
+        has_radio = await page.evaluate("""() => {
+            try {
+                var form = window.nexacro.Application.mainframe.childframe.form;
+                var divBody = form.components.div_body;
+                var radio = divBody.components.rdo_prog_stat;
+                if (!radio) return false;
+                // index가 number면 초기화 완료
+                return typeof radio.index === 'number';
+            } catch(e) { return false; }
+        }""")
+        if has_radio:
+            break
+        await asyncio.sleep(1)
+    else:
+        # 컴포넌트 목록 덤프하여 디버깅
+        components = await page.evaluate("""() => {
+            try {
+                var form = window.nexacro.Application.mainframe.childframe.form;
+                var divBody = form.components.div_body;
+                var names = [];
+                for (var key in divBody.components) {
+                    var c = divBody.components[key];
+                    names.push(key + ':' + (c._type_name || typeof c));
+                }
+                return names;
+            } catch(e) { return ['error: ' + e.message]; }
+        }""")
+        log(f"  rdo_prog_stat 없음. div_body 컴포넌트 목록: {components}")
+        return {"ok": False, "error": f"rdo_prog_stat not found. components: {components}"}
+
     return await page.evaluate("""(targetIdx) => {
         try {
             var n = window.nexacro;
@@ -643,20 +702,138 @@ async def open_received_docs(page, context):
     메인 페이지의 '받은문서' 링크(pageLinkPopup1('201')) 클릭.
     새 탭으로 웹EDI(Nexacro) 페이지가 열림.
 
+    사업장 전환 직후 호출되므로:
+    1) 메인페이지가 완전히 로드될 때까지 대기
+    2) pageLinkPopup1 함수 존재 확인
+    3) 실패 시 재시도 + 대체 방식(링크 직접 클릭)
+
     Returns:
         Page or None: 웹EDI 탭
     """
-    log("받은문서 메뉴 클릭...")
-    await page.evaluate("() => { pageLinkPopup1('201'); }")
+    # ── 1. 메인페이지 로딩 안정 대기 ──
+    log("받은문서 메뉴 클릭 — 페이지 안정화 대기...")
+    for i in range(20):
+        try:
+            ready = await page.evaluate("""() => {
+                if (document.readyState !== 'complete'
+                    && document.readyState !== 'interactive') return false;
+                return typeof pageLinkPopup1 === 'function';
+            }""")
+            if ready:
+                break
+        except Exception:
+            pass
+        await asyncio.sleep(1)
+    else:
+        # pageLinkPopup1이 없으면 대체 방식 시도
+        log("  pageLinkPopup1 함수를 찾지 못함 — 대체 방식 시도")
+        return await _open_received_docs_fallback(page, context)
 
-    for _ in range(15):
+    # ── 2. 새 탭 열기 전 기존 탭 수 기록 ──
+    pages_before = set(id(pg) for pg in context.pages)
+
+    # ── 3. pageLinkPopup1 호출 (최대 3회 재시도) ──
+    for attempt in range(1, 4):
+        log(f"받은문서 메뉴 클릭... (시도 {attempt}/3)")
+        try:
+            await page.evaluate("() => { pageLinkPopup1('201'); }")
+        except Exception as e:
+            log(f"  pageLinkPopup1 호출 오류: {e}")
+            await asyncio.sleep(2)
+            continue
+
+        # 새 탭 대기
+        for i in range(10):
+            await asyncio.sleep(1)
+            for pg in context.pages:
+                if id(pg) not in pages_before and "webedi" in pg.url:
+                    log("  웹EDI 탭 열림")
+                    return pg
+
+        log(f"  시도 {attempt} 실패 — 새 탭 미감지")
+        await asyncio.sleep(2)
+
+    # ── 4. 모든 시도 실패 — 대체 방식 ──
+    log("  pageLinkPopup1 방식 실패 — 대체 방식 시도")
+    return await _open_received_docs_fallback(page, context)
+
+
+async def _open_received_docs_fallback(page, context):
+    """받은문서 대체 진입: pageLinkPopup1 실패 시 링크/버튼 직접 클릭
+
+    '받은문서' 텍스트가 포함된 a 태그 또는 onclick 핸들러가 있는 요소를 찾아 클릭.
+    """
+    pages_before = set(id(pg) for pg in context.pages)
+
+    # 방법 1: '받은문서' 텍스트가 있는 클릭 가능한 요소 찾기
+    clicked = await page.evaluate("""() => {
+        // img alt 텍스트 또는 a 태그 텍스트에서 '받은문서' 찾기
+        const selectors = [
+            'img[alt*="받은문서"]',
+            'a:has(img[alt*="받은문서"])',
+            'a[onclick*="201"]',
+            'area[onclick*="201"]',
+        ];
+        for (const sel of selectors) {
+            try {
+                const el = document.querySelector(sel);
+                if (el) { el.click(); return 'selector: ' + sel; }
+            } catch(e) {}
+        }
+        // 텍스트 기반 탐색
+        const all = document.querySelectorAll('a, area, img, [onclick]');
+        for (const el of all) {
+            const text = (el.textContent || el.alt || el.title || '').trim();
+            const onclick = el.getAttribute('onclick') || '';
+            if (text.includes('받은문서') || onclick.includes("201")) {
+                el.click();
+                return 'text: ' + text.substring(0, 30);
+            }
+        }
+        // 이미지 맵 area 탐색
+        const areas = document.querySelectorAll('area');
+        for (const area of areas) {
+            const href = area.getAttribute('href') || '';
+            const onclick = area.getAttribute('onclick') || '';
+            const alt = area.getAttribute('alt') || '';
+            if (href.includes('201') || onclick.includes('201') || alt.includes('받은문서')) {
+                area.click();
+                return 'area: ' + alt;
+            }
+        }
+        return null;
+    }""")
+
+    if clicked:
+        log(f"  대체 클릭 성공: {clicked}")
+    else:
+        # 디버깅: 현재 페이지에서 클릭 가능한 요소 덤프
+        elements_info = await page.evaluate("""() => {
+            const results = [];
+            document.querySelectorAll('a, area, img, [onclick]').forEach(el => {
+                const text = (el.textContent || '').trim().substring(0, 40);
+                const alt = (el.alt || '').trim();
+                const onclick = (el.getAttribute('onclick') || '').substring(0, 60);
+                if (text || alt || onclick) {
+                    results.push({tag: el.tagName, text, alt, onclick});
+                }
+            });
+            return results;
+        }""")
+        log(f"  ERROR: 받은문서 요소를 찾지 못함. 페이지 요소 목록:")
+        for el in elements_info[:30]:
+            log(f"    {el['tag']} text=\"{el['text']}\" alt=\"{el['alt']}\" onclick=\"{el['onclick']}\"")
+        return None
+
+    # 새 탭 대기
+    for i in range(15):
         await asyncio.sleep(1)
         for pg in context.pages:
-            if "webedi" in pg.url:
-                log("  웹EDI 탭 열림")
+            if id(pg) not in pages_before and "webedi" in pg.url:
+                log("  웹EDI 탭 열림 (대체 방식)")
                 return pg
 
-    log("  ERROR: 웹EDI 탭이 열리지 않았습니다.")
+    log("  ERROR: 대체 방식으로도 웹EDI 탭이 열리지 않았습니다.")
     return None
 
 
@@ -917,6 +1094,20 @@ async def run_single_firm_workflow(page, context, firm_name,
         bool: 성공 여부
     """
     save_dir = make_save_dir("국민건강보험", firm_name, year=year, month=month)
+
+    # 사업장 전환 직후 메인페이지 안정화 대기
+    log("  메인페이지 안정화 대기...")
+    for i in range(15):
+        try:
+            ready = await page.evaluate("""() => {
+                return document.readyState === 'complete'
+                    || document.readyState === 'interactive';
+            }""")
+            if ready:
+                break
+        except Exception:
+            pass
+        await asyncio.sleep(1)
 
     # Step 1: 받은문서 열기
     log("  [1/5] 받은문서 열기...")
