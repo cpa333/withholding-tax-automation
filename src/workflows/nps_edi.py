@@ -54,15 +54,21 @@ class NpsEdiWorkflow(BaseWorkflow):
         # 결정내역 이동
         if not state.should_skip_step(job_id, "navigate_to_decision"):
             state.before_step(job_id, "navigate_to_decision", 1)
-            await navigate_to_decision_details(page)
+            ok = await navigate_to_decision_details(page)
+            if not ok:
+                state.fail_step(job_id, "navigate_to_decision", "결정내역 페이지 이동 실패")
+                return False
             await human_delay(2)
             state.after_step(job_id, "navigate_to_decision")
 
         # 2차 상세 열기
         if not state.should_skip_step(job_id, "open_detail"):
             state.before_step(job_id, "open_detail", 2)
-            await open_decision_detail(page, round_filter="2차",
-                                       year=year, month=month)
+            ok = await open_decision_detail(page, round_filter="2차",
+                                            year=year, month=month)
+            if not ok:
+                state.fail_step(job_id, "open_detail", "2차 결정내역 상세 진입 실패")
+                return False
             await human_delay(2)
             state.after_step(job_id, "open_detail")
 

@@ -319,6 +319,7 @@ async def nexacro_wait_and_click(page, element_id, max_wait=10):
     모달 팝업 등 비동기 렌더링되는 요소에 사용.
     nexacro_click_button과 동일한 클릭 방식이지만,
     클릭 전 요소 존재를 최대 max_wait초까지 대기.
+    페이지 이동 등 evaluate 예외 시 자동 재시도.
 
     Args:
         page: Playwright page
@@ -329,16 +330,22 @@ async def nexacro_wait_and_click(page, element_id, max_wait=10):
         dict: {ok: true, text: ...} or {error: ...}
     """
     for i in range(max_wait):
-        found = await page.evaluate(
-            '(elId) => !!document.getElementById(elId)', element_id
-        )
-        if found:
-            break
+        try:
+            found = await page.evaluate(
+                '(elId) => !!document.getElementById(elId)', element_id
+            )
+            if found:
+                break
+        except Exception:
+            pass  # 페이지 이동 중 evaluate 실패 — 재시도
         await asyncio.sleep(1)
     else:
         return {"error": f"element not found after {max_wait}s: {element_id}"}
 
-    return await nexacro_click_button(page, element_id)
+    try:
+        return await nexacro_click_button(page, element_id)
+    except Exception as e:
+        return {"error": f"click failed: {e}"}
 
 
 async def navigate_to_decision_details(page):
@@ -464,20 +471,30 @@ async def output_with_full_ssn(page):
 
     출력 옵션 모달에서 주민번호를 전체표출로 선택 후 확인.
     Crownix rdPreview 새 탭이 열림.
+    최대 3회 재시도 — 버튼이 없으면 잠시 대기 후 재시도.
     """
-    # 기존 출력 모달이 열려있으면 취소로 닫기 (배치 실행 시 상태 누적 방지)
-    existing_modal = await page.evaluate(
-        '(elId) => !!document.getElementById(elId)', BTN_MODAL_CONFIRM
-    )
-    if existing_modal:
-        log("  기존 출력 모달 감지 — 취소로 닫기...")
-        await nexacro_click_button(page, BTN_MODAL_CANCEL)
-        await human_delay(1)
+    for attempt in range(1, 4):
+        # 기존 출력 모달이 열려있으면 취소로 닫기 (배치 실행 시 상태 누적 방지)
+        try:
+            existing_modal = await page.evaluate(
+                '(elId) => !!document.getElementById(elId)', BTN_MODAL_CONFIRM
+            )
+            if existing_modal:
+                log("  기존 출력 모달 감지 — 취소로 닫기...")
+                await nexacro_click_button(page, BTN_MODAL_CANCEL)
+                await human_delay(1)
+        except Exception:
+            pass
 
-    log("출력 버튼 클릭...")
-    result = await nexacro_wait_and_click(page, BTN_OUTPUT, max_wait=10)
-    if not result.get("ok"):
-        log(f"  ERROR: 출력 버튼 클릭 실패 - {result}")
+        log(f"출력 버튼 클릭... (시도 {attempt}/3)")
+        result = await nexacro_wait_and_click(page, BTN_OUTPUT, max_wait=10)
+        if result.get("ok"):
+            break
+        if attempt < 3:
+            log(f"  출력 버튼 대기 실패 — 3초 후 재시도...")
+            await human_delay(3)
+    else:
+        log(f"  ERROR: 출력 버튼 클릭 실패 (3회 시도) - {result}")
         return False
     await human_delay(2)
 
