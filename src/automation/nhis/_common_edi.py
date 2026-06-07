@@ -24,6 +24,10 @@ GRID_RECEIVED = "mainframe_childframe_form_div_body_grid_list"
 # 콤보박스 ID
 CBO_DOCID = "mainframe_childframe_form_div_body_cbo_docid"
 
+# 라디오 버튼 ID
+RDO_PROG_STAT = "mainframe_childframe_form_div_body_rdo_prog_stat"
+RADIO_ITEMS = {0: "전체", 1: "신규", 2: "열람"}
+
 # 인쇄 버튼 ID
 BTN_PRINT = "mainframe_childframe_form_div_top_img_print"
 
@@ -499,10 +503,10 @@ async def wait_for_nexacro_ready(page):
 
 
 async def nexacro_set_radio(page, index):
-    """Nexacro 라디오 컴포넌트를 내부 API로 선택 (dispatchEvent 대신)
+    """Nexacro 라디오 컴포넌트를 DOM 클릭 + Nexacro 이벤트로 선택
 
-    set_index()로 내부 상태 + 시각 변경 후
-    on_fire_onitemchanged()로 그리드 데이터 리로드 트리거.
+    Phase 1: DOM 기반 클릭 (단일 evaluate — 경쟁 조건 없음)
+    Phase 2: Nexacro API로 onitemchanged 트리거 (최선 처리)
 
     Args:
         page: 웹EDI 탭
@@ -511,65 +515,86 @@ async def nexacro_set_radio(page, index):
     Returns:
         dict: {ok, value, index, text}
     """
-    # 라디오 컴포넌트 대기 (최대 15초)
-    # 컴포넌트 객체 존재 + index 프로퍼티 접근 가능해야 준비 완료
-    for _ in range(15):
-        has_radio = await page.evaluate("""() => {
+    target_text = RADIO_ITEMS.get(index)
+    if not target_text:
+        return {"ok": False, "error": f"Unknown radio index: {index}"}
+
+    # ── Phase 1: DOM 클릭 (단일 evaluate, 안정적) ──────────────────────
+    click_result = await page.evaluate("""(args) => {
+        var container = document.getElementById(args.radioId);
+        if (!container) {
+            // Fallback: Nexacro 컴포넌트 이름으로 DOM 요소 검색
+            var candidates = document.querySelectorAll('[id*=rdo_prog_stat]');
+            if (candidates.length > 0) container = candidates[0];
+        }
+        if (!container) return {ok: false, error: 'radio container not found'};
+
+        var items = container.querySelectorAll('div[id$="_item"]');
+        for (var item of items) {
+            var textEl = item.querySelector('[id*=TextBoxElement]');
+            if (textEl && textEl.textContent.trim() === args.targetText) {
+                var rect = item.getBoundingClientRect();
+                var cx = rect.x + rect.width / 2 + (Math.random() * 4 - 2);
+                var cy = rect.y + rect.height / 2 + (Math.random() * 4 - 2);
+                var base = {
+                    bubbles: true, cancelable: true, view: window,
+                    screenX: cx, screenY: cy, clientX: cx, clientY: cy,
+                    button: 0, buttons: 1, relatedTarget: null
+                };
+                item.dispatchEvent(new MouseEvent('mousemove', {...base, detail: 0, buttons: 0}));
+                var t = performance.now();
+                while (performance.now() - t < 30 + Math.random() * 50) {}
+                item.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
+                item.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
+                item.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
+                return {ok: true, clicked: args.targetText};
+            }
+        }
+        return {ok: false, error: 'item not found: ' + args.targetText};
+    }""", {"radioId": RDO_PROG_STAT, "targetText": target_text})
+
+    if not click_result.get("ok"):
+        log(f"  ERROR: 라디오 DOM 클릭 실패 - {click_result}")
+        return click_result
+
+    # ── Phase 2: Nexacro API onitemchanged 트리거 (최대 3회 재시도) ───
+    for attempt in range(3):
+        await asyncio.sleep(0.5)
+        result = await page.evaluate("""(targetIdx) => {
             try {
-                var form = window.nexacro.Application.mainframe.childframe.form;
+                var n = window.nexacro;
+                if (!n || !n.Application) return null;
+                var form = n.Application.mainframe.childframe.form;
                 var divBody = form.components.div_body;
                 var radio = divBody.components.rdo_prog_stat;
-                if (!radio) return false;
-                // index가 number면 초기화 완료
-                return typeof radio.index === 'number';
-            } catch(e) { return false; }
-        }""")
-        if has_radio:
-            break
-        await asyncio.sleep(1)
-    else:
-        # 컴포넌트 목록 덤프하여 디버깅
-        components = await page.evaluate("""() => {
-            try {
-                var form = window.nexacro.Application.mainframe.childframe.form;
-                var divBody = form.components.div_body;
-                var names = [];
-                for (var key in divBody.components) {
-                    var c = divBody.components[key];
-                    names.push(key + ':' + (c._type_name || typeof c));
+                if (!radio || typeof radio.index !== 'number') return null;
+
+                var oldIndex = radio.index;
+                var oldValue = radio.value;
+
+                // DOM 클릭으로 이미 변경되었을 수 있으니, 다르면 보정
+                if (radio.index !== targetIdx) {
+                    radio.set_index(targetIdx);
                 }
-                return names;
-            } catch(e) { return ['error: ' + e.message]; }
-        }""")
-        log(f"  rdo_prog_stat 없음. div_body 컴포넌트 목록: {components}")
-        return {"ok": False, "error": f"rdo_prog_stat not found. components: {components}"}
 
-    return await page.evaluate("""(targetIdx) => {
-        try {
-            var n = window.nexacro;
-            var app = n.Application;
-            var mf = app.mainframe;
-            var cf = mf.childframe;
-            var form = cf.form;
-            var divBody = form.components.div_body;
-            var radio = divBody.components.rdo_prog_stat;
+                var newValue = radio.value;
+                var newIndex = radio.index;
+                var newText = radio.text;
 
-            var oldIndex = radio.index;
-            var oldValue = radio.value;
+                radio.on_fire_onitemchanged(oldValue, newValue, oldIndex, newIndex);
 
-            radio.set_index(targetIdx);
+                return {ok: true, value: newValue, index: newIndex, text: newText};
+            } catch(e) {
+                return null;  // null = 재시도
+            }
+        }""", index)
 
-            var newValue = radio.value;
-            var newIndex = radio.index;
-            var newText = radio.text;
+        if result is not None:
+            return result
 
-            radio.on_fire_onitemchanged(oldValue, newValue, oldIndex, newIndex);
-
-            return {ok: true, value: newValue, index: newIndex, text: newText};
-        } catch(e) {
-            return {ok: false, error: e.message};
-        }
-    }""", index)
+    # Phase 2 실패해도 Phase 1 DOM 클릭은 성공
+    log("  WARN: Nexacro onitemchanged 트리거 실패 (DOM 클릭은 성공)")
+    return {"ok": True, "value": None, "index": index, "text": target_text}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

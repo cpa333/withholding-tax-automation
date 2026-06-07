@@ -1,0 +1,49 @@
+{
+  "access_token": "eyJhbGciOiJFUzI1NiIsImtpZCI6IjY1NDliZDhkLWVkNGItNGU1NS1iNmZhLWQ2N2JkNGNkZTk3MyIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2p3bWpzZ3RianRxdnB0aGl1d3l3LnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMzA3YjgxZi03NmY1LTQ1OGQtYTE5ZS1mYzlmNDVlM2ZhMTUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzgwODA0MzAzLCJpYXQiOjE3ODA4MDA3MDMsImVtYWlsIjoic2VleW9uZzk4N0BnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc4MDgwMDcwM31dLCJzZXNzaW9uX2lkIjoiMDRiZjA0ZGEtYTMyZi00NGVmLTk3MzgtNDljMDgzMWY2NDE4IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.UODC-uUG6GWnKpVZSkTFz3uDEytijhIODcsizyjSYMgHwlsTOVl7-Z435-hTiESxYQHEvrnbJJbJ541XXN4lnA",
+  "token_type": "bearer",
+  "expires_in": 3600,
+  "expires_at": 1780804303,
+  "refresh_token": "ffjv4sppjdug",
+  "user": {
+    "id": "3307b81f-76f5-458d-a19e-fc9f45e3fa15",
+    "aud": "authenticated",
+    "role": "authenticated",
+    "email": "seeyong987@gmail.com",
+    "email_confirmed_at": "2026-06-02T10:02:32.248399Z",
+    "phone": "",
+    "confirmed_at": "2026-06-02T10:02:32.248399Z",
+    "last_sign_in_at": "2026-06-07T02:51:43.304974508Z",
+    "app_metadata": {
+      "provider": "email",
+      "providers": [
+        "email"
+      ]
+    },
+    "user_metadata": {
+      "email_verified": true
+    },
+    "identities": [
+      {
+        "identity_id": "03eab685-adf3-4b39-9c1f-730149e41fd1",
+        "id": "3307b81f-76f5-458d-a19e-fc9f45e3fa15",
+        "user_id": "3307b81f-76f5-458d-a19e-fc9f45e3fa15",
+        "identity_data": {
+          "email": "seeyong987@gmail.com",
+          "email_verified": false,
+          "phone_verified": false,
+          "sub": "3307b81f-76f5-458d-a19e-fc9f45e3fa15"
+        },
+        "provider": "email",
+        "last_sign_in_at": "2026-06-02T10:02:32.240053Z",
+        "created_at": "2026-06-02T10:02:32.240114Z",
+        "updated_at": "2026-06-02T10:02:32.240114Z",
+        "email": "seeyong987@gmail.com"
+      }
+    ],
+    "created_at": "2026-06-02T10:02:32.221027Z",
+    "updated_at": "2026-06-07T02:51:43.370976Z",
+    "is_anonymous": false
+  },
+  "weak_password": null,
+  "last_verified_at": "2026-06-07T03:26:02.506594+00:00"
+}
