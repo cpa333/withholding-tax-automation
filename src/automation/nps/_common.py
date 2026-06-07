@@ -313,6 +313,34 @@ async def nexacro_click_button(page, element_id):
     }""", element_id)
 
 
+async def nexacro_wait_and_click(page, element_id, max_wait=10):
+    """Nexacro 요소가 DOM에 나타날 때까지 대기 후 클릭
+
+    모달 팝업 등 비동기 렌더링되는 요소에 사용.
+    nexacro_click_button과 동일한 클릭 방식이지만,
+    클릭 전 요소 존재를 최대 max_wait초까지 대기.
+
+    Args:
+        page: Playwright page
+        element_id: Nexacro 버튼 element ID
+        max_wait: 최대 대기 시간(초)
+
+    Returns:
+        dict: {ok: true, text: ...} or {error: ...}
+    """
+    for i in range(max_wait):
+        found = await page.evaluate(
+            '(elId) => !!document.getElementById(elId)', element_id
+        )
+        if found:
+            break
+        await asyncio.sleep(1)
+    else:
+        return {"error": f"element not found after {max_wait}s: {element_id}"}
+
+    return await nexacro_click_button(page, element_id)
+
+
 async def navigate_to_decision_details(page):
     """결정내역 > 국민연금보험료 결정내역 메뉴로 이동
 
@@ -445,11 +473,11 @@ async def output_with_full_ssn(page):
     await human_delay(2)
 
     log("주민번호 전체표출 선택...")
-    await nexacro_click_button(page, RADIO_FULL_SSN)
+    await nexacro_wait_and_click(page, RADIO_FULL_SSN)
     await human_delay(1)
 
     log("확인 클릭...")
-    result = await nexacro_click_button(page, BTN_MODAL_CONFIRM)
+    result = await nexacro_wait_and_click(page, BTN_MODAL_CONFIRM)
     if not result.get("ok"):
         log(f"  ERROR: 확인 클릭 실패 - {result}")
         return False
@@ -565,11 +593,11 @@ async def save_excel(page, context, save_dir, filename):
     await human_delay(2)
 
     log("주민번호 전체표출 선택 (엑셀 모달)...")
-    await nexacro_click_button(page, EXCEL_RADIO_FULL_SSN)
+    await nexacro_wait_and_click(page, EXCEL_RADIO_FULL_SSN)
     await human_delay(1)
 
     log("확인 클릭...")
-    result = await nexacro_click_button(page, EXCEL_BTN_CONFIRM)
+    result = await nexacro_wait_and_click(page, EXCEL_BTN_CONFIRM)
     if not result.get("ok"):
         log(f"  ERROR: 확인 클릭 실패 - {result}")
         return None
@@ -630,11 +658,11 @@ async def save_integrated(page, context, save_dir, filename):
     await human_delay(2)
 
     log("주민번호 전체표출 선택 (통합 모달)...")
-    await nexacro_click_button(page, INTEGRATED_RADIO_FULL_SSN)
+    await nexacro_wait_and_click(page, INTEGRATED_RADIO_FULL_SSN)
     await human_delay(1)
 
     log("확인 클릭...")
-    result = await nexacro_click_button(page, INTEGRATED_BTN_CONFIRM)
+    result = await nexacro_wait_and_click(page, INTEGRATED_BTN_CONFIRM)
     if not result.get("ok"):
         log(f"  ERROR: 확인 클릭 실패 - {result}")
         return None
