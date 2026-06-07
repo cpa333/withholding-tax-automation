@@ -179,20 +179,30 @@ async def nexacro_dblclick_cell(page, grid_id, row, col):
     cell_id = f"{grid_id}.body.gridrow_{row}.cell_{row}_{col}"
     text_id = f"{cell_id}:text"
 
-    # 실제 마우스 더블클릭 (가장 안정적)
+    # 뷰포트 내: 실제 마우스 더블클릭, 뷰포트 밖: 합성 이벤트
     try:
-        rect = await page.evaluate("""(ids) => {
+        info = await page.evaluate("""(ids) => {
             const target = document.getElementById(ids.textId) || document.getElementById(ids.cellId);
             if (!target) return null;
             const r = target.getBoundingClientRect();
-            return {x: r.x, y: r.y, w: r.width, h: r.height, text: target.textContent.trim()};
+            const inViewport = r.top < window.innerHeight && r.bottom > 0
+                            && r.left < window.innerWidth && r.right > 0;
+            return {
+                x: r.x, y: r.y, w: r.width, h: r.height,
+                inViewport: inViewport,
+                text: target.textContent.trim()
+            };
         }""", {"cellId": cell_id, "textId": text_id})
-        if rect:
+
+        if not info:
+            return {"error": "cell not found"}
+
+        if info.get('inViewport') and info['w'] > 0 and info['h'] > 0:
             import random
-            cx = rect['x'] + rect['w'] / 2 + random.uniform(-2, 2)
-            cy = rect['y'] + rect['h'] / 2 + random.uniform(-2, 2)
+            cx = info['x'] + info['w'] / 2 + random.uniform(-2, 2)
+            cy = info['y'] + info['h'] / 2 + random.uniform(-2, 2)
             await page.mouse.dblclick(cx, cy)
-            return {"ok": True, "text": rect.get('text', '')}
+            return {"ok": True, "text": info.get('text', '')}
     except Exception:
         pass
 
@@ -296,34 +306,46 @@ async def nexacro_get_grid_data(page, grid_id):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def nexacro_click_button(page, element_id):
-    """Nexacro 버튼에 실제 마우스 클릭 발생
+    """Nexacro 버튼 클릭 — 뷰포트 내: 실제 마우스, 뷰포트 밖: 합성 이벤트
 
-    Nexacro 프레임워크는 합성 dispatchEvent를 무시하는 경우가 있어
-    Playwright의 page.mouse.click(실제 마우스 입력)을 우선 사용.
-    요소를 찾지 못하면 합성 이벤트로 폴백.
+    해상도/줌 무관하게 동작:
+    - getBoundingClientRect()는 뷰포트 기준 CSS px 반환
+    - page.mouse.click도 동일한 CSS px 좌표계 사용
+    - 요소가 뷰포트 밖(스크롤 등)이면 합성 dispatchEvent로 폴백
 
     Args:
         page: Playwright page
         element_id: Nexacro 버튼 element ID
     """
-    # 1) 실제 마우스 클릭 (가장 안정적)
+    # 1) 요소 위치 확인 + 뷰포트 내 판정
     try:
-        rect = await page.evaluate("""(elId) => {
+        info = await page.evaluate("""(elId) => {
             const btn = document.getElementById(elId);
             if (!btn) return null;
             const r = btn.getBoundingClientRect();
-            return {x: r.x, y: r.y, w: r.width, h: r.height, text: btn.textContent.trim().substring(0, 40)};
+            const inViewport = r.top < window.innerHeight && r.bottom > 0
+                            && r.left < window.innerWidth && r.right > 0;
+            return {
+                x: r.x, y: r.y, w: r.width, h: r.height,
+                inViewport: inViewport,
+                text: btn.textContent.trim().substring(0, 40)
+            };
         }""", element_id)
-        if rect:
+
+        if not info:
+            return {"error": f"element not found: {element_id}"}
+
+        if info.get('inViewport') and info['w'] > 0 and info['h'] > 0:
+            # 뷰포트 내: 실제 마우스 클릭 (해상도 무관)
             import random
-            cx = rect['x'] + rect['w'] / 2 + random.uniform(-2, 2)
-            cy = rect['y'] + rect['h'] / 2 + random.uniform(-2, 2)
+            cx = info['x'] + info['w'] / 2 + random.uniform(-2, 2)
+            cy = info['y'] + info['h'] / 2 + random.uniform(-2, 2)
             await page.mouse.click(cx, cy)
-            return {"ok": True, "text": rect.get('text', '')}
+            return {"ok": True, "text": info.get('text', '')}
     except Exception:
         pass
 
-    # 2) 폴백: 합성 이벤트 dispatch
+    # 2) 폴백: 합성 이벤트 dispatch (뷰포트 밖/스크롤된 요소)
     return await page.evaluate("""(elId) => {
         const btn = document.getElementById(elId);
         if (!btn) return {error: 'element not found: ' + elId};
