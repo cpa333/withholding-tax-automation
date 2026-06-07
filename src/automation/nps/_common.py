@@ -465,8 +465,17 @@ async def output_with_full_ssn(page):
     출력 옵션 모달에서 주민번호를 전체표출로 선택 후 확인.
     Crownix rdPreview 새 탭이 열림.
     """
+    # 기존 출력 모달이 열려있으면 취소로 닫기 (배치 실행 시 상태 누적 방지)
+    existing_modal = await page.evaluate(
+        '(elId) => !!document.getElementById(elId)', BTN_MODAL_CONFIRM
+    )
+    if existing_modal:
+        log("  기존 출력 모달 감지 — 취소로 닫기...")
+        await nexacro_click_button(page, BTN_MODAL_CANCEL)
+        await human_delay(1)
+
     log("출력 버튼 클릭...")
-    result = await nexacro_click_button(page, BTN_OUTPUT)
+    result = await nexacro_wait_and_click(page, BTN_OUTPUT, max_wait=10)
     if not result.get("ok"):
         log(f"  ERROR: 출력 버튼 클릭 실패 - {result}")
         return False
@@ -576,6 +585,16 @@ async def save_excel(page, context, save_dir, filename):
     """
     log("엑셀저장 버튼 클릭...")
 
+    # 기존 엑셀 모달이 열려있으면 닫기
+    existing_modal = await page.evaluate(
+        '(elId) => !!document.getElementById(elId)', EXCEL_BTN_CONFIRM
+    )
+    if existing_modal:
+        log("  기존 엑셀 모달 감지 — 닫기...")
+        cancel_id = f"{EXCEL_MODAL_PREFIX}.div00_00.form.btn00"
+        await nexacro_click_button(page, cancel_id)
+        await human_delay(1)
+
     os.makedirs(save_dir, exist_ok=True)
     cdp = await context.new_cdp_session(page)
     await cdp.send("Browser.setDownloadBehavior", {
@@ -640,6 +659,16 @@ async def save_integrated(page, context, save_dir, filename):
         str or None: 저장된 파일 경로, 실패 시 None
     """
     log("통합저장 버튼 클릭...")
+
+    # 기존 통합 모달이 열려있으면 닫기
+    existing_modal = await page.evaluate(
+        '(elId) => !!document.getElementById(elId)', INTEGRATED_BTN_CONFIRM
+    )
+    if existing_modal:
+        log("  기존 통합 모달 감지 — 닫기...")
+        cancel_id = f"{INTEGRATED_MODAL_PREFIX}.div00_00.form.btn00"
+        await nexacro_click_button(page, cancel_id)
+        await human_delay(1)
 
     os.makedirs(save_dir, exist_ok=True)
     cdp = await context.new_cdp_session(page)
@@ -784,17 +813,27 @@ async def _search_workplace_in_modal(page, search_text, search_by_mgmt_no=False)
         "mainframe.VFrameSet.FrameSdi.ChangeBusi"
         ".form.divPopBg.form.divPopWork.form.div01.form"
     )
-    # 검색 필드 콤보 드롭다운 열기 → 항목 선택
+    # 1) 검색 필드 콤보 드롭다운 열기
     await nexacro_click_button(page, f"{MODAL_SEARCH}.cbo00.dropbutton")
-    await human_delay(0.5)
-    item = "item_1" if search_by_mgmt_no else "item_0"
-    await nexacro_click_button(page, f"{MODAL_SEARCH}.cbo00.combolist.{item}")
-    await human_delay(0.5)
+    await human_delay(1)
 
-    # 검색 입력란(edt08)에 텍스트 입력
+    # 2) combolist 항목 대기 후 클릭
+    item = "item_1" if search_by_mgmt_no else "item_0"
+    result = await nexacro_wait_and_click(
+        page, f"{MODAL_SEARCH}.cbo00.combolist.{item}", max_wait=5
+    )
+    if not result.get("ok"):
+        log(f"  WARN: 드롭다운 항목 선택 실패 - {result}")
+    await human_delay(1)
+
+    # 3) 검색 입력란(edt08)에 기존값 초기화 후 텍스트 입력
     await page.evaluate("""(args) => {
         const input = document.getElementById(args.inputId + ":input");
         if (input) {
+            // 기존값 초기화
+            input.value = '';
+            input.dispatchEvent(new Event("input", {bubbles: true}));
+            // 새 값 입력
             input.value = args.text;
             input.dispatchEvent(new Event("input", {bubbles: true}));
             input.dispatchEvent(new Event("change", {bubbles: true}));
@@ -804,7 +843,7 @@ async def _search_workplace_in_modal(page, search_text, search_by_mgmt_no=False)
     }""", {"inputId": f"{MODAL_SEARCH}.edt08", "text": search_text})
     await human_delay(0.5)
 
-    # 검색 버튼(btn00) 클릭
+    # 4) 검색 버튼(btn00) 클릭
     await nexacro_click_button(page, f"{MODAL_SEARCH}.btn00")
 
 
