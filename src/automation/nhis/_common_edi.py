@@ -505,7 +505,10 @@ async def wait_for_nexacro_ready(page):
 async def nexacro_set_radio(page, index):
     """Nexacro 라디오 컴포넌트를 DOM 클릭 + Nexacro 이벤트로 선택
 
-    Phase 1: DOM 기반 클릭 (단일 evaluate — 경쟁 조건 없음)
+    Nexacro 컴포넌트 객체가 준비되어도 DOM 렌더링이 늦을 수 있으므로
+    DOM 컨테이너가 나타날 때까지 대기 후 클릭.
+
+    Phase 1: DOM 컨테이너 대기 + 클릭 (단일 evaluate)
     Phase 2: Nexacro API로 onitemchanged 트리거 (최선 처리)
 
     Args:
@@ -519,11 +522,27 @@ async def nexacro_set_radio(page, index):
     if not target_text:
         return {"ok": False, "error": f"Unknown radio index: {index}"}
 
+    # ── Phase 0: DOM 컨테이너 렌더링 대기 (최대 15초) ─────────────────
+    # Nexacro 컴포넌트 객체는 존재해도 DOM 렌더링이 비동기로 늦어질 수 있음
+    log(f"  라디오 DOM 컨테이너 대기...")
+    for i in range(15):
+        found = await page.evaluate("""(radioId) => {
+            return !!document.getElementById(radioId)
+                || document.querySelectorAll('[id*=rdo_prog_stat]').length > 0;
+        }""", RDO_PROG_STAT)
+        if found:
+            log(f"  라디오 DOM 준비 완료 ({i+1}초)")
+            break
+        await asyncio.sleep(1)
+    else:
+        # DOM도 없고 Nexacro API도 안 되면 진짜 실패
+        log("  ERROR: 라디오 DOM 컨테이너 대기 시간 초과 (15초)")
+        return {"ok": False, "error": "radio container not found after 15s wait"}
+
     # ── Phase 1: DOM 클릭 (단일 evaluate, 안정적) ──────────────────────
     click_result = await page.evaluate("""(args) => {
         var container = document.getElementById(args.radioId);
         if (!container) {
-            // Fallback: Nexacro 컴포넌트 이름으로 DOM 요소 검색
             var candidates = document.querySelectorAll('[id*=rdo_prog_stat]');
             if (candidates.length > 0) container = candidates[0];
         }
