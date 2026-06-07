@@ -179,6 +179,24 @@ async def nexacro_dblclick_cell(page, grid_id, row, col):
     cell_id = f"{grid_id}.body.gridrow_{row}.cell_{row}_{col}"
     text_id = f"{cell_id}:text"
 
+    # 실제 마우스 더블클릭 (가장 안정적)
+    try:
+        rect = await page.evaluate("""(ids) => {
+            const target = document.getElementById(ids.textId) || document.getElementById(ids.cellId);
+            if (!target) return null;
+            const r = target.getBoundingClientRect();
+            return {x: r.x, y: r.y, w: r.width, h: r.height, text: target.textContent.trim()};
+        }""", {"cellId": cell_id, "textId": text_id})
+        if rect:
+            import random
+            cx = rect['x'] + rect['w'] / 2 + random.uniform(-2, 2)
+            cy = rect['y'] + rect['h'] / 2 + random.uniform(-2, 2)
+            await page.mouse.dblclick(cx, cy)
+            return {"ok": True, "text": rect.get('text', '')}
+    except Exception:
+        pass
+
+    # 폴백: 합성 이벤트 dispatch
     return await page.evaluate("""(ids) => {
         const target = document.getElementById(ids.textId) || document.getElementById(ids.cellId);
         if (!target) return {error: 'cell not found'};
@@ -278,15 +296,34 @@ async def nexacro_get_grid_data(page, grid_id):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def nexacro_click_button(page, element_id):
-    """Nexacro 버튼에 mousedown/mouseup/click 이벤트 발생
+    """Nexacro 버튼에 실제 마우스 클릭 발생
 
-    Nexacro 프레임워크의 버튼은 일반 DOM click을 무시하므로,
-    이벤트를 직접 dispatch 해야 함.
+    Nexacro 프레임워크는 합성 dispatchEvent를 무시하는 경우가 있어
+    Playwright의 page.mouse.click(실제 마우스 입력)을 우선 사용.
+    요소를 찾지 못하면 합성 이벤트로 폴백.
 
     Args:
         page: Playwright page
         element_id: Nexacro 버튼 element ID
     """
+    # 1) 실제 마우스 클릭 (가장 안정적)
+    try:
+        rect = await page.evaluate("""(elId) => {
+            const btn = document.getElementById(elId);
+            if (!btn) return null;
+            const r = btn.getBoundingClientRect();
+            return {x: r.x, y: r.y, w: r.width, h: r.height, text: btn.textContent.trim().substring(0, 40)};
+        }""", element_id)
+        if rect:
+            import random
+            cx = rect['x'] + rect['w'] / 2 + random.uniform(-2, 2)
+            cy = rect['y'] + rect['h'] / 2 + random.uniform(-2, 2)
+            await page.mouse.click(cx, cy)
+            return {"ok": True, "text": rect.get('text', '')}
+    except Exception:
+        pass
+
+    # 2) 폴백: 합성 이벤트 dispatch
     return await page.evaluate("""(elId) => {
         const btn = document.getElementById(elId);
         if (!btn) return {error: 'element not found: ' + elId};
