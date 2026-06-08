@@ -61,10 +61,12 @@ async def download_excel(page, save_dir="."):
     return os.path.abspath(save_path)
 
 
-def convert_for_upload(download_path):
+def convert_for_upload(download_path, *, nhis_data=None, nps_member_data=None,
+                       nps_retro_data=None, nps_govt_data=None):
     """다운로드 엑셀을 WEHAGO 업로드 양식으로 변환
 
     2행 헤더 평탄화, 합계 행 제거, 사원코드 4자리 0-pad.
+    raw data(NHIS/NPS)가 제공되면 공제항목에 덮어쓰기.
     """
     wb_src = openpyxl.load_workbook(download_path)
     ws_src = wb_src["Sheet1"]
@@ -115,6 +117,22 @@ def convert_for_upload(download_path):
     upload_path = f"{base}_업로드{ext}"
     wb_new.save(upload_path)
     log(f"  변환 완료: {upload_path}")
+
+    # ── Raw data 병합 (옵셔널) ──────────────────────────────────
+    if nhis_data or nps_member_data:
+        try:
+            from src.utils.data_merger import apply_raw_data
+            merge_result = apply_raw_data(
+                upload_path, nhis_data, nps_member_data,
+                nps_retro_data, nps_govt_data,
+            )
+            log(f"  원천데이터 반영: {merge_result.employees_matched}명 매칭"
+                f" (NHIS {merge_result.nhis_applied}명, NPS {merge_result.nps_applied}명)")
+            for w in merge_result.warnings:
+                log(f"  WARN: {w}")
+        except Exception as e:
+            log(f"  WARN: 원천데이터 병합 실패 (무시): {e}")
+
     return os.path.abspath(upload_path)
 
 

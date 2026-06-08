@@ -143,10 +143,45 @@ class WehagoSwsaWorkflow(BaseWorkflow):
             state.fail_step(job_id, "download_excel", "다운로드 파일 없음")
             return False
 
-        # ── Step 4: 업로드 양식 변환 ──────────────────────────────────
+        # ── Step 4: 업로드 양식 변환 (raw data 병합 포함) ───────────────
         if not state.should_skip_step(job_id, "convert_excel"):
             state.before_step(job_id, "convert_excel", 4)
-            upload_path = convert_for_upload(download_path)
+
+            # Phase 2/3 raw data 파일 탐색 및 파싱
+            nhis_data = None
+            nps_member_data = None
+            nps_retro_data = None
+            nps_govt_data = None
+
+            try:
+                raw = self._locate_raw_data(client_name, year, month)
+                if raw:
+                    from src.utils.raw_data_reader import (
+                        read_nhis_pdf, read_nps_member_excel,
+                        read_nps_retro_excel, read_nps_govt_excel,
+                    )
+                    if raw.get("nhis_pdf"):
+                        nhis_data = read_nhis_pdf(raw["nhis_pdf"])
+                        log(f"  NHIS 데이터: {len(nhis_data)}명")
+                    if raw.get("nps_member"):
+                        nps_member_data = read_nps_member_excel(raw["nps_member"])
+                        log(f"  NPS 가입자내역: {len(nps_member_data)}명")
+                    if raw.get("nps_retro"):
+                        nps_retro_data = read_nps_retro_excel(raw["nps_retro"])
+                        log(f"  NPS 소급분내역: {len(nps_retro_data)}명")
+                    if raw.get("nps_govt"):
+                        nps_govt_data = read_nps_govt_excel(raw["nps_govt"])
+                        log(f"  NPS 국고지원내역: {len(nps_govt_data)}명")
+            except Exception as e:
+                log(f"  원천데이터 읽기 스킵: {e}")
+
+            upload_path = convert_for_upload(
+                download_path,
+                nhis_data=nhis_data,
+                nps_member_data=nps_member_data,
+                nps_retro_data=nps_retro_data,
+                nps_govt_data=nps_govt_data,
+            )
             state.after_step(job_id, "convert_excel", {"path": upload_path})
         else:
             step_data = state.get_step_data(job_id, "convert_excel")
@@ -180,6 +215,56 @@ class WehagoSwsaWorkflow(BaseWorkflow):
         return True
 
     # ── 헬퍼 ───────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _locate_raw_data(client_name: str, year, month) -> dict | None:
+        """Phase 2/3 raw data 파일 경로 탐색
+
+        Desktop 경로에서 건강보험 PDF, 국민연금 Excel을 찾아 dict로 반환.
+        파일이 없으면 해당 키의 값이 None.
+
+        Returns:
+            {"nhis_pdf": path|None, "nps_member": path|None,
+             "nps_retro": path|None, "nps_govt": path|None}
+        """
+        import glob
+        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+        folder = client_name.replace(" ", "_")
+        period = f"{year}{int(month):02d}" if year and month else None
+
+        if not period:
+            return None
+
+        result = {
+            "nhis_pdf": None,
+            "nps_member": None,
+            "nps_retro": None,
+            "nps_govt": None,
+        }
+
+        # 건강보험 PDF
+        nhis_dir = os.path.join(desktop, f"국민건강보험_{period}", folder)
+        if os.path.isdir(nhis_dir):
+            matches = glob.glob(os.path.join(nhis_dir, "가입자고지내역서_건강_*.pdf"))
+            if matches:
+                result["nhis_pdf"] = matches[0]
+
+        # 국민연금 Excel
+        nps_dir = os.path.join(desktop, f"국민연금_{period}", folder)
+        if os.path.isdir(nps_dir):
+            for f in os.listdir(nps_dir):
+                full = os.path.join(nps_dir, f)
+                if "가입자내역_엑셀" in f and f.endswith(".xlsx"):
+                    result["nps_member"] = full
+                elif "소급분내역_엑셀" in f and f.endswith(".xlsx"):
+                    result["nps_retro"] = full
+                elif "국고지원내역_엑셀" in f and f.endswith(".xlsx"):
+                    result["nps_govt"] = full
+
+        # 하나라도 있으면 dict 반환, 전부 None이면 None 반환
+        if any(result.values()):
+            return result
+        return None
 
     async def _search_company_by_biz(self, page, biz_number: str) -> str | None:
         """WEHAGO 메인 검색: 사업자등록번호 입력 → 검색 버튼 클릭 → 결과에서 수임처명 반환
