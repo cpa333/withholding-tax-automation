@@ -1175,14 +1175,24 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
             log("  WARN: PDF 다운로드가 감지되지 않음 — 추가 대기 진행...")
 
         # ── 다운로드 완료 대기 (최대 60초) ──
+        # 주의: Browser.setDownloadBehavior(allowAndName)은 브라우저 전체에 적용되어
+        # MarkAny DRM의 ProCore.class 등 비-PDF 파일도 save_dir에 다운로드됨.
+        # 반드시 .pdf 파일만 완료 조건으로 사용해야 함.
         for i in range(60):
             await asyncio.sleep(1)
             after = set(os.listdir(save_dir))
             new_files = after - before
-            crdownload = [f for f in new_files if f.endswith(".crdownload")]
-            done = [f for f in new_files if not f.endswith(".crdownload")]
-            if not crdownload and done:
-                downloaded = os.path.join(save_dir, sorted(done)[-1])
+            downloading = [f for f in new_files if f.endswith(".crdownload")]
+            done_pdfs = [f for f in new_files if f.lower().endswith(".pdf")]
+            other_done = [f for f in new_files
+                          if not f.endswith(".crdownload") and not f.lower().endswith(".pdf")]
+
+            if other_done and i % 5 == 0:
+                log(f"  비-PDF 파일 감지 (무시): {other_done}")
+
+            if not downloading and done_pdfs:
+                downloaded = os.path.join(save_dir, sorted(done_pdfs)[-1])
+                # PDF 헤더 검증
                 with open(downloaded, "rb") as fh:
                     header = fh.read(5)
                 if header == b"%PDF-":
@@ -1195,14 +1205,21 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
                         os.remove(new_path)
                     os.rename(downloaded, new_path)
                     log(f"  PDF 저장 완료: {new_path}")
+                    # 비-PDF 파일 정리 (ProCore.class 등)
+                    for f in os.listdir(save_dir):
+                        if not f.lower().endswith(".pdf"):
+                            try:
+                                os.remove(os.path.join(save_dir, f))
+                                log(f"  정리: {f} 삭제")
+                            except Exception:
+                                pass
                     return new_path
                 else:
-                    log(f"  다운로드됨 (PDF 아님): {downloaded}")
-                    return downloaded
+                    log(f"  .pdf 확장자이나 PDF 헤더 아님: {downloaded}")
+                    # 헤더 불일치 파일은 done_pdfs에서 제외하고 계속 대기
+                    done_pdfs.remove(sorted(done_pdfs)[-1])
             if i % 10 == 9:
-                cr_count = len(crdownload)
-                done_count = len(done)
-                log(f"  PDF 다운로드 진행 중... ({i + 1}초) crdownload={cr_count} done={done_count}")
+                log(f"  PDF 다운로드 대기... ({i + 1}초) downloading={len(downloading)} pdfs={len(done_pdfs)} other={other_done}")
 
         log("  ERROR: PDF 다운로드 시간 초과 (60초)")
         # 타임아웃 시 미리보기 탭 정리
