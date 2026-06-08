@@ -1146,13 +1146,16 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
         }""")
 
         # 다운로드 시작 감지 (5초)
+        # Crownix는 UUID 이름(확장자 없음)으로 다운로드하므로
+        # 새 파일 자체가 나타나면 다운로드 시작으로 간주
         download_started = False
         for _ in range(5):
             await asyncio.sleep(1)
             after = set(os.listdir(save_dir))
             new_files = after - before
-            if any(f.endswith(".crdownload") or f.endswith(".pdf") for f in new_files):
+            if new_files:
                 download_started = True
+                log(f"  다운로드 시작 감지: {list(new_files)[:3]}")
                 break
 
         # ── 전략 2: Playwright locator.click(force=True) ──
@@ -1165,8 +1168,9 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
                     await asyncio.sleep(1)
                     after = set(os.listdir(save_dir))
                     new_files = after - before
-                    if any(f.endswith(".crdownload") or f.endswith(".pdf") for f in new_files):
+                    if new_files:
                         download_started = True
+                        log(f"  다운로드 시작 감지 (전략2): {list(new_files)[:3]}")
                         break
             except Exception as e:
                 log(f"  Playwright locator 클릭 예외 — {e}")
@@ -1175,51 +1179,55 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
             log("  WARN: PDF 다운로드가 감지되지 않음 — 추가 대기 진행...")
 
         # ── 다운로드 완료 대기 (최대 60초) ──
-        # 주의: Browser.setDownloadBehavior(allowAndName)은 브라우저 전체에 적용되어
-        # MarkAny DRM의 ProCore.class 등 비-PDF 파일도 save_dir에 다운로드됨.
-        # 반드시 .pdf 파일만 완료 조건으로 사용해야 함.
+        # Browser.setDownloadBehavior(allowAndName)으로 인해:
+        # - 실제 PDF: UUID 이름으로 저장됨 (확장자 없음)
+        # - MarkAny DRM: ProCore.class 등도 저장될 수 있음
+        # 따라서 확장자가 아닌 **파일 헤더(%PDF-)** 로 PDF 여부 판별.
+        checked_files = set()  # 이미 PDF 헤더 검사한 파일
         for i in range(60):
             await asyncio.sleep(1)
             after = set(os.listdir(save_dir))
             new_files = after - before
             downloading = [f for f in new_files if f.endswith(".crdownload")]
-            done_pdfs = [f for f in new_files if f.lower().endswith(".pdf")]
-            other_done = [f for f in new_files
-                          if not f.endswith(".crdownload") and not f.lower().endswith(".pdf")]
+            done = [f for f in new_files if not f.endswith(".crdownload")]
 
-            if other_done and i % 5 == 0:
-                log(f"  비-PDF 파일 감지 (무시): {other_done}")
+            if not downloading and done:
+                # 완료된 파일 중 아직 검사하지 않은 것에 대해 PDF 헤더 확인
+                for fname in sorted(done):
+                    if fname in checked_files:
+                        continue
+                    checked_files.add(fname)
+                    filepath = os.path.join(save_dir, fname)
+                    try:
+                        with open(filepath, "rb") as fh:
+                            header = fh.read(5)
+                    except Exception:
+                        continue
 
-            if not downloading and done_pdfs:
-                downloaded = os.path.join(save_dir, sorted(done_pdfs)[-1])
-                # PDF 헤더 검증
-                with open(downloaded, "rb") as fh:
-                    header = fh.read(5)
-                if header == b"%PDF-":
-                    now = datetime.now()
-                    _y = year if year is not None else now.year
-                    _m = month if month is not None else now.month
-                    new_name = f"가입자고지내역서_건강_{_y}{_m:02d}.pdf"
-                    new_path = os.path.join(save_dir, new_name)
-                    if os.path.exists(new_path):
-                        os.remove(new_path)
-                    os.rename(downloaded, new_path)
-                    log(f"  PDF 저장 완료: {new_path}")
-                    # 비-PDF 파일 정리 (ProCore.class 등)
-                    for f in os.listdir(save_dir):
-                        if not f.lower().endswith(".pdf"):
-                            try:
-                                os.remove(os.path.join(save_dir, f))
-                                log(f"  정리: {f} 삭제")
-                            except Exception:
-                                pass
-                    return new_path
-                else:
-                    log(f"  .pdf 확장자이나 PDF 헤더 아님: {downloaded}")
-                    # 헤더 불일치 파일은 done_pdfs에서 제외하고 계속 대기
-                    done_pdfs.remove(sorted(done_pdfs)[-1])
+                    if header == b"%PDF-":
+                        now = datetime.now()
+                        _y = year if year is not None else now.year
+                        _m = month if month is not None else now.month
+                        new_name = f"가입자고지내역서_건강_{_y}{_m:02d}.pdf"
+                        new_path = os.path.join(save_dir, new_name)
+                        if os.path.exists(new_path):
+                            os.remove(new_path)
+                        os.rename(filepath, new_path)
+                        log(f"  PDF 저장 완료: {new_path}")
+                        # 비-PDF 파일 정리 (ProCore.class 등)
+                        for f in os.listdir(save_dir):
+                            if not f.lower().endswith(".pdf"):
+                                try:
+                                    os.remove(os.path.join(save_dir, f))
+                                    log(f"  정리: {f} 삭제")
+                                except Exception:
+                                    pass
+                        return new_path
+                    else:
+                        log(f"  비-PDF 파일 (무시): {fname} header={header!r}")
+
             if i % 10 == 9:
-                log(f"  PDF 다운로드 대기... ({i + 1}초) downloading={len(downloading)} pdfs={len(done_pdfs)} other={other_done}")
+                log(f"  PDF 다운로드 대기... ({i + 1}초) downloading={len(downloading)} done={done}")
 
         log("  ERROR: PDF 다운로드 시간 초과 (60초)")
         # 타임아웃 시 미리보기 탭 정리
