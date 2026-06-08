@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from playwright.async_api import async_playwright
 
 from src.utils.chrome_cdp import launch_chrome, connect_page
+from src.utils.save_path import make_save_dir
 from src.automation.wehago._common import (
     log, wait_for_login, goto_salary_page, dismiss_dialogs, WEHAGO_URL,
     search_companies, ensure_full_tab,
@@ -31,9 +32,6 @@ from src.automation.wehago._common import (
 from src.automation.wehago.run_swsa0101 import run_swsa0101
 from src.automation.wehago.run_swta0101 import run_swta0101
 from src.automation.wehago.run_swer0101 import run_swer0101
-
-
-SAVE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "results"))
 
 
 def print_header():
@@ -156,7 +154,7 @@ async def main():
             log("수임처 선택 실패")
             return
 
-        os.makedirs(SAVE_DIR, exist_ok=True)
+        save_dir = make_save_dir("위하고급여자료입력", selected_company)
 
         # ═══ Phase 3: 메뉴 루프 ═══
         while True:
@@ -170,7 +168,7 @@ async def main():
                 log("  급여자료입력 (SWSA0101) 시작")
                 log(f"{'='*55}")
                 try:
-                    await run_swsa0101(page, SAVE_DIR, dry_run=dry_run)
+                    await run_swsa0101(page, save_dir, dry_run=dry_run)
                 except Exception as e:
                     log(f"ERROR: {e}")
                     traceback.print_exc()
@@ -210,6 +208,7 @@ async def main():
                     new_company = await select_and_goto_company(page)
                     if new_company:
                         selected_company = new_company
+                        save_dir = make_save_dir("위하고급여자료입력", selected_company)
                         log(f"  '{selected_company}'로 변경 완료")
                     else:
                         log("  수임처 변경 실패")
