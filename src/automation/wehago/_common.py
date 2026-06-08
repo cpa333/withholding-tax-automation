@@ -56,6 +56,9 @@ async def dismiss_dialogs(page):
     비과세 모달은 취소 우선, 나머지는 닫기 → X → 확인 → 취소 순.
     """
     for _ in range(20):
+        # AI 브리핑 팝업 우선 처리 (z-index/버튼 기준에 맞지 않을 수 있으므로 별도 처리)
+        await dismiss_ai_briefing_popup(page)
+
         closed = await page.evaluate("""() => {
             // z-index 내림차순으로 정렬하여 가장 위에 있는 모달부터 처리
             const candidates = [];
@@ -144,6 +147,73 @@ async def dismiss_dialogs(page):
         if not closed:
             return
         log(f"  팝업 닫음 ({closed})")
+        await asyncio.sleep(0.5)
+
+
+async def dismiss_ai_briefing_popup(page):
+    """WEHAGO 메인 팝업 닫기 (AI 에디션 프로모션, 2차 인증 등)
+
+    실제 팝업 구조:
+      - ._isDialog.WSC_LUXDialog (AI 에디션 프로모션) → button.btn_close
+      - .LUX_basic_dialog (2차 인증) → button.btn_close
+      - .dimmed 오버레이 (z-index: 1100) 배경
+    기존 ai-briefing-popover 셀렉터는 실제 DOM에 존재하지 않아 매칭 실패했음.
+    """
+    closed = await page.evaluate(r"""() => {
+        let dismissed = [];
+
+        // 1) WSC_LUXDialog / LUX_basic_dialog 닫기 버튼 클릭
+        const dialogSelectors = [
+            '._isDialog button.btn_close',
+            '._isDialog.WSC_LUXDialog button.btn_close',
+            '.LUX_basic_dialog button.btn_close',
+            '.LUX_basic_dialog button.qa_popupClose',
+        ];
+        for (const sel of dialogSelectors) {
+            const btns = document.querySelectorAll(sel);
+            for (const btn of btns) {
+                if (btn.offsetWidth > 0) {
+                    btn.click();
+                    dismissed.push('dialog-close:' + sel);
+                }
+            }
+        }
+
+        // 2) aiOpenPop* 래퍼 강제 숨김 (닫기 버튼으로 안 닫히는 경우)
+        document.querySelectorAll('[class*="aiOpenPop"]').forEach(el => {
+            if (el.offsetWidth > 0) {
+                el.style.display = 'none';
+                dismissed.push('aiOpenPop-hide');
+            }
+        });
+
+        // 3) dimmed 오버레이 숨김
+        document.querySelectorAll('.dimmed').forEach(el => {
+            const cs = window.getComputedStyle(el);
+            if (parseInt(cs.zIndex) >= 1000 && el.offsetWidth > 0) {
+                el.style.display = 'none';
+                dismissed.push('dimmed-hide');
+            }
+        });
+
+        // 4) 기존 ai-briefing-popover도 유지 (미래 호환성)
+        const oldSelectors = [
+            '[class*="ai-briefing-popover"] button[class*="close"]',
+            '[class*="ai-briefing-popover"] button[aria-label="close"]',
+            '[id*="T_MAIN_LAUNCH_PROMO_DIALOG"] button',
+        ];
+        for (const sel of oldSelectors) {
+            const btn = document.querySelector(sel);
+            if (btn && btn.offsetWidth > 0) {
+                btn.click();
+                dismissed.push('legacy-close:' + sel);
+            }
+        }
+
+        return dismissed.length > 0 ? dismissed.join(', ') : false;
+    }""")
+    if closed:
+        log(f"  WEHAGO 팝업 닫음 ({closed})")
         await asyncio.sleep(0.5)
 
 
