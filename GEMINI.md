@@ -343,7 +343,7 @@ pause
 
 | 파일 | 역할 |
 |------|------|
-| `_common_edi.py` | CDP 연결, 로그인 대기, 팝업 닫기, 수임사업장 선택/검색/목록 수집, Nexacro 제어, 1사이클 워크플로우 |
+| `_common_edi.py` | CDP 연결, 로그인 대기, 팝업 닫기, 수임사업장 선택/검색/목록 수집, Nexacro 제어, 1사이클 워크플로우, PDF 다운로드 (Crownix 로딩 대기 + 다중 전략 클릭 + 헤더 기반 PDF 판별 + CDP 세션 정리) |
 | `nhis_edi_auto_cdp.py` | 메인 진입점 (전체 자동 / 대화형 메뉴) |
 
 ### 실행
@@ -377,13 +377,24 @@ pause
    - combolist 생성 대기 후 "가입자 고지(산출) 내역서" 항목 mousedown/mouseup/click
 4. **첫 행 더블클릭** — 그리드 `grid_list` row 0, col 3 (서식명) dblclick
 5. **인쇄 버튼** — `div_top_img_print` mousedown/mouseup/click
+   - 인쇄 클릭 전 `pages_before`로 기존 탭 ID 기록 (stale 탭 방지)
 6. **미리보기 탭** — `popup.html?formname=CO::WETZ_163.xfdl` 열림
-7. **PDF 저장** — reportview iframe 내 `button[title="PDF 저장"]` 클릭 (Playwright locator)
-   - `Browser.setDownloadBehavior` CDP로 저장 경로 지정
+   - 10초 재시도 루프 + `pages_before` 필터링으로 **새로 열린 탭만** 탐지
+   - fallback: 새 탭 미감지 시 기존 탭 중 마지막 매칭 사용
+7. **reportview iframe** — 미리보기 탭 내 iframe (`reportview.jsp`) 10초 재시도 대기
+8. **Crownix 뷰어 로딩 대기** — iframe 내 `button[title="PDF 저장"]` 출현까지 최대 15초 폴링
+9. **PDF 다운로드** — `Browser.setDownloadBehavior(allowAndName)` CDP로 저장 경로 지정
+   - **전략 1:** DOM `element.click()` (iframe 내부에서 직접 클릭)
+   - **전략 2:** Playwright `locator.click(force=True)` (전략 1 실패 시)
+   - **다운로드 감지:** 새 파일 자체가 나타나면 시작으로 간주 (확장자 불문)
+   - **PDF 식별:** Crownix가 **UUID 이름**(확장자 없음)으로 저장하므로 `%PDF-` 헤더로 판별
+   - **비-PDF 파일 처리:** MarkAny DRM의 ProCore.class 등은 헤더 검사 후 무시 + 성공 시 정리
+   - CDP 세션 try/finally `detach()` (배치 반복 시 세션 누수 방지)
+   - 타임아웃 60초, 10초마다 진행 로그
    - `~/Desktop/국민건강보험_{YYYYMM}/{수임처명}/가입자고지내역서_건강_{YYYYMM}.pdf`
-8. **탭 정리** — 미리보기 + 웹EDI 탭 닫기
-9. **로그인 사업장 복귀** — `img[src*=we_btn_relogin]` 클릭
-10. **모달 닫기** — 공지사항 등 팝업 탭 정리
+10. **탭 정리** — 미리보기 + 웹EDI 탭 닫기
+11. **로그인 사업장 복귀** — `img[src*=we_btn_relogin]` 클릭
+12. **모달 닫기** — 공지사항 등 팝업 탭 정리
 
 ### Nexacro 제어 방식
 
@@ -408,6 +419,11 @@ pause
 | 서식명 선택 후 값 불일치 | Nexacro 내부 상태 동기화 지연 | 1초 대기 후 input 값 확인 |
 | 라디오 "전체" 안 바뀜 | dispatchEvent로 시각/데이터 불일치 | Nexacro API `set_index(0)` + `on_fire_onitemchanged()` 사용 |
 | Nexacro API 접근 불가 | 프레임워크 로딩 전에 실행 | `wait_for_nexacro_ready()`로 mainframe.form 접근 확인 후 실행 |
+| PDF 다운로드 배치 실패 | Crownix 뷰어 로딩 전 클릭 | PDF 버튼 15초 폴링 대기 + DOM/Playwright 순차 클릭 |
+| ProCore.class 간섭 | `allowAndName`이 모든 다운로드를 save_dir로 저장 | `%PDF-` 헤더로 PDF 판별, 비-PDF는 무시+정리 |
+| UUID 파일명 PDF | Crownix가 확장자 없이 UUID로 저장 | 확장자 불문, 헤더 `%PDF-` 검사로 PDF 식별 |
+| CDP 세션 누수 | 배치 반복 시 new_cdp_session 미정리 | try/finally `detach()` |
+| stale 미리보기 탭 | 이전 반복의 잔여 탭 포착 | `pages_before` 추적으로 새 탭만 필터링 |
 
 ## Playwright Stealth (`src/utils/stealth.py`)
 
