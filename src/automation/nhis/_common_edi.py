@@ -1026,7 +1026,10 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
     log(f"  문서: {result.get('text', '')[:60]}")
     await human_delay(3)
 
-    # 인쇄 버튼 클릭
+    # ── 인쇄 버튼 클릭 ──
+    # 새 탭 추적: 인쇄 클릭 전 기존 탭 기록
+    pages_before = set(id(pg) for pg in context.pages)
+
     log("  인쇄 버튼 클릭...")
     result = await edi_page.evaluate('''() => {
         var btn = document.getElementById('mainframe_childframe_form_div_top_img_print');
@@ -1048,73 +1051,175 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
         return None
     await human_delay(3)
 
-    # 미리보기 탭 찾기
+    # ── 미리보기 탭 찾기 (최대 10초 대기, 새 탭 우선) ──
     preview = None
-    for pg in context.pages:
-        if "popup.html" in pg.url and "WETZ" in pg.url:
-            preview = pg
+    for attempt in range(10):
+        for pg in context.pages:
+            try:
+                if "popup.html" in pg.url and "WETZ" in pg.url:
+                    # pages_before에 없는 탭 = 새로 열린 탭
+                    if id(pg) not in pages_before:
+                        preview = pg
+                        break
+            except Exception:
+                continue
+        if preview:
             break
+        await asyncio.sleep(1)
+
+    # fallback: 새 탭이 없으면 기존 탭 중 마지막 매칭 사용
     if not preview:
-        log("  ERROR: 미리보기 탭을 찾지 못했습니다.")
+        for pg in context.pages:
+            try:
+                if "popup.html" in pg.url and "WETZ" in pg.url:
+                    preview = pg
+            except Exception:
+                continue
+
+    if not preview:
+        log("  ERROR: 미리보기 탭을 찾지 못했습니다 (10초 대기).")
         return None
     log("  미리보기 탭 열림")
 
-    # reportview iframe 찾기
+    # ── reportview iframe 찾기 (최대 10초 대기) ──
     report_frame = None
-    for f in preview.frames:
-        if "reportview" in f.url:
-            report_frame = f
+    for attempt in range(10):
+        for f in preview.frames:
+            if "reportview" in f.url:
+                report_frame = f
+                break
+        if report_frame:
             break
+        await asyncio.sleep(1)
+
     if not report_frame:
-        log("  ERROR: 리포트 프레임을 찾지 못했습니다.")
+        log("  ERROR: 리포트 프레임을 찾지 못했습니다 (10초 대기).")
+        try:
+            await preview.close()
+        except Exception:
+            pass
         return None
 
-    # CDP 다운로드 경로 설정
-    os.makedirs(save_dir, exist_ok=True)
-    cdp = await context.new_cdp_session(preview)
-    await cdp.send("Browser.setDownloadBehavior", {
-        "behavior": "allowAndName",
-        "downloadPath": save_dir,
-        "eventsEnabled": True,
-    })
-
-    before = set(os.listdir(save_dir))
-
-    # PDF 버튼 클릭
-    pdf_btn = report_frame.locator('button[title="PDF 저장"]')
-    await pdf_btn.click()
-    log("  PDF 버튼 클릭")
-
-    # 다운로드 완료 대기
-    for i in range(60):
+    # ── Crownix 뷰어 로딩 대기: PDF 버튼 나타날 때까지 (최대 15초) ──
+    log("  Crownix 뷰어 로딩 대기...")
+    pdf_btn_found = False
+    for attempt in range(15):
+        try:
+            pdf_btn_found = await report_frame.evaluate("""() => {
+                const btn = document.querySelector('button[title="PDF 저장"]');
+                return !!btn;
+            }""")
+            if pdf_btn_found:
+                log(f"  Crownix 뷰어 준비 완료 ({attempt + 1}초)")
+                break
+        except Exception:
+            pass
         await asyncio.sleep(1)
-        after = set(os.listdir(save_dir))
-        new_files = after - before
-        crdownload = [f for f in new_files if f.endswith(".crdownload")]
-        done = [f for f in new_files if not f.endswith(".crdownload")]
-        if not crdownload and done:
-            downloaded = os.path.join(save_dir, sorted(done)[-1])
-            with open(downloaded, "rb") as fh:
-                header = fh.read(5)
-            if header == b"%PDF-":
-                now = datetime.now()
-                _y = year if year is not None else now.year
-                _m = month if month is not None else now.month
-                new_name = f"가입자고지내역서_건강_{_y}{_m:02d}.pdf"
-                new_path = os.path.join(save_dir, new_name)
-                if os.path.exists(new_path):
-                    os.remove(new_path)
-                os.rename(downloaded, new_path)
-                log(f"  PDF 저장 완료: {new_path}")
-                return new_path
-            else:
-                log(f"  다운로드됨 (PDF 아님): {downloaded}")
-                return downloaded
-        if i % 10 == 9:
-            log(f"  다운로드 대기 중... ({i + 1}초)")
 
-    log("  ERROR: PDF 다운로드 시간 초과")
-    return None
+    if not pdf_btn_found:
+        log("  ERROR: Crownix PDF 버튼을 찾지 못했습니다 (15초 대기).")
+        try:
+            await preview.close()
+        except Exception:
+            pass
+        return None
+
+    # ── CDP 다운로드 경로 설정 + PDF 다운로드 ──
+    os.makedirs(save_dir, exist_ok=True)
+    cdp_session = None
+    try:
+        cdp_session = await context.new_cdp_session(preview)
+        await cdp_session.send("Browser.setDownloadBehavior", {
+            "behavior": "allowAndName",
+            "downloadPath": save_dir,
+            "eventsEnabled": True,
+        })
+
+        before = set(os.listdir(save_dir))
+
+        # ── 전략 1: DOM element.click() ──
+        log("  PDF 버튼 클릭 (DOM .click())...")
+        clicked = await report_frame.evaluate("""() => {
+            const btn = document.querySelector('button[title="PDF 저장"]');
+            if (btn) { btn.click(); return true; }
+            return false;
+        }""")
+
+        # 다운로드 시작 감지 (5초)
+        download_started = False
+        for _ in range(5):
+            await asyncio.sleep(1)
+            after = set(os.listdir(save_dir))
+            new_files = after - before
+            if any(f.endswith(".crdownload") or f.endswith(".pdf") for f in new_files):
+                download_started = True
+                break
+
+        # ── 전략 2: Playwright locator.click(force=True) ──
+        if not download_started:
+            log("  PDF 버튼 DOM 클릭으로 다운로드 미시작 — Playwright locator 클릭...")
+            try:
+                pdf_btn = report_frame.locator('button[title="PDF 저장"]')
+                await pdf_btn.click(force=True, timeout=5000)
+                for _ in range(5):
+                    await asyncio.sleep(1)
+                    after = set(os.listdir(save_dir))
+                    new_files = after - before
+                    if any(f.endswith(".crdownload") or f.endswith(".pdf") for f in new_files):
+                        download_started = True
+                        break
+            except Exception as e:
+                log(f"  Playwright locator 클릭 예외 — {e}")
+
+        if not download_started:
+            log("  WARN: PDF 다운로드가 감지되지 않음 — 추가 대기 진행...")
+
+        # ── 다운로드 완료 대기 (최대 60초) ──
+        for i in range(60):
+            await asyncio.sleep(1)
+            after = set(os.listdir(save_dir))
+            new_files = after - before
+            crdownload = [f for f in new_files if f.endswith(".crdownload")]
+            done = [f for f in new_files if not f.endswith(".crdownload")]
+            if not crdownload and done:
+                downloaded = os.path.join(save_dir, sorted(done)[-1])
+                with open(downloaded, "rb") as fh:
+                    header = fh.read(5)
+                if header == b"%PDF-":
+                    now = datetime.now()
+                    _y = year if year is not None else now.year
+                    _m = month if month is not None else now.month
+                    new_name = f"가입자고지내역서_건강_{_y}{_m:02d}.pdf"
+                    new_path = os.path.join(save_dir, new_name)
+                    if os.path.exists(new_path):
+                        os.remove(new_path)
+                    os.rename(downloaded, new_path)
+                    log(f"  PDF 저장 완료: {new_path}")
+                    return new_path
+                else:
+                    log(f"  다운로드됨 (PDF 아님): {downloaded}")
+                    return downloaded
+            if i % 10 == 9:
+                cr_count = len(crdownload)
+                done_count = len(done)
+                log(f"  PDF 다운로드 진행 중... ({i + 1}초) crdownload={cr_count} done={done_count}")
+
+        log("  ERROR: PDF 다운로드 시간 초과 (60초)")
+        # 타임아웃 시 미리보기 탭 정리
+        try:
+            await preview.close()
+            log("  미리보기 탭 닫기 완료 (타임아웃 정리)")
+        except Exception:
+            pass
+        return None
+
+    finally:
+        # CDP 세션 정리 (배치 반복 시 세션 누수 방지)
+        if cdp_session:
+            try:
+                await cdp_session.detach()
+            except Exception:
+                pass
 
 
 async def run_single_firm_workflow(page, context, firm_name,

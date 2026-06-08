@@ -1,9 +1,9 @@
 {
-  "access_token": "eyJhbGciOiJFUzI1NiIsImtpZCI6IjY1NDliZDhkLWVkNGItNGU1NS1iNmZhLWQ2N2JkNGNkZTk3MyIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2p3bWpzZ3RianRxdnB0aGl1d3l3LnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMzA3YjgxZi03NmY1LTQ1OGQtYTE5ZS1mYzlmNDVlM2ZhMTUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzgwODA4MDM0LCJpYXQiOjE3ODA4MDQ0MzQsImVtYWlsIjoic2VleW9uZzk4N0BnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc4MDgwMDcwM31dLCJzZXNzaW9uX2lkIjoiMDRiZjA0ZGEtYTMyZi00NGVmLTk3MzgtNDljMDgzMWY2NDE4IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.26L2o6hEWiPx-aOH4WKJv1J6RA51STaGyIEgIJJfJe8A3qwuirzhfQ4DYgx-pZj2RjmoeQp3uRyNTgQOe6T01Q",
+  "access_token": "eyJhbGciOiJFUzI1NiIsImtpZCI6IjY1NDliZDhkLWVkNGItNGU1NS1iNmZhLWQ2N2JkNGNkZTk3MyIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2p3bWpzZ3RianRxdnB0aGl1d3l3LnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMzA3YjgxZi03NmY1LTQ1OGQtYTE5ZS1mYzlmNDVlM2ZhMTUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzgwOTA4Nzc0LCJpYXQiOjE3ODA5MDUxNzQsImVtYWlsIjoic2VleW9uZzk4N0BnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc4MDgwMDcwM31dLCJzZXNzaW9uX2lkIjoiMDRiZjA0ZGEtYTMyZi00NGVmLTk3MzgtNDljMDgzMWY2NDE4IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.7UKhJ5tnhBDbWO_2DigwvGkxtMliJkHFV3qrLPHsq3Rb0vlza2ywQhX0g1NeCUumvk6bXMvYCq3ysRAkgjr7ew",
   "token_type": "bearer",
   "expires_in": 3600,
-  "expires_at": 1780808034,
-  "refresh_token": "jetei2mwwarw",
+  "expires_at": 1780908774,
+  "refresh_token": "hy5bjaj5i6ka",
   "user": {
     "id": "3307b81f-76f5-458d-a19e-fc9f45e3fa15",
     "aud": "authenticated",
@@ -41,8 +41,8 @@
       }
     ],
     "created_at": "2026-06-02T10:02:32.221027Z",
-    "updated_at": "2026-06-07T03:53:54.31053Z",
+    "updated_at": "2026-06-08T07:52:54.148968Z",
     "is_anonymous": false
   },
-  "last_verified_at": "2026-06-07T03:59:36.515155+00:00"
+  "last_verified_at": "2026-06-08T08:00:03.233218+00:00"
 }
