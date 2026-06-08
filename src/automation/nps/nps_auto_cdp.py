@@ -280,11 +280,35 @@ async def run_single_workplace(page, context, workplace_name, is_first=False,
         (TAB_GOVT, "국고지원내역", "grdList4"),
     ]
     for tab_idx, label, grid_sfx in tabs:
-        result = await process_tab_download(
-            page, context, save_dir, tab_idx, label, grid_sfx,
-        )
-        if result["skipped"]:
-            log(f"  {label} 스킵 (데이터 없음)")
+        try:
+            result = await process_tab_download(
+                page, context, save_dir, tab_idx, label, grid_sfx,
+            )
+            if result["skipped"]:
+                log(f"  {label} 스킵 (데이터 없음)")
+        except Exception as e:
+            log(f"  ERROR: {label} 처리 중 예외 발생 - {e}")
+            import traceback
+            traceback.print_exc()
+            # 잔여 상태 정리: 열린 모달 / rdPreview 탭 닫기
+            from src.automation.nps._common import (
+                nexacro_click_button, BTN_MODAL_CANCEL, BTN_MODAL_CONFIRM,
+            )
+            try:
+                stale = await page.evaluate(
+                    '(elId) => !!document.getElementById(elId)', BTN_MODAL_CONFIRM
+                )
+                if stale:
+                    await nexacro_click_button(page, BTN_MODAL_CANCEL)
+                    await human_delay(0.5)
+            except Exception:
+                pass
+            for pg in context.pages:
+                try:
+                    if "rdPreview" in pg.url:
+                        await pg.close()
+                except Exception:
+                    continue
         await human_delay(1)
 
     log(f"  저장 경로: {save_dir}")

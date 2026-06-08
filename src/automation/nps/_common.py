@@ -525,12 +525,111 @@ async def click_detail_tab(page, tab_index):
     return result.get("ok", False)
 
 
+async def _wait_for_modal(page, modal_id, timeout=5):
+    """모달 요소가 DOM에 나타날 때까지 폴링
+
+    Args:
+        page: Playwright page
+        modal_id: 확인할 모달 요소의 DOM id
+        timeout: 최대 대기 시간(초)
+
+    Returns:
+        bool: 모달 출현 여부
+    """
+    for _ in range(timeout):
+        try:
+            found = await page.evaluate(
+                '(elId) => !!document.getElementById(elId)', modal_id
+            )
+            if found:
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(1)
+    return False
+
+
+async def _scroll_into_view(page, element_id):
+    """요소를 뷰포트 중앙으로 스크롤
+
+    Args:
+        page: Playwright page
+        element_id: 스크롤할 요소의 DOM id
+    """
+    try:
+        await page.evaluate("""(elId) => {
+            const el = document.getElementById(elId);
+            if (el) el.scrollIntoView({block: 'center', behavior: 'instant'});
+        }""", element_id)
+        await asyncio.sleep(0.3)
+    except Exception:
+        pass
+
+
+async def _click_output_button(page):
+    """출력 버튼을 3가지 전략으로 순차 클릭
+
+    전략:
+      1) nexacro_click_button (기존 방식, scrollIntoView 선행)
+      2) Playwright locator.click(force=True) — 오버레이 무시
+      3) DOM element.click() — 브라우저 네이티브
+
+    각 전략 후 모달(BTN_MODAL_CONFIRM) 출현 확인.
+    성공한 전략 번호를 반환, 모두 실패 시 0.
+
+    Returns:
+        int: 성공한 전략 번호 (1~3), 실패 시 0
+    """
+    # 전략 1: 기존 nexacro_click_button (scrollIntoView 선행)
+    log("  [전략 1] nexacro_click_button + scrollIntoView...")
+    try:
+        await _scroll_into_view(page, BTN_OUTPUT)
+        result = await nexacro_click_button(page, BTN_OUTPUT)
+        if result.get("ok") and await _wait_for_modal(page, BTN_MODAL_CONFIRM, timeout=5):
+            log("  [전략 1] 성공 — 모달 출현 확인")
+            return 1
+        modal_exists = await page.evaluate('(elId) => !!document.getElementById(elId)', BTN_MODAL_CONFIRM)
+        log(f"  [전략 1] 실패 — result={result}, modal={not modal_exists}")
+    except Exception as e:
+        log(f"  [전략 1] 예외 — {e}")
+
+    # 전략 2: Playwright locator.click(force=True)
+    log("  [전략 2] Playwright locator.click(force=True)...")
+    try:
+        btn = page.locator(f'[id="{BTN_OUTPUT}"]')
+        await btn.click(force=True, timeout=5000)
+        if await _wait_for_modal(page, BTN_MODAL_CONFIRM, timeout=5):
+            log("  [전략 2] 성공 — 모달 출현 확인")
+            return 2
+        log("  [전략 2] 실패 — 모달 미출현")
+    except Exception as e:
+        log(f"  [전략 2] 예외 — {e}")
+
+    # 전략 3: DOM element.click()
+    log("  [전략 3] DOM element.click()...")
+    try:
+        await page.evaluate("""(elId) => {
+            const el = document.getElementById(elId);
+            if (!el) throw new Error('element not found: ' + elId);
+            el.focus();
+            el.click();
+        }""", BTN_OUTPUT)
+        if await _wait_for_modal(page, BTN_MODAL_CONFIRM, timeout=5):
+            log("  [전략 3] 성공 — 모달 출현 확인")
+            return 3
+        log("  [전략 3] 실패 — 모달 미출현")
+    except Exception as e:
+        log(f"  [전략 3] 예외 — {e}")
+
+    return 0
+
+
 async def output_with_full_ssn(page):
     """출력 버튼 클릭 → 주민번호 전체표출 → 확인
 
     출력 옵션 모달에서 주민번호를 전체표출로 선택 후 확인.
     Crownix rdPreview 새 탭이 열림.
-    최대 3회 재시도 — 버튼이 없으면 잠시 대기 후 재시도.
+    최대 3회 재시도 — 각 회차에서 3가지 클릭 전략을 순차 시도.
     """
     for attempt in range(1, 4):
         # 기존 출력 모달이 열려있으면 취소로 닫기 (배치 실행 시 상태 누적 방지)
@@ -546,14 +645,17 @@ async def output_with_full_ssn(page):
             pass
 
         log(f"출력 버튼 클릭... (시도 {attempt}/3)")
-        result = await nexacro_wait_and_click(page, BTN_OUTPUT, max_wait=10)
-        if result.get("ok"):
+        strategy = await _click_output_button(page)
+
+        if strategy > 0:
+            log(f"  출력 버튼 클릭 성공 (전략 {strategy})")
             break
+
         if attempt < 3:
-            log(f"  출력 버튼 대기 실패 — 3초 후 재시도...")
+            log(f"  모든 전략 실패 — 3초 후 재시도...")
             await human_delay(3)
     else:
-        log(f"  ERROR: 출력 버튼 클릭 실패 (3회 시도) - {result}")
+        log("  ERROR: 출력 버튼 클릭 실패 (3회 × 3전략 시도)")
         return False
     await human_delay(2)
 
@@ -585,18 +687,48 @@ async def download_pdf_from_preview(context, save_dir, filename):
     Returns:
         str or None: 저장된 파일 경로, 실패 시 None
     """
-    # rdPreview 탭 찾기
+    # rdPreview 탭 찾기 (최대 10초 대기)
     rd_page = None
-    for pg in context.pages:
-        try:
-            if "rdPreview" in pg.url:
-                rd_page = pg
-                break
-        except Exception:
-            continue
+    for _ in range(10):
+        for pg in context.pages:
+            try:
+                if "rdPreview" in pg.url:
+                    rd_page = pg
+                    break
+            except Exception:
+                continue
+        if rd_page:
+            break
+        await asyncio.sleep(1)
 
     if not rd_page:
-        log("  ERROR: rdPreview 탭을 찾지 못했습니다.")
+        log("  ERROR: rdPreview 탭을 찾지 못했습니다 (10초 대기).")
+        return None
+
+    # Crownix 뷰어 로딩 대기: PDF 버튼이 나타날 때까지
+    log("  Crownix 뷰어 로딩 대기...")
+    pdf_btn_found = False
+    for _ in range(15):
+        try:
+            pdf_btn_found = await rd_page.evaluate("""() => {
+                const btns = document.querySelectorAll('button.crownix-toolbar-button');
+                for (const btn of btns) {
+                    if ((btn.textContent || '').trim() === 'PDF') return true;
+                }
+                return false;
+            }""")
+            if pdf_btn_found:
+                break
+        except Exception:
+            pass
+        await asyncio.sleep(1)
+
+    if not pdf_btn_found:
+        log("  ERROR: Crownix PDF 버튼을 찾지 못했습니다 (15초 대기).")
+        try:
+            await rd_page.close()
+        except Exception:
+            pass
         return None
 
     # 다운로드 경로 설정
@@ -608,9 +740,12 @@ async def download_pdf_from_preview(context, save_dir, filename):
         "eventsEnabled": True,
     })
 
-    # PDF 버튼 클릭
+    # PDF 버튼 클릭 — DOM .click() → Playwright locator 순차 시도
     before = set(os.listdir(save_dir))
-    await rd_page.evaluate("""() => {
+
+    # 전략 1: DOM element.click()
+    log("  PDF 버튼 클릭 (DOM .click())...")
+    clicked = await rd_page.evaluate("""() => {
         const btns = document.querySelectorAll('button.crownix-toolbar-button');
         for (const btn of btns) {
             if ((btn.textContent || '').trim() === 'PDF') {
@@ -621,8 +756,38 @@ async def download_pdf_from_preview(context, save_dir, filename):
         return false;
     }""")
 
-    # 다운로드 완료 대기
-    for _ in range(30):
+    # 다운로드 시작 감지 (5초 내 .crdownload 또는 완료 파일 확인)
+    download_started = False
+    for _ in range(5):
+        await asyncio.sleep(1)
+        after = set(os.listdir(save_dir))
+        new_files = after - before
+        if any(f.endswith(".crdownload") or f.endswith(".pdf") for f in new_files):
+            download_started = True
+            break
+
+    # 전략 2: DOM 클릭으로 다운로드가 시작되지 않았으면 Playwright locator 사용
+    if not download_started:
+        log("  PDF 버튼 DOM 클릭으로 다운로드 미시작 — Playwright locator 클릭...")
+        try:
+            pdf_btn = rd_page.locator('button.crownix-toolbar-button:has-text("PDF")')
+            await pdf_btn.click(force=True, timeout=5000)
+            # 다시 다운로드 시작 대기
+            for _ in range(5):
+                await asyncio.sleep(1)
+                after = set(os.listdir(save_dir))
+                new_files = after - before
+                if any(f.endswith(".crdownload") or f.endswith(".pdf") for f in new_files):
+                    download_started = True
+                    break
+        except Exception as e:
+            log(f"  Playwright locator 클릭 예외 — {e}")
+
+    if not download_started:
+        log("  WARN: PDF 다운로드가 감지되지 않음 — 추가 대기 진행...")
+
+    # 다운로드 완료 대기 (최대 60초)
+    for i in range(60):
         await asyncio.sleep(1)
         after = set(os.listdir(save_dir))
         new_files = after - before
@@ -639,8 +804,16 @@ async def download_pdf_from_preview(context, save_dir, filename):
             await rd_page.close()
             log(f"  PDF 저장 완료: {final_path}")
             return final_path
+        if i % 10 == 9 and (crdownload or done):
+            log(f"  PDF 다운로드 진행 중... ({i+1}초)")
 
-    log("  ERROR: PDF 다운로드 시간 초과")
+    log("  ERROR: PDF 다운로드 시간 초과 (60초)")
+    # 타임아웃 시 rdPreview 탭 정리
+    try:
+        await rd_page.close()
+        log("  rdPreview 탭 닫기 완료 (타임아웃 정리)")
+    except Exception:
+        pass
     return None
 
 
@@ -837,6 +1010,27 @@ async def process_tab_download(page, context, save_dir, tab_index, tab_label, gr
     pdf_path = None
     if await output_with_full_ssn(page):
         pdf_path = await download_pdf_from_preview(context, save_dir, base)
+
+    # PDF 성공 여부 무관: 잔여 출력 모달(UHJE0002P1) 정리
+    try:
+        stale = await page.evaluate(
+            '(elId) => !!document.getElementById(elId)', BTN_MODAL_CONFIRM
+        )
+        if stale:
+            log("  잔여 출력 모달 정리...")
+            await nexacro_click_button(page, BTN_MODAL_CANCEL)
+            await human_delay(1)
+    except Exception:
+        pass
+
+    # 잔여 rdPreview 탭 정리 (PDF 다운로드 실패로 남은 경우)
+    for pg in context.pages:
+        try:
+            if "rdPreview" in pg.url:
+                await pg.close()
+                log("  잔여 rdPreview 탭 닫기 완료")
+        except Exception:
+            continue
 
     # 통합저장/엑셀저장 (국고지원내역은 통합저장 사용)
     if tab_index == TAB_GOVT:
