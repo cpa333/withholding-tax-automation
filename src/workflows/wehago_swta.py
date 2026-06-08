@@ -1,4 +1,4 @@
-"""Phase 5: WEHAGO 원천징수이행상황신고서 (SWTA0101) 어댑터"""
+"""Phase 6: WEHAGO 원천징수이행상황신고서 (SWTA0101) 어댑터"""
 
 from src.workflows.registry import register
 from src.workflows.base import BaseWorkflow
@@ -6,7 +6,7 @@ from src.batch.state import StateManager
 
 
 @register(
-    phase_id=5,
+    phase_id=6,
     portal="wehago",
     display_name="WEHAGO 원천이행상황신고서",
     enabled=False,

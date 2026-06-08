@@ -1,4 +1,4 @@
-"""Phase 7: 홈택스 원천세 신고 어댑터"""
+"""Phase 8: 홈택스 원천세 신고 어댑터"""
 
 import os
 
@@ -9,7 +9,7 @@ from src.batch.state import StateManager
 
 
 @register(
-    phase_id=7,
+    phase_id=8,
     portal="hometax",
     display_name="홈택스 원천세 신고",
     enabled=False,

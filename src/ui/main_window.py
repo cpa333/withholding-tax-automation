@@ -194,6 +194,7 @@ class MainWindow(QMainWindow):
         import src.workflows.nhis_edi             # noqa: F401
         import src.workflows.nps_edi              # noqa: F401
         import src.workflows.wehago_swsa          # noqa: F401
+        import src.workflows.wehago_salary_pdf    # noqa: F401
         import src.workflows.wehago_swta          # noqa: F401
         import src.workflows.wehago_swer          # noqa: F401
         import src.workflows.hometax              # noqa: F401

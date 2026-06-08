@@ -1,17 +1,15 @@
 """Phase 4: WEHAGO 급여자료입력 (SWSA0101) 어댑터
 
-개별 자동화 함수(download_excel, convert_for_upload, upload_excel, download_pdf)를
-단계별로 호출하여 크래시 복구 지원 + 다중 수임처 배치 처리.
+엑셀 다운로드 → raw data 병합 → 엑셀 업로드까지 수행.
+PDF 발급은 Phase 5(WEHAGO 급여명세 PDF)에서 별도 실행.
 
 플로우:
   0. WEHAGO 메인 복귀
   1. 수임처 급여 페이지 진입
   2. SWSA0101 메뉴 이동 + 드롭다운 설정
   3. 엑셀 다운로드
-  4. 업로드 양식 변환
+  4. 업로드 양식 변환 (raw data 병합 포함)
   5. 엑셀 업로드
-  6. PDF 발급
-  7. 모달 정리
 """
 import asyncio
 import os
@@ -38,8 +36,6 @@ class WehagoSwsaWorkflow(BaseWorkflow):
         {"name": "download_excel",          "index": 3},
         {"name": "convert_excel",           "index": 4},
         {"name": "upload_excel",            "index": 5},
-        {"name": "download_pdf",            "index": 6},
-        {"name": "cleanup_modals",          "index": 7},
     ]
 
     async def run_single(
@@ -199,18 +195,6 @@ class WehagoSwsaWorkflow(BaseWorkflow):
                 state.fail_step(job_id, "upload_excel", "업로드 실패")
                 return False
             state.after_step(job_id, "upload_excel")
-
-        # ── Step 6: PDF 발급 ───────────────────────────────────────────
-        if not state.should_skip_step(job_id, "download_pdf"):
-            state.before_step(job_id, "download_pdf", 6)
-            await download_pdf(page, save_dir)
-            state.after_step(job_id, "download_pdf")
-
-        # ── Step 7: 모달 정리 ─────────────────────────────────────────
-        if not state.should_skip_step(job_id, "cleanup_modals"):
-            state.before_step(job_id, "cleanup_modals", 7)
-            await self._cleanup_print_modals(page)
-            state.after_step(job_id, "cleanup_modals")
 
         return True
 
@@ -409,36 +393,3 @@ class WehagoSwsaWorkflow(BaseWorkflow):
             await click_dialog_button(page, "취소")
 
         return True
-
-    async def _cleanup_print_modals(self, page):
-        """일괄인쇄/일괄PDF 모달 정리
-
-        run_swsa0101() lines 640-666 로직을 추출.
-        """
-        for _ in range(3):
-            closed = await page.evaluate("""() => {
-                const all = document.querySelectorAll('*');
-                for (const el of all) {
-                    try {
-                        const cs = window.getComputedStyle(el);
-                        if ((cs.position !== 'fixed' && cs.position !== 'absolute')
-                            || cs.display === 'none' || el.offsetWidth < 50) continue;
-                        const z = parseInt(cs.zIndex);
-                        if (z < 1000) continue;
-                        if (!el.textContent.includes('일괄인쇄')
-                            && !el.textContent.includes('일괄PDF')) continue;
-                        const btns = el.querySelectorAll('button');
-                        for (const btn of btns) {
-                            if (btn.textContent.trim().startsWith('닫기')
-                                    && btn.offsetWidth > 0) {
-                                btn.click(); return 'closed';
-                            }
-                        }
-                    } catch(e) {}
-                }
-                return null;
-            }""")
-            if closed:
-                await asyncio.sleep(0.5)
-            else:
-                break
