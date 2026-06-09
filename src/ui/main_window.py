@@ -533,10 +533,22 @@ class MainWindow(QMainWindow):
         self.company_table.set_buttons_enabled(False)
         self.company_table.set_selected_run_mode(False)
 
+        # Phase 7: 비밀번호 전달
+        extra_kwargs = {}
+        if self._selected_phase == 7:
+            pw = self.pw_input.text().strip()
+            if not pw:
+                self.statusBar().showMessage("전자신고 비밀번호를 입력하세요")
+                self.company_table.set_run_active(False)
+                self.company_table.set_buttons_enabled(True)
+                return
+            extra_kwargs["password"] = pw
+
         self.runner.start_selected_clients(
             self._selected_phase, client_infos,
             year=self.year_spin.value(),
             month=self.month_spin.value(),
+            **extra_kwargs,
         )
         self._poll_timer.start()
 

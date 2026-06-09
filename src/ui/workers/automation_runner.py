@@ -487,7 +487,8 @@ class AutomationRunner(AsyncWorker):
     def start_selected_clients(self, phase_id: int,
                                client_infos: list[dict],
                                year: int | None = None,
-                               month: int | None = None):
+                               month: int | None = None,
+                               **kwargs):
         """선택건 실행: 여러 수임처에 대해 순차 자동화 실행"""
         self._ensure_running()
         cmd = {
@@ -496,6 +497,7 @@ class AutomationRunner(AsyncWorker):
             "client_infos": client_infos,
             "year": year,
             "month": month,
+            **kwargs,
         }
         self._command_queue.put_nowait(cmd)
 
@@ -506,6 +508,8 @@ class AutomationRunner(AsyncWorker):
         client_infos = cmd.get("client_infos", [])
         year = cmd.get("year")
         month = cmd.get("month")
+        extra_kwargs = {k: v for k, v in cmd.items()
+                        if k not in ("type", "phase_id", "client_infos", "year", "month")}
         total = len(client_infos)
 
         from src.workflows.registry import get_phase_info, get_workflow
@@ -583,6 +587,7 @@ class AutomationRunner(AsyncWorker):
                     management_number=management_number,
                     year=year,
                     month=month,
+                    **extra_kwargs,
                 )
                 if success:
                     self.log_message.emit(f"[{display_name}] ({i+1}/{total}) {client_name} 완료")
