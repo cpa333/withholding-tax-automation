@@ -597,27 +597,39 @@ async def search_clients_by_name(page, name: str):
     2) 조회 버튼 클릭
     3) 결과 로딩 대기
     """
-    # 검색 입력란에 이름 입력
-    search_input = page.locator('#mainCard input[type="text"], #mainCard input:not([type])')
+    # 검색 입력란 — XPath 우선 (CSS 셀렉터는 hidden input 37개 포함하여 부정확)
+    search_input = page.locator(
+        'xpath=//*[@id="mainCard"]/div[2]/div/div[1]/div/span/input'
+    )
     if await search_input.count() > 0:
         await search_input.first.fill("")
         await search_input.first.fill(name)
         log(f"  검색어 입력: {name}")
     else:
-        log("  검색 입력란을 찾을 수 없음 — 전체 조회로 진행")
-        return
+        # CSS fallback: visible text input
+        search_input_css = page.locator('#mainCard input[type="text"]:visible')
+        if await search_input_css.count() > 0:
+            await search_input_css.first.fill("")
+            await search_input_css.first.fill(name)
+            log(f"  검색어 입력 (CSS): {name}")
+        else:
+            log("  검색 입력란을 찾을 수 없음 — 전체 조회로 진행")
+            return
 
-    # 조회 버튼 클릭
-    search_btn = page.locator('#mainCard button').filter(has_text="조회")
+    # 조회 버튼 — XPath 우선
+    search_btn = page.locator(
+        'xpath=//*[@id="mainCard"]/div[1]/div[3]/button'
+    )
     if await search_btn.count() > 0:
         await search_btn.first.click()
         log("  조회 버튼 클릭")
     else:
-        # XPath fallback
-        try:
-            await page.click('//*[@id="mainCard"]/div[1]/div[3]/button', timeout=5000)
-            log("  조회 버튼 클릭 (XPath)")
-        except Exception:
+        # 텍스트 기반 fallback
+        search_btn_txt = page.locator('#mainCard button').filter(has_text="조회")
+        if await search_btn_txt.count() > 0:
+            await search_btn_txt.first.click()
+            log("  조회 버튼 클릭 (텍스트)")
+        else:
             log("  조회 버튼을 찾을 수 없음 — 전체 조회로 진행")
             return
 
