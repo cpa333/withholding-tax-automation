@@ -5,7 +5,7 @@ import sys
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout,
     QSplitter, QPushButton, QHBoxLayout,
-    QCheckBox, QSpinBox, QLabel, QMessageBox,
+    QCheckBox, QSpinBox, QLabel, QLineEdit, QMessageBox,
     QProgressDialog, QApplication,
 )
 from PySide6.QtCore import Qt, QTimer
@@ -177,6 +177,18 @@ class MainWindow(QMainWindow):
         self.dry_run_check.setChecked(True)
         layout.addWidget(self.dry_run_check)
 
+        # 전자신고 비밀번호 (Phase 7 선택 시만 표시)
+        self.pw_label = QLabel("비밀번호")
+        self.pw_label.setVisible(False)
+        layout.addWidget(self.pw_label)
+
+        self.pw_input = QLineEdit()
+        self.pw_input.setPlaceholderText("8~15자리")
+        self.pw_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.pw_input.setFixedWidth(150)
+        self.pw_input.setVisible(False)
+        layout.addWidget(self.pw_input)
+
         layout.addStretch()
 
         # 제어 버튼
@@ -262,6 +274,15 @@ class MainWindow(QMainWindow):
             self.company_table.set_client_mode(False)
             self._load_client_list(portal_override=self._get_portal_for_phase(phase_id))
             self.company_table.set_selected_run_mode(True)
+
+        # Phase 7 선택 시 비밀번호 필드 표시
+        show_pw = (phase_id == 7)
+        self.pw_label.setVisible(show_pw)
+        self.pw_input.setVisible(show_pw)
+        if show_pw:
+            self.pw_input.setFocus()
+        else:
+            self.pw_input.clear()
 
     def _get_portal_for_phase(self, phase_id: int) -> str | None:
         """페이즈 ID에 해당하는 포털 반환"""
@@ -363,19 +384,13 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("수임처 리스트는 '새로 가져오기' 버튼을 사용하세요")
             return
 
-        # Phase 7: 전자신고 비밀번호 입력 필요
+        # Phase 7: 툴바 비밀번호 필드에서 읽기
         password = ""
         if self._selected_phase == 7:
-            from PyQt6.QtWidgets import QInputDialog, QLineEdit
-            password, ok = QInputDialog.getText(
-                self, "전자신고 비밀번호",
-                "전자신고 파일 비밀번호를 입력하세요 (8~15자리):",
-                QLineEdit.Password,
-            )
-            if not ok or not password.strip():
-                self.statusBar().showMessage("비밀번호 입력이 취소되었습니다")
+            password = self.pw_input.text().strip()
+            if not password:
+                self.statusBar().showMessage("전자신고 비밀번호를 입력하세요")
                 return
-            password = password.strip()
 
         self.company_table.set_run_active(True)
         self.pause_btn.setEnabled(True)
