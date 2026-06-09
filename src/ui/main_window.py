@@ -67,6 +67,9 @@ class MainWindow(QMainWindow):
         self.company_table.full_run_btn.setEnabled(False)
         self.company_table.set_client_mode(True)
 
+        # Phase 1 기본 선택 상태 초기화 (이름 필드 표시 등)
+        self._on_phase_selected(1)
+
         # 진행 상황 폴링 타이머 (러너가 실행 중일 때)
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(2000)
