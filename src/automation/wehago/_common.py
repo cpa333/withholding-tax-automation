@@ -744,23 +744,26 @@ async def goto_salary_page(page, company_name):
     log(f"  페이지 이동 완료: {await page.title()}")
 
     # 수당 및 공제등록 모달 처리 (최대 10초 대기)
-    for _ in range(5):
-        await dismiss_dialogs(page)
-        await asyncio.sleep(1)
-        has_modal = await page.evaluate("""() => {
-            const all = document.querySelectorAll('*');
-            for (const el of all) {
-                const cs = window.getComputedStyle(el);
-                if (cs.display === 'none' || el.offsetWidth < 50) continue;
-                if (parseInt(cs.zIndex) < 1000) continue;
-                if (cs.position !== 'fixed' && cs.position !== 'absolute') continue;
-                const txt = el.textContent;
-                if (txt.includes('수당') && txt.includes('공제')) return true;
-            }
-            return false;
-        }""")
-        if not has_modal:
-            break
+    try:
+        for _ in range(5):
+            await dismiss_dialogs(page)
+            await asyncio.sleep(1)
+            has_modal = await page.evaluate("""() => {
+                const all = document.querySelectorAll('*');
+                for (const el of all) {
+                    const cs = window.getComputedStyle(el);
+                    if (cs.display === 'none' || el.offsetWidth < 50) continue;
+                    if (parseInt(cs.zIndex) < 1000) continue;
+                    if (cs.position !== 'fixed' && cs.position !== 'absolute') continue;
+                    const txt = el.textContent;
+                    if (txt.includes('수당') && txt.includes('공제')) return true;
+                }
+                return false;
+            }""")
+            if not has_modal:
+                break
+    except Exception as e:
+        log(f"  수당공제 모달 처리 스킵: {e}")
 
     return True
 
