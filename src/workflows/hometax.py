@@ -1,8 +1,9 @@
 """Phase 8: 홈택스 원천세 신고 어댑터"""
 
 import os
+import glob
 
-from src.config import RESULTS_DIR
+from src.utils.save_path import make_save_dir
 from src.workflows.registry import register
 from src.workflows.base import BaseWorkflow
 from src.batch.state import StateManager
@@ -12,7 +13,7 @@ from src.batch.state import StateManager
     phase_id=8,
     portal="hometax",
     display_name="홈택스 원천세 신고",
-    enabled=False,
+    enabled=True,
 )
 class HometaxWorkflow(BaseWorkflow):
     steps = [
@@ -29,35 +30,27 @@ class HometaxWorkflow(BaseWorkflow):
     ) -> bool:
         """홈택스 원천세 파일변환신고.
 
-        WEHAGO SWER0101에서 생성된 .zip 파일을 홈택스에 업로드.
+        WEHAGO SWER0101에서 생성된 .01 파일을 홈택스에 업로드.
         """
-        import glob
-
-        save_dir = kwargs.get("save_dir", RESULTS_DIR)
+        year = kwargs.get("year")
+        month = kwargs.get("month")
         dry_run = kwargs.get("dry_run", True)
+        save_dir = make_save_dir("원천전자신고", client_name, year=year, month=month)
 
         # 신고파일 찾기
         if not state.should_skip_step(job_id, "find_swer_file"):
             state.before_step(job_id, "find_swer_file", 0)
 
-            # results/{client_name}/원천징수전자신고/*.zip 패턴 검색
-            search_patterns = [
-                os.path.join(save_dir, client_name, "원천징수전자신고", "*.zip"),
-                os.path.join(save_dir, client_name, "*.zip"),
-                os.path.join(save_dir, "*.zip"),
-            ]
-
-            file_path = None
-            for pattern in search_patterns:
-                matches = glob.glob(pattern)
-                if matches:
-                    file_path = max(matches, key=os.path.getmtime)
-                    break
-
-            if not file_path:
-                state.fail_step(job_id, "find_swer_file", "신고파일을 찾을 수 없음")
+            search_pattern = os.path.join(save_dir, "*.01")
+            matches = glob.glob(search_pattern)
+            if not matches:
+                state.fail_step(
+                    job_id, "find_swer_file",
+                    f"신고파일을 찾을 수 없음: {search_pattern}",
+                )
                 return False
 
+            file_path = max(matches, key=os.path.getmtime)
             state.after_step(job_id, "find_swer_file", {"file": file_path})
         else:
             step_data = state.get_step_data(job_id, "find_swer_file")

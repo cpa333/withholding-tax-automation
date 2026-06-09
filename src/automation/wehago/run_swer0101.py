@@ -133,15 +133,17 @@ async def set_password_and_submit(page, password):
 
 
 async def run_swer0101(page, password, nts_folder="원천징수전자신고",
-                       year: int = None, month: int = None):
+                       year: int = None, month: int = None,
+                       save_dir: str = None):
     """원천징수전자신고 전체 자동화
 
     Args:
         page: SmartA 페이지에 위치한 Playwright page
         password: 전자신고 파일 비밀번호
-        nts_folder: WehagoNTS 저장 폴더명
+        nts_folder: WehagoNTS 저장 폴더명 (save_dir=None일 때 사용)
         year: 귀속 연도 (None이면 compute_target_period로 산출)
         month: 귀속 월 (None이면 compute_target_period로 산출)
+        save_dir: 파일 저장 절대경로 (None이면 nts_folder 기반 바탕화면에 저장)
     """
     # [0] SPA 라우팅 초기화: SWSA0101 사이드바 클릭
     log("[SWER0101] 급여자료입력(SWSA0101) 사이드바 클릭 (SPA 라우팅 초기화)...")
@@ -291,7 +293,10 @@ async def run_swer0101(page, password, nts_folder="원천징수전자신고",
     # [7] WehagoNTS 폴더 선택 + 파일 저장
     log("[SWER0101] WehagoNTS 폴더 선택...")
     loop = asyncio.get_event_loop()
-    nts_ok = await loop.run_in_executor(None, select_nts_folder, nts_folder)
+    if save_dir:
+        nts_ok = await loop.run_in_executor(None, select_nts_folder, None, save_dir)
+    else:
+        nts_ok = await loop.run_in_executor(None, select_nts_folder, nts_folder)
 
     if nts_ok:
         log("[SWER0101] 완료 - 전자신고 파일 저장 성공")

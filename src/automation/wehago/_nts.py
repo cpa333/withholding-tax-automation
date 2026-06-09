@@ -27,8 +27,12 @@ def _get_desktop_path():
 DESKTOP_PATH = _get_desktop_path()
 
 
-def select_nts_folder(folder_name):
+def select_nts_folder(folder_name, target_path=None):
     """WehagoNTS 폴더 선택 다이얼로그에서 바탕화면/지정폴더 선택 후 확인.
+
+    Args:
+        folder_name: 트리에서 검색할 폴더명 (target_path=None일 때 저장 폴더명도 겸함)
+        target_path: 파일을 저장할 절대 경로. None이면 ~/Desktop/{folder_name}/ 사용.
 
     처리 흐름:
     1. WehagoNTS 프로세스 대기 (최대 20초)
@@ -62,18 +66,33 @@ def select_nts_folder(folder_name):
         print("  NTS root not found (15초 타임아웃)")
         return False
 
-    target_path = os.path.join(DESKTOP_PATH, folder_name)
+    if target_path is None:
+        target_path = os.path.join(DESKTOP_PATH, folder_name)
     if not os.path.exists(target_path):
         os.makedirs(target_path)
         print(f"  폴더 생성: {target_path}")
+
+    # target_path가 바탕화면 하위 경로면 중첩 네비게이션용 세그먼트 계산
+    path_segments = None
+    try:
+        rel = os.path.relpath(target_path, DESKTOP_PATH)
+        if rel and rel != "." and not rel.startswith(".."):
+            path_segments = [s for s in rel.replace("\\", "/").split("/") if s]
+    except ValueError:
+        pass  # 다른 드라이브면 relpath 실패 — 기존 동작
 
     form = _wait_for_folder_dialog(UIA, uia, nts_root)
     if not form:
         return False
     print("  폴더 선택 창 감지")
 
-    if not _select_tree_folder(UIA, uia, form, folder_name):
-        return False
+    if path_segments and len(path_segments) > 1:
+        if not _select_nested_folder(UIA, uia, form, path_segments):
+            return False
+    else:
+        leaf_name = path_segments[-1] if path_segments else folder_name
+        if not _select_tree_folder(UIA, uia, form, leaf_name):
+            return False
 
     # 경로 확인
     cond_lbl = uia.CreatePropertyCondition(
@@ -214,6 +233,80 @@ def _select_tree_folder(UIA, uia, form, folder_name):
         pass
     print(f"  '{folder_name}' 트리에 없음 → 바탕화면 선택")
     return True
+
+
+def _select_nested_folder(UIA, uia, form, path_segments):
+    """중첩 경로(예: ['원천전자신고_202606', 'SomeClient'])를 트리에서 단계별 선택.
+
+    바탕화면 노드에서 시작해 각 세그먼트를 찾고 확장하며 마지막은 Select.
+    """
+    cond_tree = uia.CreatePropertyCondition(
+        UIA.UIA_AutomationIdPropertyId, "treeDir"
+    )
+    tree = form.FindFirst(UIA.TreeScope_Descendants, cond_tree)
+    if not tree:
+        print("  treeDir not found")
+        return False
+
+    cond_item = uia.CreatePropertyCondition(
+        UIA.UIA_ControlTypePropertyId, UIA.UIA_TreeItemControlTypeId
+    )
+
+    # 바탕화면 찾기
+    items = tree.FindAll(UIA.TreeScope_Children, cond_item)
+    desktop_item = None
+    for i in range(items.Length):
+        if items.GetElement(i).CurrentName == "바탕화면":
+            desktop_item = items.GetElement(i)
+            break
+
+    if not desktop_item:
+        print("  바탕화면 노드 not found")
+        return False
+
+    # 바탕화면 확장
+    try:
+        exp = desktop_item.GetCurrentPattern(UIA.UIA_ExpandCollapsePatternId)
+        exp.QueryInterface(UIA.IUIAutomationExpandCollapsePattern).Expand()
+        time.sleep(1.5)
+    except Exception:
+        pass
+
+    parent = desktop_item
+    for idx, segment in enumerate(path_segments):
+        is_last = (idx == len(path_segments) - 1)
+        sub_items = parent.FindAll(UIA.TreeScope_Descendants, cond_item)
+        found = False
+        for i in range(sub_items.Length):
+            si = sub_items.GetElement(i)
+            if si.CurrentName == segment:
+                if is_last:
+                    # 마지막 세그먼트: Select
+                    try:
+                        sel = si.GetCurrentPattern(UIA.UIA_SelectionItemPatternId)
+                        sel.QueryInterface(UIA.IUIAutomationSelectionItemPattern).Select()
+                        time.sleep(0.5)
+                    except Exception:
+                        pass
+                    print(f"  폴더 선택: {'/'.join(path_segments)}")
+                    return True
+                else:
+                    # 중간 세그먼트: Expand
+                    try:
+                        exp = si.GetCurrentPattern(UIA.UIA_ExpandCollapsePatternId)
+                        exp.QueryInterface(UIA.IUIAutomationExpandCollapsePattern).Expand()
+                        time.sleep(1.5)
+                    except Exception:
+                        pass
+                    parent = si
+                    found = True
+                    break
+        if not found and not is_last:
+            print(f"  중간 폴더 '{segment}' not found")
+            return False
+
+    print(f"  중첩 폴더 선택 실패: {'/'.join(path_segments)}")
+    return False
 
 
 def _handle_nts_modals(UIA, uia, nts_root):

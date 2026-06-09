@@ -7,6 +7,7 @@
 """
 
 from src.utils.human import human_delay
+from src.utils.save_path import make_save_dir
 from src.workflows.registry import register
 from src.workflows.base import BaseWorkflow
 from src.batch.state import StateManager
@@ -38,6 +39,7 @@ class WehagoSwerWorkflow(BaseWorkflow):
         nts_folder = kwargs.get("nts_folder", "원천징수전자신고")
         year = kwargs.get("year")
         month = kwargs.get("month")
+        save_dir = make_save_dir("원천전자신고", client_name, year=year, month=month)
 
         if not password:
             log("  전자신고 비밀번호가 없습니다")
@@ -67,7 +69,7 @@ class WehagoSwerWorkflow(BaseWorkflow):
         if not state.should_skip_step(job_id, "run_swer0101"):
             state.before_step(job_id, "run_swer0101", 2)
             try:
-                await run_swer0101(page, password, nts_folder, year=year, month=month)
+                await run_swer0101(page, password, nts_folder, year=year, month=month, save_dir=save_dir)
                 state.after_step(job_id, "run_swer0101")
             except Exception as e:
                 state.fail_step(job_id, "run_swer0101", str(e))

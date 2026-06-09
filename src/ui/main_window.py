@@ -298,7 +298,7 @@ class MainWindow(QMainWindow):
             self.name_input.setFocus()
 
         # Phase 7 선택 시 비밀번호 필드 표시
-        show_pw = (phase_id == 7)
+        show_pw = (phase_id == 7 or phase_id == 8)
         self.pw_label.setVisible(show_pw)
         self.pw_input.setVisible(show_pw)
         if show_pw:
@@ -406,9 +406,9 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("수임처 리스트는 '새로 가져오기' 버튼을 사용하세요")
             return
 
-        # Phase 7: 툴바 비밀번호 필드에서 읽기
+        # Phase 7/8: 툴바 비밀번호 필드에서 읽기
         password = ""
-        if self._selected_phase == 7:
+        if self._selected_phase in (7, 8):
             password = self.pw_input.text().strip()
             if not password:
                 self.statusBar().showMessage("전자신고 비밀번호를 입력하세요")
@@ -555,9 +555,9 @@ class MainWindow(QMainWindow):
         self.company_table.set_buttons_enabled(False)
         self.company_table.set_selected_run_mode(False)
 
-        # Phase 7: 비밀번호 전달
+        # Phase 7/8: 비밀번호 전달
         extra_kwargs = {}
-        if self._selected_phase == 7:
+        if self._selected_phase in (7, 8):
             pw = self.pw_input.text().strip()
             if not pw:
                 self.statusBar().showMessage("전자신고 비밀번호를 입력하세요")
