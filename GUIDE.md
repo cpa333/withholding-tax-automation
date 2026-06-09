@@ -49,18 +49,22 @@
 - "전체실행" 버튼은 Phase 1에서 숨김 처리됨
 
 담당자 필터링 동작 (`search_clients_by_name`):
-1. 수임처관리 페이지의 검색 입력란(`#mainCard input`)에 담당자 이름 입력
-2. 조회 버튼(`#mainCard button` "조회") 클릭 → 필터링된 결과 대기
-3. 이름이 비어있으면 이 단계를 건너뛰고 전체 수임처 조회
+1. `wait_for_selector`로 검색 입력란이 SPA 렌더링될 때까지 대기 (10초 타임아웃)
+2. XPath 기반으로 검색 입력란(`#mainCard/div[2]/div/div[1]/div/span/input`)에 담당자 이름 입력
+3. XPath 기반으로 조회 버튼(`#mainCard/div[1]/div[3]/button`) 클릭 → 필터링된 결과 대기
+4. 이름이 비어있으면 이 단계를 건너뛰고 전체 수임처 조회
+
+> **참고:** CSS 셀렉터(`#mainCard input`)는 hidden input 37개가 포함되어 부정확하므로 XPath 우선 사용.
 
 스크래핑 동작 (`get_clients_with_biz_from_taxagent`):
 1. 수임처관리 페이지(`tedge/#/taxagent`)로 이동 → 모달 닫기 → 리스트 로딩 대기
 2. (선택) 담당자 이름 필터링 수행
 3. 스크롤 컨테이너를 끝까지 스크롤하여 전체 카드 로드
-4. 각 카드를 순차 클릭 → `div.cl_basicinfo_section` 상세 영역에서 사업자등록번호(`\d{3}-\d{2}-\d{5}`) 추출
-5. 수임처명은 `li.is_linkbtn.selected > span.company_name_text`에서 추출
-6. `[테스트]` 접두사 제거 후 DB에 wehago 포털로 저장 (수임처명 + 사업자등록번호)
-7. 레거시: `get_all_clients_from_management()` (이름만 수집)은 별도 유지
+4. 각 카드를 순차 클릭(0.8초 대기) → `div.cl_basicinfo_section` 상세 영역에서 사업자등록번호(`\d{3}-\d{2}-\d{5}`) 추출
+5. **사업자번호 누락 시 재시도:** 이름은 있고 사업자번호만 비어있으면 상세 영역 로딩 지연으로 판단, 0.5초 간격 최대 3회 재시도
+6. 수임처명은 `li.is_linkbtn.selected > span.company_name_text`에서 추출
+7. `[테스트]` 접두사 제거 후 DB에 wehago 포털로 저장 (수임처명 + 사업자등록번호)
+8. 레거시: `get_all_clients_from_management()` (이름만 수집)은 별도 유지
 
 > **참고:** 메인 페이지(`#/main`)의 카드 UI는 SPA 가상 스크롤로 인해 항상 20개만 DOM에 렌더링되어 전체 수임처를 보장하지 않음.
 
