@@ -684,30 +684,38 @@ async def get_clients_with_biz_from_taxagent(page):
         if not clicked:
             continue
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.8)
 
-        # 상세 영역에서 이름과 사업자번호 추출
-        info = await _safe_evaluate(page, r'''() => {
-            // cl_basicinfo_section에 상세 정보 표시됨
-            const infoEl = document.querySelector('.cl_basicinfo_section');
-            if (!infoEl) return null;
+        # 상세 영역에서 이름과 사업자번호 추출 (최대 2회 재시도)
+        info = None
+        for attempt in range(3):
+            info = await _safe_evaluate(page, r'''() => {
+                // cl_basicinfo_section에 상세 정보 표시됨
+                const infoEl = document.querySelector('.cl_basicinfo_section');
+                if (!infoEl) return null;
 
-            const text = infoEl.textContent;
+                const text = infoEl.textContent;
 
-            // 사업자등록번호 패턴 (XXX-XX-XXXXX)
-            const bizMatch = text.match(/(\d{3}-\d{2}-\d{5})/);
-            const bizNum = bizMatch ? bizMatch[1] : '';
+                // 사업자등록번호 패턴 (XXX-XX-XXXXX)
+                const bizMatch = text.match(/(\d{3}-\d{2}-\d{5})/);
+                const bizNum = bizMatch ? bizMatch[1] : '';
 
-            // 수임처명: 클릭된 li.selected의 company_name_text에서
-            const selectedLi = document.querySelector('li.is_linkbtn.selected');
-            let name = '';
-            if (selectedLi) {
-                const nameEl = selectedLi.querySelector('span.company_name_text');
-                if (nameEl) name = nameEl.textContent.trim();
-            }
+                // 수임처명: 클릭된 li.selected의 company_name_text에서
+                const selectedLi = document.querySelector('li.is_linkbtn.selected');
+                let name = '';
+                if (selectedLi) {
+                    const nameEl = selectedLi.querySelector('span.company_name_text');
+                    if (nameEl) name = nameEl.textContent.trim();
+                }
 
-            return {name, business_number: bizNum};
-        }''')
+                return {name, business_number: bizNum};
+            }''')
+
+            # 이름은 있고 사업자번호만 비어있으면 상세 영역 로딩 지연 → 재시도
+            if info and info["name"] and info.get("business_number"):
+                break
+            if attempt < 2:
+                await asyncio.sleep(0.5)
 
         if info and info["name"]:
             name = info["name"].replace("[테스트] ", "")
