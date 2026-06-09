@@ -363,15 +363,32 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("수임처 리스트는 '새로 가져오기' 버튼을 사용하세요")
             return
 
+        # Phase 7: 전자신고 비밀번호 입력 필요
+        password = ""
+        if self._selected_phase == 7:
+            from PyQt6.QtWidgets import QInputDialog, QLineEdit
+            password, ok = QInputDialog.getText(
+                self, "전자신고 비밀번호",
+                "전자신고 파일 비밀번호를 입력하세요 (8~15자리):",
+                QLineEdit.Password,
+            )
+            if not ok or not password.strip():
+                self.statusBar().showMessage("비밀번호 입력이 취소되었습니다")
+                return
+            password = password.strip()
+
         self.company_table.set_run_active(True)
         self.pause_btn.setEnabled(True)
 
-        self.runner.start_phase(
-            self._selected_phase,
+        start_kwargs = dict(
             dry_run=self.dry_run_check.isChecked(),
             year=self.year_spin.value(),
             month=self.month_spin.value(),
         )
+        if password:
+            start_kwargs["password"] = password
+
+        self.runner.start_phase(self._selected_phase, **start_kwargs)
         self._poll_timer.start()
 
     def _on_pause(self):

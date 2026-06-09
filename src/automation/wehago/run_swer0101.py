@@ -207,19 +207,28 @@ async def run_swer0101(page, password, nts_folder="원천징수전자신고"):
     log(f"  코드도움: {confirmed}")
     await asyncio.sleep(2)
 
-    # [4] 제작(F4) 버튼 클릭
+    # [4] 제작(F4) 버튼 클릭 — Playwright real click (JS click skips disabled buttons)
     log("[SWER0101] 제작(F4) 클릭...")
-    clicked_f4 = await page.evaluate("""() => {
-        const all = document.querySelectorAll('button.WSC_LUXButton');
-        for (const btn of all) {
-            if (btn.textContent.trim() === '제작(F4)') {
-                const r = btn.getBoundingClientRect();
-                if (r.y < 200 && r.width > 0) { btn.click(); return true; }
-            }
-        }
-        return false;
-    }""")
-    log(f"  clicked: {clicked_f4}")
+    try:
+        f4_btn = page.locator('button.WSC_LUXButton:has-text("제작(F4)")')
+        if await f4_btn.count() > 0:
+            await f4_btn.first.click(timeout=5000)
+            log("  clicked (Playwright)")
+        else:
+            log("  F4 button not found, trying JS fallback...")
+            clicked_f4 = await page.evaluate("""() => {
+                const all = document.querySelectorAll('button.WSC_LUXButton');
+                for (const btn of all) {
+                    if (btn.textContent.trim() === '제작(F4)') {
+                        const r = btn.getBoundingClientRect();
+                        if (r.y < 200 && r.width > 0) { btn.click(); return true; }
+                    }
+                }
+                return false;
+            }""")
+            log(f"  clicked (JS): {clicked_f4}")
+    except Exception as e:
+        log(f"  Playwright click error: {e}")
 
     # [5] 모달 대기: 참고사항 vs 비밀번호
     log("[SWER0101] 모달 대기...")
