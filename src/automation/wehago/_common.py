@@ -593,33 +593,37 @@ async def get_all_clients_from_management(page):
 async def search_clients_by_name(page, name: str):
     """수임처관리 페이지에서 담당자 이름으로 검색.
 
-    1) 검색 입력란에 이름 입력
-    2) 조회 버튼 클릭
-    3) 결과 로딩 대기
+    1) 검색 입력란이 렌더링될 때까지 대기
+    2) 검색 입력란에 이름 입력
+    3) 조회 버튼 클릭
+    4) 결과 로딩 대기
     """
-    # 검색 입력란 — XPath 우선 (CSS 셀렉터는 hidden input 37개 포함하여 부정확)
-    search_input = page.locator(
-        'xpath=//*[@id="mainCard"]/div[2]/div/div[1]/div/span/input'
-    )
+    XPATH_INPUT = 'xpath=//*[@id="mainCard"]/div[2]/div/div[1]/div/span/input'
+    XPATH_BTN = 'xpath=//*[@id="mainCard"]/div[1]/div[3]/button'
+
+    # 검색 입력란이 렌더링될 때까지 대기 (SPA 렌더링 지연 고려)
+    try:
+        await page.wait_for_selector(
+            'xpath=//*[@id="mainCard"]/div[2]/div/div[1]/div/span/input',
+            timeout=10000,
+        )
+        log("  검색 입력란 로딩 확인")
+    except Exception:
+        log("  검색 입력란 대기 시간 초과 — 전체 조회로 진행")
+        return
+
+    # 검색 입력란에 이름 입력
+    search_input = page.locator(XPATH_INPUT)
     if await search_input.count() > 0:
         await search_input.first.fill("")
         await search_input.first.fill(name)
         log(f"  검색어 입력: {name}")
     else:
-        # CSS fallback: visible text input
-        search_input_css = page.locator('#mainCard input[type="text"]:visible')
-        if await search_input_css.count() > 0:
-            await search_input_css.first.fill("")
-            await search_input_css.first.fill(name)
-            log(f"  검색어 입력 (CSS): {name}")
-        else:
-            log("  검색 입력란을 찾을 수 없음 — 전체 조회로 진행")
-            return
+        log("  검색 입력란을 찾을 수 없음 — 전체 조회로 진행")
+        return
 
-    # 조회 버튼 — XPath 우선
-    search_btn = page.locator(
-        'xpath=//*[@id="mainCard"]/div[1]/div[3]/button'
-    )
+    # 조회 버튼 클릭
+    search_btn = page.locator(XPATH_BTN)
     if await search_btn.count() > 0:
         await search_btn.first.click()
         log("  조회 버튼 클릭")
