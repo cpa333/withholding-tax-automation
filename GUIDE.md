@@ -33,10 +33,11 @@
 | 1 | WEHAGO | 수임처 리스트 확보 | 완료 |
 | 2 | 국민건강보험 EDI | 결정내역 PDF/Excel 다운로드 | 완료 |
 | 3 | 국민연금 EDI | 결정내역 PDF/Excel 다운로드 | 완료 |
-| 4 | WEHAGO | 급여자료입력 (SWSA0101) | 구현 |
-| 5 | WEHAGO | 원천이행상황신고서 (SWTA0101) | 구현 |
-| 6 | WEHAGO | 원천전자신고 (SWER0101) | 구현 |
-| 7 | 홈택스 | 종합소득세 신고 | 구현 |
+| 4 | WEHAGO | 급여자료입력 (SWSA0101) | 완료 |
+| 5 | WEHAGO | 급여명세 PDF | 완료 |
+| 6 | WEHAGO | 원천이행상황신고서 (SWTA0101) | 완료 |
+| 7 | WEHAGO | 원천전자신고 (SWER0101) | 개발중 |
+| 8 | 홈택스 | 원천세 신고 | 개발중 |
 
 ### Phase 1: 수임처 리스트 확보 (WEHAGO)
 
@@ -92,6 +93,19 @@ Nexacro 기반 웹 프레임워크로 일반 DOM click이 동작하지 않음:
 
 Phase 2/3에서 수임처 테이블의 특정 행을 Ctrl/Shift 클릭으로 다중 선택한 후 "선택건 실행" 버튼으로 해당 수임처만 즉시 실행 가능. BatchEngine 없이 직접 워크플로우를 실행한다.
 
+### Phase 6: 원천이행상황신고서 (WEHAGO — SWTA0101)
+
+Phase 1-5와 완전히 독립적으로 동작한다. NHIS/NPS 원천데이터나 급여 엑셀 없이도 실행 가능.
+
+1. Chrome 실행 → WEHAGO 접속 (Phase 1, 4, 5와 포털 공유)
+2. 사용자 공동인증서 수동 로그인
+3. 수임처별 순차 처리:
+   - **WEHAGO 메인 복귀** → 사업자번호 검색 → 수임처명 fallback
+   - **SWSA0101 사이드바 클릭** (SPA 라우팅 초기화)
+   - **SWTA0101 메뉴 이동** → 신고유형(매월/반기) 자동 감지
+   - **기간 설정**: 매월 → 전월, 반기 → 상/하반기 자동 판단
+   - **조회 → 마감/마감해제**: 이미 마감이면 스킵, 미마감이면 2단계 모달(유의사항 → 마감완료) 자동 처리
+
 ## 4. UI 레이아웃
 
 ```
@@ -109,10 +123,11 @@ Phase 2/3에서 수임처 테이블의 특정 행을 Ctrl/Shift 클릭으로 다
 | ▶ 3 국민연금        |  [✓] 1. 사업장 선택                         |
 |   (5/24 진행중)     |  [▶] 2. 결정내역 이동                       |
 |                     |  [ ] 3. 2차 상세 진입                       |
-| 4 WEHAGO 급여  ⏳   |                                             |
-| 5 WEHAGO 이행  ⏳   |                                             |
-| 6 WEHAGO 신고  ⏳   |                                             |
-| 7 홈택스 신고  ⏳   |                                             |
+| 4 WEHAGO 급여입력   |                                             |
+| 5 WEHAGO 급여PDF    |                                             |
+| ▶ 6 WEHAGO 이행     |                                             |
+| 7 WEHAGO 전자신고 ⏳ |                                             |
+| 8 홈택스 신고    ⏳  |                                             |
 +---------------------+---------------------------------------------+
 |  [14:32:11] [국민연금] 삼성전자 - 결정내역 이동...                 |
 |  [14:32:15] [국민연금] 삼성전자 - 2차 행 발견 (row=3)              |
@@ -158,9 +173,10 @@ withholding-tax-automation/
 │   │   ├── nhis_edi.py             # Phase 2
 │   │   ├── nps_edi.py              # Phase 3
 │   │   ├── wehago_swsa.py          # Phase 4
-│   │   ├── wehago_swta.py          # Phase 5
-│   │   ├── wehago_swer.py          # Phase 6
-│   │   └── hometax.py              # Phase 7
+│   │   ├── wehago_salary_pdf.py    # Phase 5
+│   │   ├── wehago_swta.py          # Phase 6
+│   │   ├── wehago_swer.py          # Phase 7
+│   │   └── hometax.py              # Phase 8
 │   │
 │   ├── automation/                 # 포털별 자동화 (수정 없이 재사용)
 │   │   ├── wehago/                 # WEHAGO 포털
@@ -220,10 +236,10 @@ AutomationRunner (AsyncWorker)
 
 | Phase | 포털 | URL |
 |-------|------|-----|
-| 1, 4, 5, 6 | WEHAGO | https://www.wehago.com/ |
+| 1, 4, 5, 6, 7 | WEHAGO | https://www.wehago.com/ |
 | 2 | 국민건강보험 EDI | https://edi.nhis.or.kr/ |
 | 3 | 국민연금 EDI | https://edi.nps.or.kr/ |
-| 7 | 홈택스 | https://www.hometax.go.kr/ |
+| 8 | 홈택스 | https://www.hometax.go.kr/ |
 
 모든 포털에서 CDP 포트 9223을 사용한다. Chrome은 `subprocess.Popen`으로 실행하며, Playwright는 `connect_over_cdp`로 연결한다.
 
