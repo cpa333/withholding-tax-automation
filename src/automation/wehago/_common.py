@@ -111,11 +111,27 @@ async def dismiss_dialogs(page):
                 const t = btn.textContent.trim();
                 if (t.startsWith('닫기') && btn.offsetWidth > 0) { btn.click(); return '닫기'; }
             }
-            // 수당 및 공제등록 모달: display:none으로 강제 숨김
-            // (z:1100 오버레이가 X 버튼을 덮어 JS/mouse click 불가)
+            // 수당 및 공제등록 모달: 2단계 처리
+            // 1) "비과세 설정탭에 설정되지 않은 코드가 있습니다" → 취소
+            // 2) 첫 번째 "수당 및 공제등록" → 확인
+            // 3) 버튼 못 찾으면 force-hide (fallback)
             if (text.includes('수당 및 공제등록') || text.includes('수당 및 공제 등록')) {
+                // 1) 비과세 설정 안내 → 취소
+                if (text.includes('비과세') || text.includes('설정되지 않은 코드')) {
+                    for (const btn of btns) {
+                        if (btn.textContent.trim() === '취소' && btn.offsetWidth > 0) {
+                            btn.click(); return '수당공제→취소';
+                        }
+                    }
+                }
+                // 2) 첫 번째 수당공제 모달 → 확인
+                for (const btn of btns) {
+                    if (btn.textContent.trim() === '확인' && btn.offsetWidth > 0) {
+                        btn.click(); return '수당공제→확인';
+                    }
+                }
+                // 3) fallback: force-hide
                 target.el.style.display = 'none';
-                // z:1100 검은 오버레이도 함께 숨김
                 const siblings = target.el.parentElement?.children;
                 if (siblings) {
                     for (const sib of siblings) {
@@ -726,6 +742,26 @@ async def goto_salary_page(page, company_name):
         return False
 
     log(f"  페이지 이동 완료: {await page.title()}")
+
+    # 수당 및 공제등록 모달 처리 (최대 10초 대기)
+    for _ in range(5):
+        await dismiss_dialogs(page)
+        await asyncio.sleep(1)
+        has_modal = await page.evaluate("""() => {
+            const all = document.querySelectorAll('*');
+            for (const el of all) {
+                const cs = window.getComputedStyle(el);
+                if (cs.display === 'none' || el.offsetWidth < 50) continue;
+                if (parseInt(cs.zIndex) < 1000) continue;
+                if (cs.position !== 'fixed' && cs.position !== 'absolute') continue;
+                const txt = el.textContent;
+                if (txt.includes('수당') && txt.includes('공제')) return true;
+            }
+            return false;
+        }""")
+        if not has_modal:
+            break
+
     return True
 
 
