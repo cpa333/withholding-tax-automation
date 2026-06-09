@@ -126,8 +126,8 @@ def convert_for_upload(download_path, *, nhis_data=None, nps_member_data=None,
                 upload_path, nhis_data, nps_member_data,
                 nps_retro_data, nps_govt_data,
             )
-            log(f"  원천데이터 반영: {merge_result.employees_matched}명 매칭"
-                f" (NHIS {merge_result.nhis_applied}명, NPS {merge_result.nps_applied}명)")
+            log(f"  [원천데이터 반영] NHIS {merge_result.nhis_applied}명, NPS {merge_result.nps_applied}명"
+                f" ({merge_result.employees_matched}명 매칭)")
             for w in merge_result.warnings:
                 log(f"  WARN: {w}")
         except Exception as e:

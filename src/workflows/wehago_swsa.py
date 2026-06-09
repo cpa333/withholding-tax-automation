@@ -45,7 +45,7 @@ class WehagoSwsaWorkflow(BaseWorkflow):
         from src.automation.wehago._common import (
             goto_salary_page, dismiss_dialogs, dismiss_ai_briefing_popup,
             ensure_full_tab, click_menu, goto_menu_page, select_dropdown,
-            click_dialog_button,
+            click_dialog_button, log,
         )
         from src.automation.wehago.run_swsa0101 import (
             download_excel, convert_for_upload, upload_excel, download_pdf,
@@ -94,18 +94,15 @@ class WehagoSwsaWorkflow(BaseWorkflow):
                     if found_name and await goto_salary_page(page, found_name):
                         goto_ok = True
                 except Exception as e:
-                    from src.automation.wehago._common import log
                     log(f"  사업자번호 검색 예외: {e}")
 
             # --- FALLBACK: 수임처명 직접 진입 (기존 작동 방식) ---
             if not goto_ok:
                 try:
-                    from src.automation.wehago._common import log
                     log(f"  수임처명 '{client_name}'으로 직접 진입...")
                     if await goto_salary_page(page, client_name):
                         goto_ok = True
                 except Exception as e:
-                    from src.automation.wehago._common import log
                     log(f"  수임처명 진입 예외: {e}")
 
             if not goto_ok:
