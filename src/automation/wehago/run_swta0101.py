@@ -16,11 +16,13 @@ from src.automation.wehago._common import (
 )
 
 
-async def run_swta0101(page):
+async def run_swta0101(page, year: int = None, month: int = None):
     """원천징수이행상황신고서 자동화
 
     Args:
         page: SmartA 페이지에 위치한 Playwright page
+        year: 귀속 연도 (None이면 compute_target_period로 산출)
+        month: 귀속 월 (None이면 compute_target_period로 산출)
     """
     # [0] SPA 라우팅 초기화: SWSA0101 사이드바 클릭
     log("[SWTA0101] 급여자료입력(SWSA0101) 사이드바 클릭 (SPA 라우팅 초기화)...")
@@ -40,13 +42,13 @@ async def run_swta0101(page):
     log(f"  신고유형: {period_type}")
 
     # [3] 기간 설정
-    year, month = compute_target_period()
+    if year is None or month is None:
+        year, month = compute_target_period()
     if period_type == "매월":
         log(f"[SWTA0101] 매월 → {year}년 {month:02d}월")
         await set_period_fields(page, year, month, month)
     elif period_type == "반기":
-        current_month = datetime.now().month
-        if current_month >= 7:
+        if month >= 7:
             log(f"[SWTA0101] 반기 → {year}년 07월 ~ 12월")
             await set_period_fields(page, year, 7, 12)
         else:

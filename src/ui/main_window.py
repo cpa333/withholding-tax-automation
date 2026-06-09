@@ -1,6 +1,7 @@
 """메인 윈도우 — 전체 UI 레이아웃 관리"""
 
 import sys
+from datetime import datetime
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout,
@@ -163,7 +164,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("연도"))
         self.year_spin = QSpinBox()
         self.year_spin.setRange(2024, 2030)
-        self.year_spin.setValue(2026)
+        self.year_spin.setValue(datetime.now().year)
         self.year_spin.setFixedWidth(70)
         layout.addWidget(self.year_spin)
 
@@ -171,7 +172,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("월"))
         self.month_spin = QSpinBox()
         self.month_spin.setRange(1, 12)
-        self.month_spin.setValue(5)
+        self.month_spin.setValue(datetime.now().month)
         self.month_spin.setFixedWidth(50)
         layout.addWidget(self.month_spin)
 

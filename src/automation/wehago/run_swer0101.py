@@ -132,13 +132,16 @@ async def set_password_and_submit(page, password):
     return False
 
 
-async def run_swer0101(page, password, nts_folder="원천징수전자신고"):
+async def run_swer0101(page, password, nts_folder="원천징수전자신고",
+                       year: int = None, month: int = None):
     """원천징수전자신고 전체 자동화
 
     Args:
         page: SmartA 페이지에 위치한 Playwright page
         password: 전자신고 파일 비밀번호
         nts_folder: WehagoNTS 저장 폴더명
+        year: 귀속 연도 (None이면 compute_target_period로 산출)
+        month: 귀속 월 (None이면 compute_target_period로 산출)
     """
     # [0] SPA 라우팅 초기화: SWSA0101 사이드바 클릭
     log("[SWER0101] 급여자료입력(SWSA0101) 사이드바 클릭 (SPA 라우팅 초기화)...")
@@ -182,7 +185,8 @@ async def run_swer0101(page, password, nts_folder="원천징수전자신고"):
         await asyncio.sleep(0.5)
 
     # [2] 지급기간 설정
-    year, month = compute_target_period()
+    if year is None or month is None:
+        year, month = compute_target_period()
     log(f"[SWER0101] 지급기간: {year}년 {month:02d}월")
     await set_period_fields(page, year, month, month)
 

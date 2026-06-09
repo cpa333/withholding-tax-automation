@@ -36,6 +36,8 @@ class WehagoSwerWorkflow(BaseWorkflow):
 
         password = kwargs.get("password", "")
         nts_folder = kwargs.get("nts_folder", "원천징수전자신고")
+        year = kwargs.get("year")
+        month = kwargs.get("month")
 
         if not password:
             log("  전자신고 비밀번호가 없습니다")
@@ -65,7 +67,7 @@ class WehagoSwerWorkflow(BaseWorkflow):
         if not state.should_skip_step(job_id, "run_swer0101"):
             state.before_step(job_id, "run_swer0101", 2)
             try:
-                await run_swer0101(page, password, nts_folder)
+                await run_swer0101(page, password, nts_folder, year=year, month=month)
                 state.after_step(job_id, "run_swer0101")
             except Exception as e:
                 state.fail_step(job_id, "run_swer0101", str(e))

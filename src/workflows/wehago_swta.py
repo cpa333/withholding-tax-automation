@@ -34,6 +34,9 @@ class WehagoSwtaWorkflow(BaseWorkflow):
         )
         from src.automation.wehago.run_swta0101 import run_swta0101
 
+        year = kwargs.get("year")
+        month = kwargs.get("month")
+
         # ── Step 0: WEHAGO 메인 복귀 ──────────────────────────────────
         if not state.should_skip_step(job_id, "navigate_to_wehago_main"):
             state.before_step(job_id, "navigate_to_wehago_main", 0)
@@ -58,7 +61,7 @@ class WehagoSwtaWorkflow(BaseWorkflow):
         if not state.should_skip_step(job_id, "run_swta0101"):
             state.before_step(job_id, "run_swta0101", 2)
             try:
-                await run_swta0101(page)
+                await run_swta0101(page, year=year, month=month)
                 state.after_step(job_id, "run_swta0101")
             except Exception as e:
                 state.fail_step(job_id, "run_swta0101", str(e))
