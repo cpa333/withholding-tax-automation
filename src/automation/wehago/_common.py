@@ -111,27 +111,11 @@ async def dismiss_dialogs(page):
                 const t = btn.textContent.trim();
                 if (t.startsWith('닫기') && btn.offsetWidth > 0) { btn.click(); return '닫기'; }
             }
-            // 수당 및 공제등록 모달: 2단계 처리
-            // 1) "비과세 설정탭에 설정되지 않은 코드가 있습니다" → 취소
-            // 2) 첫 번째 "수당 및 공제등록" → 확인
-            // 3) 버튼 못 찾으면 force-hide (fallback)
+            // 수당 및 공제등록 모달: display:none으로 강제 숨김
+            // (z:1100 오버레이가 X 버튼을 덮어 JS/mouse click 불가)
             if (text.includes('수당 및 공제등록') || text.includes('수당 및 공제 등록')) {
-                // 1) 비과세 설정 안내 → 취소
-                if (text.includes('비과세') || text.includes('설정되지 않은 코드')) {
-                    for (const btn of btns) {
-                        if (btn.textContent.trim() === '취소' && btn.offsetWidth > 0) {
-                            btn.click(); return '수당공제→취소';
-                        }
-                    }
-                }
-                // 2) 첫 번째 수당공제 모달 → 확인
-                for (const btn of btns) {
-                    if (btn.textContent.trim() === '확인' && btn.offsetWidth > 0) {
-                        btn.click(); return '수당공제→확인';
-                    }
-                }
-                // 3) fallback: force-hide
                 target.el.style.display = 'none';
+                // z:1100 검은 오버레이도 함께 숨김
                 const siblings = target.el.parentElement?.children;
                 if (siblings) {
                     for (const sib of siblings) {
@@ -690,8 +674,10 @@ async def goto_salary_page(page, company_name):
     """수임처의 SmartA 급여 메인 페이지로 이동
 
     window.open 인터셉트 → 수임처 카드 '급여' 버튼 클릭 → URL 캡처 → page.goto
+    모든 page.evaluate 호출을 _safe_evaluate로 래핑하여
+    페이지 전환 중 예외가 브라우저 종료로 오인되는 것을 방지.
     """
-    await page.evaluate("""() => {
+    await _safe_evaluate(page, """() => {
         window.__capturedUrl = null;
         window.__origOpen = window.open;
         window.open = function(url) {
@@ -700,7 +686,7 @@ async def goto_salary_page(page, company_name):
         };
     }""")
 
-    clicked = await page.evaluate("""(companyName) => {
+    clicked = await _safe_evaluate(page, """(companyName) => {
         const allDivs = document.querySelectorAll('[id^="company_"]');
         for (const div of allDivs) {
             const nameEl = div.querySelector('a');
@@ -723,8 +709,8 @@ async def goto_salary_page(page, company_name):
         return False
 
     await asyncio.sleep(1)
-    url = await page.evaluate("() => window.__capturedUrl")
-    await page.evaluate("() => { window.open = window.__origOpen; }")
+    url = await _safe_evaluate(page, "() => window.__capturedUrl")
+    await _safe_evaluate(page, "() => { window.open = window.__origOpen; }")
 
     if not url:
         log("  SmartA URL 캡처 실패")
@@ -744,8 +730,8 @@ async def goto_salary_page(page, company_name):
     log(f"  페이지 이동 완료: {await page.title()}")
 
     # 수당 및 공제등록 모달 처리 (최대 10초 대기)
-    # 모든 page.evaluate 호출을 _safe_evaluate로 래핑하여
-    # 예외가 브라우저 종료로 오인되어 세션이 끊기는 것을 방지
+    # _safe_evaluate 사용으로 예외가 브라우저 종료로 오인되어
+    # 세션이 끊기는 것을 방지
     for _ in range(5):
         try:
             await dismiss_dialogs(page)

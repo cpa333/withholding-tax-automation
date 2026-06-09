@@ -13,28 +13,43 @@ import traceback
 from src.config import DB_PATH, PORTAL_URLS
 from src.ui.workers.async_bridge import AsyncWorker
 
-# 브라우저 연결 끊김을 나타내는 예외 메시지 패턴
+# 브라우저가 확실히 종료된 패턴 (즉시 disconnect 처리)
 _BROWSER_DISCONNECT_PATTERNS = (
     "Target page, context or browser has been closed",
     "Target closed",
     "Browser closed",
     "Connection closed",
     "Browser has been disconnected",
-    "Session expired",
-    "Execution context was destroyed",
     "net::ERR_CONNECTION_REFUSED",
     "No target found",
-    "Page navigated",
+)
+
+# 페이지 전환 중 발생할 수 있는 일시적 에러 패턴
+# (실제 브라우저 종료가 아닐 수 있으므로 _is_page_alive로 확인 후 판단)
+_BROWSER_TRANSIENT_PATTERNS = (
+    "Execution context was destroyed",
     "Frame was detached",
+    "Page navigated",
+    "Session expired",
 )
 
 
 def _is_browser_disconnected(error: Exception) -> bool:
-    """예외가 브라우저 연결 끊김인지 판별"""
+    """예외가 브라우저 연결 끊김인지 판별
+
+    하드 disconnect 패턴만 True 반환.
+    일시적 에러 패턴은 _is_page_alive()로 별도 확인 필요.
+    """
     if isinstance(error, _BrowserClosedError):
         return True
     msg = str(error).lower()
     return any(p.lower() in msg for p in _BROWSER_DISCONNECT_PATTERNS)
+
+
+def _is_transient_error(error: Exception) -> bool:
+    """예외가 페이지 전환 중 일시적 에러인지 판별"""
+    msg = str(error).lower()
+    return any(p.lower() in msg for p in _BROWSER_TRANSIENT_PATTERNS)
 
 
 class _BrowserClosedError(Exception):
@@ -89,8 +104,17 @@ class AutomationRunner(AsyncWorker):
                     elif cmd.get("type") == "run_selected_clients":
                         await self._handle_run_selected_clients(cmd)
                 except Exception as e:
-                    # 예외 메시지 패턴 또는 실제 브라우저 상태로 판별
-                    if _is_browser_disconnected(e) or not await self._is_page_alive():
+                    # 하드 disconnect → 즉시 복구/종료 처리
+                    if _is_browser_disconnected(e):
+                        await self._handle_browser_disconnect(cmd, e)
+                    # 일시적 에러 → _is_page_alive로 실제 상태 확인
+                    elif _is_transient_error(e):
+                        if not await self._is_page_alive():
+                            await self._handle_browser_disconnect(cmd, e)
+                        else:
+                            self.log_message.emit(f"일시적 오류 (복구됨): {e}")
+                    # 기타 에러 → 브라우저 상태 확인 후 처리
+                    elif not await self._is_page_alive():
                         await self._handle_browser_disconnect(cmd, e)
                     else:
                         tb = traceback.format_exc()
@@ -122,27 +146,30 @@ class AutomationRunner(AsyncWorker):
             self.phase_changed.emit(phase_id, "failed")
             return
 
-        # Chrome 실행 + 로그인
-        if not await self._ensure_browser(portal):
-            self.phase_changed.emit(phase_id, "failed")
-            self.error_occurred.emit("Chrome 연결 실패")
-            return
+        # Chrome 실행 + 로그인 (기존 세션 재사용 우선)
+        reused = await self._try_reuse_browser(portal)
 
-        if self._stop_event.is_set():
-            self.phase_changed.emit(phase_id, "failed")
-            return
-
-        # 포털별 로그인 대기
-        if not await self._wait_for_login(portal):
-            if self._stop_event.is_set():
-                self.log_message.emit("[사용자 중단] 로그인 대기 중단")
-            else:
+        if not reused:
+            if not await self._ensure_browser(portal):
                 self.phase_changed.emit(phase_id, "failed")
-                self.error_occurred.emit("로그인 실패 또는 시간 초과")
-            return
+                self.error_occurred.emit("Chrome 연결 실패")
+                return
 
-        # 로그인 후 페이지 재연결 (인증 과정에서 탭이 바뀔 수 있음)
-        await self._reconnect_page(portal)
+            if self._stop_event.is_set():
+                self.phase_changed.emit(phase_id, "failed")
+                return
+
+            # 포털별 로그인 대기
+            if not await self._wait_for_login(portal):
+                if self._stop_event.is_set():
+                    self.log_message.emit("[사용자 중단] 로그인 대기 중단")
+                else:
+                    self.phase_changed.emit(phase_id, "failed")
+                    self.error_occurred.emit("로그인 실패 또는 시간 초과")
+                return
+
+            # 로그인 후 페이지 재연결 (인증 과정에서 탭이 바뀔 수 있음)
+            await self._reconnect_page(portal)
 
         # Phase 1은 "새로 가져오기" 버튼으로만 실행
         if phase_id == 1:
@@ -390,19 +417,38 @@ class AutomationRunner(AsyncWorker):
             self.error_occurred.emit(f"수임처 조회 실패: {e}")
 
     async def _handle_browser_disconnect(self, cmd: dict, error: Exception):
-        """브라우저가 사용자에 의해 종료되었을 때 복구 처리
+        """브라우저 연결 끊김 처리 — CDP 재연결 시도 후 실패 시 세션 초기화
 
-        워커 스레드를 죽이지 않고 상태만 초기화하여
-        다음 명령(가져오기/시작)을 받을 수 있도록 함.
+        1) CDP 포트가 살아있으면 Playwright 재연결 시도 (Chrome kill 없이 복구)
+        2) 재연결 실패 또는 CDP 포트 불응답 → Chrome 종료 + 세션 초기화
         """
-        self.log_message.emit("브라우저가 닫혀서 세션이 중단되었습니다.")
-        self.log_message.emit("다시 시작하려면 '시작' 버튼을 눌러주세요.")
-
-        await self._disconnect_browser()
+        from src.utils.chrome_cdp import check_cdp_available, CDP_URL
 
         phase_id = cmd.get("phase_id", self._last_phase_id)
-        self.phase_changed.emit(phase_id, "failed")
-        self.error_occurred.emit("브라우저가 닫혀서 세션이 중단되었습니다. 다시 시작하려면 시작 버튼을 눌러주세요.")
+
+        # 복구 시도: CDP 포트가 살아있으면 Playwright 재연결
+        recovered = False
+        if await asyncio.to_thread(check_cdp_available):
+            try:
+                browser = await self._playwright.chromium.connect_over_cdp(CDP_URL)
+                context = browser.contexts[0]
+                page = context.pages[0] if context.pages else await context.new_page()
+                # 재연결된 페이지가 실제로 응답하는지 확인
+                await asyncio.wait_for(page.evaluate("1"), timeout=5)
+                self._browser = browser
+                self._context = context
+                self._page = page
+                self.log_message.emit("브라우저 재연결 성공 (복구)")
+                recovered = True
+            except Exception:
+                pass
+
+        if not recovered:
+            self.log_message.emit("브라우저가 닫혀서 세션이 중단되었습니다.")
+            self.log_message.emit("다시 시작하려면 '시작' 버튼을 눌러주세요.")
+            await self._disconnect_browser()
+            self.phase_changed.emit(phase_id, "failed")
+            self.error_occurred.emit("브라우저가 닫혀서 세션이 중단되었습니다. 다시 시작하려면 시작 버튼을 눌러주세요.")
 
     async def _reset_after_error(self, cmd: dict):
         """일반 오류 후 상태 초기화"""
@@ -746,15 +792,19 @@ class AutomationRunner(AsyncWorker):
         """현재 페이지가 유효한지 (브라우저가 살아있는지) 확인
 
         page.evaluate()로 실제 브라우저 통신을 시도하되
-        3초 타임아웃을 걸어 브라우저가 닫혀도 즉시 감지.
+        5초 타임아웃 + 1회 재시도로 페이지 전환 중 false negative 방지.
         """
-        try:
-            if self._page is None:
-                return False
-            await asyncio.wait_for(self._page.evaluate("1"), timeout=3)
-            return True
-        except Exception:
-            return False
+        for attempt in range(2):
+            try:
+                if self._page is None:
+                    return False
+                await asyncio.wait_for(self._page.evaluate("1"), timeout=5)
+                return True
+            except Exception:
+                if attempt == 0:
+                    await asyncio.sleep(1)  # 페이지 전환 대기
+                continue
+        return False
 
     async def _check_browser_alive(self):
         """브라우저가 닫혀있으면 예외 발생"""

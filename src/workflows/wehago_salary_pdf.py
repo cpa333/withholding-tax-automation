@@ -53,9 +53,12 @@ class WehagoSalaryPdfWorkflow(BaseWorkflow):
         # ── Step 0: WEHAGO 메인 복귀 ──────────────────────────────────
         if not state.should_skip_step(job_id, "navigate_to_wehago_main"):
             state.before_step(job_id, "navigate_to_wehago_main", 0)
-            is_on_main = await page.evaluate(
-                "() => document.querySelectorAll('[id^=\"company_\"]').length > 0"
-            )
+            try:
+                is_on_main = await page.evaluate(
+                    "() => document.querySelectorAll('[id^=\"company_\"]').length > 0"
+                )
+            except Exception:
+                is_on_main = False
             if not is_on_main:
                 await page.goto(
                     WEHAGO_URL + "#/main",
