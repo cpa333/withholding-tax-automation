@@ -100,7 +100,7 @@ class AutomationRunner(AsyncWorker):
                     if cmd.get("type") == "run_phase":
                         await self._handle_run_phase(cmd)
                     elif cmd.get("type") == "refresh_clients":
-                        await self._handle_refresh_clients()
+                        await self._handle_refresh_clients(cmd)
                     elif cmd.get("type") == "run_selected_clients":
                         await self._handle_run_selected_clients(cmd)
                 except Exception as e:
@@ -320,17 +320,23 @@ class AutomationRunner(AsyncWorker):
         finally:
             engine.close()
 
-    async def _handle_refresh_clients(self):
+    async def _handle_refresh_clients(self, cmd: dict = None):
         """새로 가져오기: taxagent에서 수임처명 + 사업자등록번호 수집 후 DB 업데이트"""
+        if cmd is None:
+            cmd = {}
         self._last_phase_id = 1
         from src.automation.wehago._common import (
             WEHAGO_TAXAGENT_URL, dismiss_dialogs,
-            get_clients_with_biz_from_taxagent,
+            get_clients_with_biz_from_taxagent, search_clients_by_name,
         )
         from src.batch.db import BatchDB, ClientRepository
         from src.batch.models import Client
 
-        self.log_message.emit("[수임처 새로 가져오기] 시작...")
+        name_filter = cmd.get("name", "")
+        if name_filter:
+            self.log_message.emit(f"[수임처 새로 가져오기] 시작... (담당자: {name_filter})")
+        else:
+            self.log_message.emit("[수임처 새로 가져오기] 시작...")
 
         if self._stop_event.is_set():
             return
@@ -366,6 +372,12 @@ class AutomationRunner(AsyncWorker):
             # 페이지 건강성 확인 (크래시/세션 만료 감지)
             if not await self._is_page_alive():
                 raise _BrowserClosedError()
+
+            # 담당자 이름 필터링 (이름이 있으면 검색 입력 → 조회 버튼 클릭)
+            if name_filter:
+                self.log_message.emit(f"담당자 '{name_filter}'으로 필터링 조회...")
+                await search_clients_by_name(page, name_filter)
+                await asyncio.sleep(1)
 
             try:
                 await page.wait_for_selector(

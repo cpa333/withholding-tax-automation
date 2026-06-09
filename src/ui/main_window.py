@@ -177,6 +177,17 @@ class MainWindow(QMainWindow):
         self.dry_run_check.setChecked(True)
         layout.addWidget(self.dry_run_check)
 
+        # 수임처 담당자 이름 (Phase 1 선택 시만 표시)
+        self.name_label = QLabel("담당자")
+        self.name_label.setVisible(False)
+        layout.addWidget(self.name_label)
+
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("이름 입력")
+        self.name_input.setFixedWidth(120)
+        self.name_input.setVisible(False)
+        layout.addWidget(self.name_input)
+
         # 전자신고 비밀번호 (Phase 7 선택 시만 표시)
         self.pw_label = QLabel("비밀번호")
         self.pw_label.setVisible(False)
@@ -274,6 +285,13 @@ class MainWindow(QMainWindow):
             self.company_table.set_client_mode(False)
             self._load_client_list(portal_override=self._get_portal_for_phase(phase_id))
             self.company_table.set_selected_run_mode(True)
+
+        # Phase 1 선택 시 이름 필드 표시
+        show_name = (phase_id == 1)
+        self.name_label.setVisible(show_name)
+        self.name_input.setVisible(show_name)
+        if show_name:
+            self.name_input.setFocus()
 
         # Phase 7 선택 시 비밀번호 필드 표시
         show_pw = (phase_id == 7)
@@ -555,7 +573,8 @@ class MainWindow(QMainWindow):
     def _on_refresh_clients(self):
         """WEHAGO에서 수임처 새로 가져오기"""
         self.company_table.set_buttons_enabled(False)
-        self.runner.start_refresh_clients()
+        name = self.name_input.text().strip() if hasattr(self, 'name_input') else ""
+        self.runner.start_refresh_clients(name=name)
 
     def _on_delete_all_clients(self):
         """DB에서 수임처 모두 삭제"""
