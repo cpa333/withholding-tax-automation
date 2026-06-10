@@ -618,24 +618,32 @@ async def search_clients_by_name(page, name: str):
         await search_input.first.fill("")
         await search_input.first.fill(name)
         log(f"  검색어 입력: {name}")
+        # 입력 시 WSC_LUXSmartComplete 자동완성 드롭다운이 뜨면서 전체화면
+        # 오버레이(z:2000)가 조회 버튼을 덮어 일반 클릭이 가로채진다.
+        # Enter로 검색을 직접 트리거 (오버레이도 함께 닫힘).
+        await search_input.first.press("Enter")
+        log("  Enter로 검색 실행")
     else:
         log("  검색 입력란을 찾을 수 없음 — 전체 조회로 진행")
         return
 
-    # 조회 버튼 클릭
+    # 조회 버튼 클릭 (Enter가 무시되는 레이아웃 대비).
+    # 자동완성 오버레이가 남아 있을 수 있어 force=True로 우회 (search_company_by_biz 동일 패턴).
     search_btn = page.locator(XPATH_BTN)
-    if await search_btn.count() > 0:
-        await search_btn.first.click()
-        log("  조회 버튼 클릭")
-    else:
-        # 텍스트 기반 fallback
-        search_btn_txt = page.locator('#mainCard button').filter(has_text="조회")
-        if await search_btn_txt.count() > 0:
-            await search_btn_txt.first.click()
-            log("  조회 버튼 클릭 (텍스트)")
+    try:
+        if await search_btn.count() > 0:
+            await search_btn.first.click(timeout=5000, force=True)
+            log("  조회 버튼 클릭")
         else:
-            log("  조회 버튼을 찾을 수 없음 — 전체 조회로 진행")
-            return
+            # 텍스트 기반 fallback
+            search_btn_txt = page.locator('#mainCard button').filter(has_text="조회")
+            if await search_btn_txt.count() > 0:
+                await search_btn_txt.first.click(timeout=5000, force=True)
+                log("  조회 버튼 클릭 (텍스트)")
+            else:
+                log("  조회 버튼을 찾을 수 없음 — Enter 검색 결과로 진행")
+    except Exception:
+        log("  조회 버튼 클릭 건너뜀 — Enter 검색 결과로 진행")
 
     # 결과 로딩 대기
     await asyncio.sleep(1)

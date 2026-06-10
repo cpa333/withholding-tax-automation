@@ -117,9 +117,12 @@ def select_nts_folder(folder_name):
 def _wait_for_nts(uia):
     """WehagoNTS.exe 프로세스 시작 대기 (최대 20초)"""
     for _ in range(20):
+        # tasklist는 매칭 프로세스가 없으면 한국어 안내문을 콘솔(cp949)로 출력한다.
+        # PYTHONUTF8=1 환경에서 UTF-8로 디코딩하면 reader 스레드가 죽고 r.stdout이
+        # None이 되어 AttributeError로 흐름이 중단되므로 oem 코덱으로 디코딩한다.
         r = subprocess.run(
             ["tasklist", "/FI", "IMAGENAME eq WehagoNTS.exe", "/FO", "CSV", "/NH"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="oem", errors="ignore",
         )
         try:
             pid = int(r.stdout.split(",")[1].strip('"'))

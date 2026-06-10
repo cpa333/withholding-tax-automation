@@ -31,7 +31,8 @@ def find_chrome():
             ["reg", "query",
              r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe",
              "/ve"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, encoding="oem", errors="ignore",
+            timeout=5,
         )
         for line in result.stdout.splitlines():
             line = line.strip()
@@ -119,7 +120,8 @@ def _create_junction(user_data_dir):
     # junction 생성
     result = subprocess.run(
         ["cmd", "/c", "mklink", "/J", junc, user_data_dir],
-        capture_output=True, text=True, timeout=10,
+        capture_output=True, text=True, encoding="oem", errors="ignore",
+        timeout=10,
     )
     if not os.path.exists(junc):
         raise RuntimeError(f"Junction 생성 실패: {result.stderr}")
