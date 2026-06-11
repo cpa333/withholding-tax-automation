@@ -230,14 +230,19 @@ withholding-tax-automation/
 │   ├── automation/                 # 포털별 자동화 (수정 없이 재사용)
 │   │   ├── wehago/                 # WEHAGO 포털
 │   │   │   ├── _common.py          # 공통 함수 (로그인, 수임처 검색 등)
+│   │   │   ├── _nts.py             # WehagoNTS (Windows Forms) COM 제어
 │   │   │   ├── run_swsa0101.py     # 급여자료입력
 │   │   │   ├── run_swta0101.py     # 원천이행상황신고서
 │   │   │   └── run_swer0101.py     # 원천전자신고
 │   │   ├── nhis/                   # 국민건강보험 EDI
-│   │   │   ├── _common_edi.py      # 공통 함수
-│   │   │   └── nhis_auto_cdp.py    # 전체 워크플로우
+│   │   │   ├── _common_edi.py      # 재export 허브 (import 호환성 유지)
+│   │   │   ├── _nexacro.py         # Nexacro 초기화/라디오/그리드 제어 + 상수
+│   │   │   ├── _firm_selector.py   # 수임사업장 선택/검색/페이징
+│   │   │   ├── _doc_download.py    # 받은문서 열기, 서식 선택, PDF 다운로드
+│   │   │   └── nhis_edi_auto_cdp.py# 전체 워크플로우
 │   │   ├── nps/                    # 국민연금 EDI (Nexacro)
-│   │   │   ├── _common.py          # 공통 함수
+│   │   │   ├── _common.py          # 재export 허브 + 연결/네비/사업장전환
+│   │   │   ├── _output.py          # 출력/PDF/Excel 다운로드, 탭 제어
 │   │   │   └── nps_auto_cdp.py     # 전체 워크플로우
 │   │   └── hometax/                # 홈택스
 │   │       └── hometax_auto_cdp.py # 전체 워크플로우
@@ -252,6 +257,8 @@ withholding-tax-automation/
 │       ├── chrome_cdp.py           # Chrome CDP 실행/연결
 │       ├── stealth.py              # Playwright 안티디텍션
 │       ├── save_path.py            # 다운로드 저장 경로 생성 (사이트명_연월/수임처)
+│       ├── nexacro.py              # Nexacro 공통 이벤트 dispatch (click/dblclick/combo/radio)
+│       └── polling.py              # 비동기 폴링 (wait_for_element, wait_for_new_tab)
 │       └── pdf_reader.py           # PDF 텍스트 추출
 │
 ├── data/
