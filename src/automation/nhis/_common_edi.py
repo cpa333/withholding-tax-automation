@@ -986,44 +986,87 @@ async def select_doc_type(edi_page, doc_name="가입자 고지(산출) 내역서
 
 async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
                                   year: int | None = None, month: int | None = None):
-    """웹EDI 받은문서 목록에서 첫 행 더블클릭 → 인쇄 → PDF 다운로드
+    """웹EDI 받은문서 목록에서 YYYYMM 매칭 행 더블클릭 → 인쇄 → PDF 다운로드
+
+    서식명(가입자 고지(산출) 내역서) 필터링 후, 그리드에서 고지년월이
+    year/month와 일치하는 첫 번째 행을 찾아 상세 진입 후 PDF 저장.
 
     Args:
         edi_page: 웹EDI 탭
         context: Browser context
         save_dir: 저장 디렉토리
         firm_name: 수임처명 (파일명용)
+        year: 귀속 연도
+        month: 귀속 월
 
     Returns:
         str or None: 저장된 PDF 경로
     """
-    # 첫 행 더블클릭
-    log("  첫 번째 문서 더블클릭...")
-    result = await edi_page.evaluate('''() => {
-        var cell = document.getElementById('mainframe_childframe_form_div_body_grid_list_body_gridrow_0_cell_0_3');
-        if (!cell) return {ok: false, msg: 'cell not found'};
+    # YYYYMM 타겟 계산
+    now = datetime.now()
+    _y = year if year is not None else now.year
+    _m = month if month is not None else now.month
+    target_yyyymm = f"{_y}{_m:02d}"
+
+    # 그리드에서 YYYYMM 매칭 행 찾기 + 서식명 셀(col=3) 더블클릭
+    log(f"  문서 검색 (고지년월: {target_yyyymm})...")
+    result = await edi_page.evaluate("""(target) => {
+        var body = document.getElementById(
+            'mainframe_childframe_form_div_body_grid_list_body'
+        );
+        if (!body) return {ok: false, msg: 'grid body not found'};
+
+        // 각 행 순회하며 target(YYYYMM) 포함 여부 확인
+        var allRows = body.querySelectorAll('[id*="gridrow_"]');
+        var matchedIdx = null;
+        for (var i = 0; i < allRows.length; i++) {
+            var row = allRows[i];
+            if (row.id.includes('gridrow_-1')) continue;
+            if (row.id.includes('G')) continue;
+            if (row.textContent.includes(target)) {
+                var m = row.id.match(/gridrow_(\\d+)$/);
+                if (m) { matchedIdx = m[1]; break; }
+            }
+        }
+        if (matchedIdx === null)
+            return {ok: false, msg: 'no matching row for ' + target};
+
+        // 서식명 셀(col=3) 더블클릭
+        var cellId = 'mainframe_childframe_form_div_body_grid_list_body'
+            + '_gridrow_' + matchedIdx + '_cell_0_3';
+        var cell = document.getElementById(cellId);
+        if (!cell)
+            return {ok: false, msg: 'cell not found: ' + cellId};
+
         var rect = cell.getBoundingClientRect();
         var cx = rect.x + rect.width / 2 + (Math.random() * 4 - 2);
         var cy = rect.y + rect.height / 2 + (Math.random() * 4 - 2);
-        var base = {bubbles: true, cancelable: true, view: window, screenX: cx, screenY: cy, clientX: cx, clientY: cy, button: 0, buttons: 1, relatedTarget: null};
-        cell.dispatchEvent(new MouseEvent('mousemove', {...base, detail: 0, buttons: 0}));
+        var base = {bubbles: true, cancelable: true, view: window,
+            screenX: cx, screenY: cy, clientX: cx, clientY: cy,
+            button: 0, buttons: 1, relatedTarget: null};
+
+        cell.dispatchEvent(new MouseEvent('mousemove',
+            {...base, detail: 0, buttons: 0}));
         var t = performance.now();
         while (performance.now() - t < 30 + Math.random() * 50) {}
         cell.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 1}));
-        cell.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 1}));
-        cell.dispatchEvent(new MouseEvent('click', {...base, detail: 1}));
+        cell.dispatchEvent(new MouseEvent('mouseup',   {...base, detail: 1}));
+        cell.dispatchEvent(new MouseEvent('click',     {...base, detail: 1}));
         t = performance.now();
         while (performance.now() - t < 30 + Math.random() * 50) {}
-        cell.dispatchEvent(new MouseEvent('mousedown', {...base, detail: 2}));
-        cell.dispatchEvent(new MouseEvent('mouseup', {...base, detail: 2}));
-        cell.dispatchEvent(new MouseEvent('click', {...base, detail: 2}));
-        cell.dispatchEvent(new MouseEvent('dblclick', {...base, detail: 2}));
-        return {ok: true, text: cell.textContent.trim().substring(0, 60)};
-    }''')
+        cell.dispatchEvent(new MouseEvent('mousedown',  {...base, detail: 2}));
+        cell.dispatchEvent(new MouseEvent('mouseup',    {...base, detail: 2}));
+        cell.dispatchEvent(new MouseEvent('click',      {...base, detail: 2}));
+        cell.dispatchEvent(new MouseEvent('dblclick',   {...base, detail: 2}));
+        return {ok: true, rowIdx: matchedIdx,
+                text: cell.textContent.trim().substring(0, 60)};
+    }""", target_yyyymm)
+
     if not result.get("ok"):
-        log(f"  ERROR: 행 더블클릭 실패 - {result}")
+        log(f"  ERROR: 문서 검색 실패 - {result}")
         return None
-    log(f"  문서: {result.get('text', '')[:60]}")
+    log(f"  문서 발견 (row {result['rowIdx']}): "
+        f"{result.get('text', '')[:60]}")
     await human_delay(3)
 
     # ── 인쇄 버튼 클릭 ──
