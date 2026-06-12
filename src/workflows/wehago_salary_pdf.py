@@ -6,7 +6,7 @@ Phase 4(급여자료입력)에서 분리된 PDF 전용 페이즈.
 플로우:
   0. WEHAGO 메인 복귀
   1. 수임처 급여 페이지 진입
-  2. SWSA0101 메뉴 이동 + 드롭다운 설정
+  2. SWSA0101 메뉴 이동 + 귀속연월 설정 + 드롭다운 설정
   3. PDF 발급
   4. 모달 정리
 """
@@ -72,7 +72,7 @@ class WehagoSalaryPdfWorkflow(BaseWorkflow):
         # ── Step 2: SWSA0101 메뉴 이동 + 설정 ─────────────────────────
         if not state.should_skip_step(job_id, "navigate_to_swsa0101"):
             state.before_step(job_id, "navigate_to_swsa0101", 2)
-            ok = await navigate_to_swsa0101(page)
+            ok = await navigate_to_swsa0101(page, year=year, month=month)
             if not ok:
                 state.fail_step(job_id, "navigate_to_swsa0101", "SWSA0101 이동 실패")
                 return False
