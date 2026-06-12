@@ -129,6 +129,8 @@ def convert_for_upload(download_path, *, nhis_data=None, nps_member_data=None,
     """다운로드 엑셀을 WEHAGO 업로드 양식으로 변환
 
     2행 헤더 평탄화, 합계 행 제거, 사원코드 4자리 0-pad.
+    텍스트 컬럼(사원코드 등) 셀 서식을 '@'(텍스트)로 통일하여
+    WEHAGO 다운로드 엑셀의 서식과 일치시킴.
     raw data(NHIS/NPS)가 제공되면 공제항목에 덮어쓰기.
     """
     wb_src = openpyxl.load_workbook(download_path)
@@ -145,6 +147,7 @@ def convert_for_upload(download_path, *, nhis_data=None, nps_member_data=None,
         else:
             headers.append(None)
 
+    # WEHAGO 다운로드 엑셀에서 텍스트 서식('@')인 컬럼들
     TEXT_COLS = {"사원코드", "사원명", "부서", "직급", "직종"}
 
     wb_new = openpyxl.Workbook()
@@ -153,6 +156,9 @@ def convert_for_upload(download_path, *, nhis_data=None, nps_member_data=None,
 
     for i, header in enumerate(headers, 1):
         ws_new.cell(1, i).value = header
+        # 텍스트 컬럼 헤더도 서식 '텍스트'로 통일
+        if header in TEXT_COLS:
+            ws_new.cell(1, i).number_format = "@"
 
     new_row = 2
     for r in range(3, ws_src.max_row + 1):
@@ -173,7 +179,11 @@ def convert_for_upload(download_path, *, nhis_data=None, nps_member_data=None,
             if val is None:
                 val = "" if header in TEXT_COLS else 0
 
-            ws_new.cell(new_row, c).value = val
+            cell = ws_new.cell(new_row, c)
+            cell.value = val
+            # 텍스트 컬럼(사원코드 등)은 셀 서식을 '텍스트'로 통일
+            if header in TEXT_COLS:
+                cell.number_format = "@"
         new_row += 1
 
     base, ext = os.path.splitext(download_path)
