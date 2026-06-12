@@ -24,13 +24,18 @@ from playwright.async_api import async_playwright
 from src.utils.chrome_cdp import launch_chrome, connect_page as cdp_connect
 from src.utils.save_path import make_save_dir
 from src.utils.human import human_delay
+from datetime import datetime as _dt
+
 from src.automation.nps._common import (
     log, NPS_URL, connect_page, wait_for_login, ensure_login_page,
     open_workplace_selector, select_workplace, select_workplace_by_index,
     list_workplaces, navigate_to_decision_details, open_decision_detail,
     click_detail_tab, output_with_full_ssn, download_pdf_from_preview,
     save_excel, save_integrated, process_tab_download, switch_workplace,
+    nexacro_click_button,
+    BTN_CHANGE_WORKPLACE, BTN_MODAL_CONFIRM, BTN_MODAL_CANCEL,
     TAB_MEMBER, TAB_RETRO, TAB_GOVT,
+    PAGE_LOAD_TIMEOUT_MS,
 )
 
 
@@ -113,7 +118,7 @@ async def main():
             return
 
         # NPS EDI 페이지로 이동
-        await page.goto(NPS_URL, wait_until="domcontentloaded", timeout=30000)
+        await page.goto(NPS_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
         await page.bring_to_front()
 
         if not await wait_for_login(page):
@@ -123,7 +128,6 @@ async def main():
         log("로그인 확인됨. 자동화 시작.\n")
 
         # ═══ Phase 2: 날짜 입력 ═══
-        from datetime import datetime as _dt
         _now = _dt.now()
         _yr = input(f"연도 (기본={_now.year}): ").strip()
         _mo = input(f"월 (기본={_now.month}): ").strip()
@@ -144,7 +148,6 @@ async def main():
 
 async def run_full_auto(page, context, year: int | None = None, month: int | None = None):
     """전체 자동 모드: 수임처를 하나씩 선택하며 전체 워크플로우 수행"""
-    from src.automation.nps._common import select_workplace as _select_wp
     completed = 0
 
     while True:
@@ -214,7 +217,7 @@ async def run_full_auto(page, context, year: int | None = None, month: int | Non
                 log(f"  '{choice}' — 표시 목록에 없음, 이름으로 검색합니다.")
 
             # 사업장 선택 시도 (모달 내 검색 포함)
-            ok = await _select_wp(page, wp_name)
+            ok = await select_workplace(page, wp_name)
             if ok:
                 break  # 선택 성공 → 워크플로우 진행
 
@@ -247,7 +250,6 @@ async def run_full_auto(page, context, year: int | None = None, month: int | Non
 
 async def switch_workplace_open(page):
     """사업장전환 버튼 클릭하여 모달 열기 (선택은 하지 않음)"""
-    from src.automation.nps._common import nexacro_click_button, BTN_CHANGE_WORKPLACE
     await nexacro_click_button(page, BTN_CHANGE_WORKPLACE)
 
 
@@ -301,9 +303,6 @@ async def run_single_workplace(page, context, workplace_name, is_first=False,
             import traceback
             traceback.print_exc()
             # 잔여 상태 정리: 열린 모달 / rdPreview 탭 닫기
-            from src.automation.nps._common import (
-                nexacro_click_button, BTN_MODAL_CANCEL, BTN_MODAL_CONFIRM,
-            )
             try:
                 stale = await page.evaluate(
                     '(elId) => !!document.getElementById(elId)', BTN_MODAL_CONFIRM
@@ -331,7 +330,6 @@ async def run_single_workplace(page, context, workplace_name, is_first=False,
 async def run_interactive(page, context, year: int | None = None, month: int | None = None):
     """대화형 메뉴 모드"""
     current_workplace = None  # 선택된 사업장명 추적
-    from datetime import datetime as _dt
 
     # ═══ Phase 2: 메뉴 루프 ═══
     while True:
