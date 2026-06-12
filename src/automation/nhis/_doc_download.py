@@ -391,7 +391,7 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
             return {ok: false, msg: 'no matching row for ' + target};
 
         var cellId = 'mainframe_childframe_form_div_body_grid_list_body'
-            + '_gridrow_' + matchedIdx + '_cell_0_3';
+            + '_gridrow_' + matchedIdx + '_cell_' + matchedIdx + '_3';
         var cell = document.getElementById(cellId);
         if (!cell)
             return {ok: false, msg: 'cell not found: ' + cellId};
