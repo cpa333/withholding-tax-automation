@@ -1315,20 +1315,25 @@ async def navigate_to_swsa0101(page, year: int = None, month: int = None) -> boo
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Backward-compat re-exports (SWSA-specific → run_swsa0101.py로 이관)
+# Backward-compat re-exports (SWSA-specific → _swsa_* 모듈로 이관)
 # ═══════════════════════════════════════════════════════════════════════
 
 def __getattr__(name):
-    """Lazy re-export: SWSA-specific names moved to run_swsa0101.py"""
-    _moved = {
+    """Lazy re-export: SWSA-specific names moved to _swsa_* modules"""
+    _swsa_constants = {
         '_READ_SWSA_YM_JS', '_READ_CALENDAR_YEAR_JS',
-        '_REACT_SET_CALENDAR_YEAR_JS', 'set_swsa_ym',
+        '_REACT_SET_CALENDAR_YEAR_JS',
     }
-    if name in _moved:
-        from src.automation.wehago.run_swsa0101 import (
+    _swsa_calendar = {'set_swsa_ym'}
+    if name in _swsa_constants:
+        from src.automation.wehago._swsa_constants import (
             _READ_SWSA_YM_JS, _READ_CALENDAR_YEAR_JS,
-            _REACT_SET_CALENDAR_YEAR_JS, set_swsa_ym,
+            _REACT_SET_CALENDAR_YEAR_JS,
         )
+        globals()[name] = locals()[name]
+        return locals()[name]
+    if name in _swsa_calendar:
+        from src.automation.wehago._swsa_calendar import set_swsa_ym
         globals()[name] = locals()[name]
         return locals()[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

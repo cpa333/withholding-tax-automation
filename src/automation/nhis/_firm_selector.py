@@ -12,7 +12,7 @@ from src.utils.log import log
 from src.utils.human import human_delay
 
 # 수임사업장 리스트 URL 경로
-FIRM_LIST_URL = "retrieveFirmList.do"
+from src.automation.nhis._constants import FIRM_LIST_URL
 
 
 async def open_firm_selector(page, context, *, close_popups_fn=None):

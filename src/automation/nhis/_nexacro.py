@@ -20,19 +20,9 @@ from src.utils.nexacro import (
 )
 
 # ─── 상수 (NHIS EDI Nexacro 요소 ID) ─────────────────────────────────────────
-
-# 라디오 버튼 ID
-RDO_PROG_STAT = "mainframe_childframe_form_div_body_rdo_prog_stat"
-RADIO_ITEMS = {0: "전체", 1: "신규", 2: "열람"}
-
-# Nexacro 그리드 ID prefix
-GRID_RECEIVED = "mainframe_childframe_form_div_body_grid_list"
-
-# 콤보박스 ID
-CBO_DOCID = "mainframe_childframe_form_div_body_cbo_docid"
-
-# 인쇄 버튼 ID
-BTN_PRINT = "mainframe_childframe_form_div_top_img_print"
+from src.automation.nhis._constants import (
+    RDO_PROG_STAT, RADIO_ITEMS, GRID_RECEIVED, CBO_DOCID, BTN_PRINT,
+)
 
 
 # ─── Nexacro 초기화/제어 함수 ────────────────────────────────────────────────
