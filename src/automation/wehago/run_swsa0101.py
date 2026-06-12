@@ -128,7 +128,8 @@ def convert_for_upload(download_path, *, nhis_data=None, nps_member_data=None,
                        nps_retro_data=None, nps_govt_data=None):
     """다운로드 엑셀을 WEHAGO 업로드 양식으로 변환
 
-    2행 헤더 평탄화, 합계 행 제거, 사원코드 4자리 0-pad.
+    2행 헤더 평탄화, 합계 행 제거.
+    사원코드는 WEHAGO 원본 값을 그대로 보존 (zfill 금지).
     텍스트 컬럼(사원코드 등) 셀 서식을 '@'(텍스트)로 통일하여
     WEHAGO 다운로드 엑셀의 서식과 일치시킴.
     raw data(NHIS/NPS)가 제공되면 공제항목에 덮어쓰기.
@@ -170,11 +171,12 @@ def convert_for_upload(download_path, *, nhis_data=None, nps_member_data=None,
             val = ws_src.cell(r, c).value
             header = headers[c - 1]
 
-            if header == "사원코드" and isinstance(val, str):
-                try:
-                    val = str(int(val)).zfill(4)
-                except (ValueError, TypeError):
-                    pass
+            if header == "사원코드" and val is not None:
+                # 사원코드는 WEHAGO 원본 값을 그대로 보존.
+                # WEHAGO는 4자리('0001'), 6자리('000008'),
+                # 10자리('2019093001'), 1자리('1') 등 다양한 형식을
+                # 사용하므로 zfill 등 임의 변환을 금지함.
+                val = str(val)
 
             if val is None:
                 val = "" if header in TEXT_COLS else 0
