@@ -467,3 +467,16 @@ mousemove(detail=0, buttons=0) → [30~80ms] → click(1) → [30~80ms] → clic
  일정한 클릭 간격           →  30~80ms 랜덤 지연
  인증서 없는 로그인         →  수동 공동인증서 (Human-in-the-loop)
 ```
+
+## 10. 리팩토링 TODO
+
+> 2026-06-12 commit `6d428ec`에서 Step 1~5, 8 완료. 아래 항목은 별도 PR로 진행 예정.
+
+### TODO-1: `batch/db.py` 분할 (1,112줄)
+- `db.py` → `queries.py`(~500줄) + 슬림 `db.py`(~400줄 + 재export)
+- DB 레이어 전체에 영향 → 별도 검증 필요
+
+### TODO-2: `sys.path.insert` import 정리
+- 여러 파일에서 반복: `sys.path.insert(0, os.path.abspath(...))`
+- `pyproject.toml` 또는 `src/__init__.py`에서 중앙화
+- 전체 모듈에 분산되어 있어 광범위 테스트 필요
