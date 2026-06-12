@@ -248,6 +248,41 @@ async def _handle_code_link_modal(page):
             break
 
 
+async def _handle_jegasan_modal(page):
+    """제개산 모달 처리: 취소 버튼 클릭
+
+    엑셀 업로드 후 데이터 처리 과정에서 특정 수임처에만 등장.
+    모달이 없으면 즉시 종료 (불필요한 대기 없음).
+    """
+    for _ in range(3):
+        found = await page.evaluate("""() => {
+            const all = document.querySelectorAll('*');
+            for (const el of all) {
+                try {
+                    const cs = window.getComputedStyle(el);
+                    if ((cs.position !== 'fixed' && cs.position !== 'absolute')
+                        || cs.display === 'none' || el.offsetWidth < 50) continue;
+                    const z = parseInt(cs.zIndex);
+                    if (z < 1000) continue;
+                    if (!el.textContent.includes('제개산')) continue;
+                    const btns = el.querySelectorAll('button');
+                    for (const btn of btns) {
+                        if (btn.textContent.trim() === '취소' && btn.offsetWidth > 0) {
+                            btn.click();
+                            return 'clicked';
+                        }
+                    }
+                } catch(e) {}
+            }
+            return null;
+        }""")
+        if found:
+            log("  제개산 모달 → 취소 클릭")
+            await asyncio.sleep(1)
+        else:
+            break
+
+
 async def upload_excel(page, file_path, dry_run=True):
     """변환된 엑셀 파일을 WEHAGO에 업로드"""
     log("[엑셀 업로드] 화면 정리...")
@@ -345,6 +380,9 @@ async def upload_excel(page, file_path, dry_run=True):
     # 사원코드연결 모달 (파일 선택 직후 등장 가능)
     await _handle_code_link_modal(page)
 
+    # 제개산 모달 (특정 수임처에서 파일 선택 직후 등장 가능)
+    await _handle_jegasan_modal(page)
+
     # ① 헤더 행(행1) 선택
     log("[엑셀 업로드] ① 헤더 행 선택...")
     clicked = await page.evaluate("""() => {
@@ -412,13 +450,22 @@ async def upload_excel(page, file_path, dry_run=True):
     }""")
     await asyncio.sleep(3)
 
+    # 제개산 모달 (데이터 저장 후 등장 가능)
+    await _handle_jegasan_modal(page)
+
     # 후속 모달 2: 연결되지 않은 사원
     log("[엑셀 업로드] 후속 2/5 → '연결되지 않은 사원' 확인...")
     await _click_modal_text(page, "연결되지 않은 사원", "확인")
     await asyncio.sleep(3)
 
+    # 제개산 모달 (사원 연결 처리 후 등장 가능)
+    await _handle_jegasan_modal(page)
+
     # 사원코드연결 모달 (후속 모달 처리 중간에 등장 가능)
     await _handle_code_link_modal(page)
+
+    # 제개산 모달 (사원코드연결 후 등장 가능)
+    await _handle_jegasan_modal(page)
 
     # 후속 모달 3: 삭제후 업로드
     action = "취소" if dry_run else "확인"
