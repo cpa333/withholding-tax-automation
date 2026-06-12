@@ -170,7 +170,7 @@ async def open_decision_detail(page, year=None, month=None):
 
     내용 컬럼(col=3)에서 해당 월의 2차를 우선 찾고,
     2차가 없으면 해당 월의 첫 번째 아이템을 선택.
-    해당 월 자체가 없으면 첫 행으로 폴백.
+    해당 월이 없으면 None 반환 (호출부에서 스킵 처리).
     """
     now = datetime.now()
     _y = year if year is not None else now.year
@@ -197,8 +197,8 @@ async def open_decision_detail(page, year=None, month=None):
                                      col=3, text=month_prefix)
 
     if row is None:
-        log(f"  WARN: {month_prefix} 해당 결정내역 없음 - 첫 행으로 진행")
-        row = 0
+        log(f"  {month_prefix} 해당 결정내역 없음 — 스킵")
+        return None
     else:
         log(f"  {month_prefix} 결정내역 발견 (row {row})")
 
