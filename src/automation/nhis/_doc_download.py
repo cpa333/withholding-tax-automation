@@ -241,6 +241,115 @@ async def select_doc_type(edi_page, doc_name="가입자 고지(산출) 내역서
     return True
 
 
+async def _find_preview_tab(context, pages_before, timeout=5):
+    """popup.html + WETZ 미리보기 탭 감지
+
+    새 탭(pages_before 이후) 우선, fallback으로 기존 탭에서 검색.
+    """
+    preview = None
+    for _ in range(timeout):
+        for pg in context.pages:
+            try:
+                if "popup.html" in pg.url and "WETZ" in pg.url:
+                    if id(pg) not in pages_before:
+                        preview = pg
+                        break
+            except Exception:
+                continue
+        if preview:
+            break
+        await asyncio.sleep(1)
+
+    # fallback: 기존 탭에서도 검색
+    if not preview:
+        for pg in context.pages:
+            try:
+                if "popup.html" in pg.url and "WETZ" in pg.url:
+                    preview = pg
+                    break
+            except Exception:
+                continue
+
+    return preview
+
+
+async def _click_print_button(edi_page, context, pages_before):
+    """인쇄 버튼 3전략 클릭. 미리보기 탭 Page 반환 또는 None.
+
+    전략 1: JS MouseEvent 시뮬레이션 (기존 방식)
+    전략 2: Playwright locator.click(force=True)
+    전략 3: DOM element.focus() + element.click()
+
+    각 전략 후 _find_preview_tab으로 미리보기 탭 오픈 확인.
+    전체 최대 3회 재시도.
+    """
+    for attempt in range(3):
+        # ── 전략 1: JS MouseEvent 시뮬레이션 ──
+        log(f"  [1] JS MouseEvent 시뮬레이션... (시도 {attempt + 1}/3)")
+        try:
+            result = await edi_page.evaluate(f'''() => {{
+                var btn = document.getElementById('{BTN_PRINT}');
+                if (!btn) return {{ok: false, msg: 'print btn not found'}};
+                var rect = btn.getBoundingClientRect();
+                var cx = rect.x + rect.width / 2 + (Math.random() * 4 - 2);
+                var cy = rect.y + rect.height / 2 + (Math.random() * 4 - 2);
+                var base = {{bubbles: true, cancelable: true, view: window, screenX: cx, screenY: cy, clientX: cx, clientY: cy, button: 0, buttons: 1, relatedTarget: null}};
+                btn.dispatchEvent(new MouseEvent('mousemove', {{...base, detail: 0, buttons: 0}}));
+                var t = performance.now();
+                while (performance.now() - t < 30 + Math.random() * 50) {{}}
+                btn.dispatchEvent(new MouseEvent('mousedown', {{...base, detail: 1}}));
+                btn.dispatchEvent(new MouseEvent('mouseup', {{...base, detail: 1}}));
+                btn.dispatchEvent(new MouseEvent('click', {{...base, detail: 1}}));
+                return {{ok: true}};
+            }}''')
+            if result.get("ok"):
+                preview = await _find_preview_tab(context, pages_before, timeout=5)
+                if preview:
+                    log("  [1] 성공 — 미리보기 탭 오픈")
+                    return preview
+                log("  [1] 클릭 ok but 미리보기 탭 미감지")
+            else:
+                log(f"  [1] 버튼 없음 — {result}")
+        except Exception as e:
+            log(f"  [1] 예외 — {e}")
+
+        # ── 전략 2: Playwright locator.click(force=True) ──
+        log("  [2] Playwright locator.click(force=True)...")
+        try:
+            btn = edi_page.locator(f'[id="{BTN_PRINT}"]')
+            await btn.click(force=True, timeout=5000)
+            preview = await _find_preview_tab(context, pages_before, timeout=5)
+            if preview:
+                log("  [2] 성공 — 미리보기 탭 오픈")
+                return preview
+            log("  [2] 실패 — 미리보기 탭 미감지")
+        except Exception as e:
+            log(f"  [2] 예외 — {e}")
+
+        # ── 전략 3: DOM element.focus() + element.click() ──
+        log("  [3] DOM element.click()...")
+        try:
+            await edi_page.evaluate(f'''() => {{
+                var el = document.getElementById('{BTN_PRINT}');
+                if (!el) throw new Error('print btn not found');
+                el.focus();
+                el.click();
+            }}''')
+            preview = await _find_preview_tab(context, pages_before, timeout=5)
+            if preview:
+                log("  [3] 성공 — 미리보기 탭 오픈")
+                return preview
+            log("  [3] 실패 — 미리보기 탭 미감지")
+        except Exception as e:
+            log(f"  [3] 예외 — {e}")
+
+        if attempt < 2:
+            log("  모든 전략 실패 — 2초 후 재시도...")
+            await asyncio.sleep(2)
+
+    return None
+
+
 async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
                                   year: int | None = None, month: int | None = None):
     """웹EDI 받은문서 목록에서 YYYYMM 매칭 행 더블클릭 → 인쇄 → PDF 다운로드
@@ -313,55 +422,12 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
         f"{result.get('text', '')[:60]}")
     await human_delay(3)
 
-    # ── 인쇄 버튼 클릭 ──
+    # ── 인쇄 버튼 클릭 (3전략) ──
     pages_before = set(id(pg) for pg in context.pages)
-
-    log("  인쇄 버튼 클릭...")
-    result = await edi_page.evaluate(f'''() => {{
-        var btn = document.getElementById('{BTN_PRINT}');
-        if (!btn) return {{ok: false, msg: 'print btn not found'}};
-        var rect = btn.getBoundingClientRect();
-        var cx = rect.x + rect.width / 2 + (Math.random() * 4 - 2);
-        var cy = rect.y + rect.height / 2 + (Math.random() * 4 - 2);
-        var base = {{bubbles: true, cancelable: true, view: window, screenX: cx, screenY: cy, clientX: cx, clientY: cy, button: 0, buttons: 1, relatedTarget: null}};
-        btn.dispatchEvent(new MouseEvent('mousemove', {{...base, detail: 0, buttons: 0}}));
-        var t = performance.now();
-        while (performance.now() - t < 30 + Math.random() * 50) {{}}
-        btn.dispatchEvent(new MouseEvent('mousedown', {{...base, detail: 1}}));
-        btn.dispatchEvent(new MouseEvent('mouseup', {{...base, detail: 1}}));
-        btn.dispatchEvent(new MouseEvent('click', {{...base, detail: 1}}));
-        return {{ok: true}};
-    }}''')
-    if not result.get("ok"):
-        log(f"  ERROR: 인쇄 버튼 클릭 실패 - {result}")
-        return None
-    await human_delay(3)
-
-    # ── 미리보기 탭 찾기 ──
-    preview = None
-    for attempt in range(10):
-        for pg in context.pages:
-            try:
-                if "popup.html" in pg.url and "WETZ" in pg.url:
-                    if id(pg) not in pages_before:
-                        preview = pg
-                        break
-            except Exception:
-                continue
-        if preview:
-            break
-        await asyncio.sleep(1)
-
+    log("  인쇄 버튼 클릭 (3전략)...")
+    preview = await _click_print_button(edi_page, context, pages_before)
     if not preview:
-        for pg in context.pages:
-            try:
-                if "popup.html" in pg.url and "WETZ" in pg.url:
-                    preview = pg
-            except Exception:
-                continue
-
-    if not preview:
-        log("  ERROR: 미리보기 탭을 찾지 못했습니다 (10초 대기).")
+        log("  ERROR: 미리보기 탭을 찾지 못했습니다 (3전략 × 3회 시도).")
         return None
     log("  미리보기 탭 열림")
 

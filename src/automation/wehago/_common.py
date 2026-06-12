@@ -727,27 +727,31 @@ async def get_clients_with_biz_from_taxagent(page):
 
     results = []
     for i in range(total_cards):
-        # i번째 카드 클릭
-        clicked = await _safe_evaluate(page, r'''(idx) => {
+        # i번째 카드 클릭 + 카드 이름 즉시 읽기
+        click_result = await _safe_evaluate(page, r'''(idx) => {
             const allLists = document.querySelectorAll('ul.acceptance_list');
             for (const list of allLists) {
                 const cards = list.querySelectorAll('a.acceptance_card');
                 if (cards.length === 0) continue;
                 if (cards[idx]) {
                     cards[idx].click();
-                    return true;
+                    // 클릭 직전 카드 자체의 이름 읽기 (expected_name)
+                    const nameEl = cards[idx].querySelector('span.company_name_text');
+                    const cardName = nameEl ? nameEl.textContent.trim() : '';
+                    return {clicked: true, cardName: cardName};
                 }
             }
-            return false;
+            return {clicked: false, cardName: ''};
         }''', i)
-        if not clicked:
+        if not click_result or not click_result.get("clicked"):
             continue
+        expected_name = (click_result.get("cardName") or "").replace("[테스트] ", "")
 
-        await asyncio.sleep(0.8)
+        await asyncio.sleep(1.5)
 
-        # 상세 영역에서 이름과 사업자번호 추출 (최대 2회 재시도)
+        # 상세 영역에서 이름과 사업자번호 추출 (최대 5회 재시도)
         info = None
-        for attempt in range(3):
+        for attempt in range(5):
             info = await _safe_evaluate(page, r'''() => {
                 // cl_basicinfo_section에 상세 정보 표시됨
                 const infoEl = document.querySelector('.cl_basicinfo_section');
@@ -770,10 +774,18 @@ async def get_clients_with_biz_from_taxagent(page):
                 return {name, business_number: bizNum};
             }''')
 
-            # 이름은 있고 사업자번호만 비어있으면 상세 영역 로딩 지연 → 재시도
+            # 이름/사업자번호 모두 있으면 일치 검증
             if info and info["name"] and info.get("business_number"):
+                detail_name = info["name"].replace("[테스트] ", "")
+                if expected_name and detail_name != expected_name:
+                    # 상세 영역이 아직 이전 카드 데이터 → 재시도
+                    log(f"  이름 불일치: card='{expected_name}' "
+                        f"detail='{detail_name}' — 재시도 ({attempt + 1}/5)")
+                    await asyncio.sleep(1.0)
+                    continue
                 break
-            if attempt < 2:
+            # 이름만 있고 사업자번호 비어있으면 로딩 지연 → 재시도
+            if attempt < 4:
                 await asyncio.sleep(0.5)
 
         if info and info["name"]:

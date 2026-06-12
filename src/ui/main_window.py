@@ -542,9 +542,11 @@ class MainWindow(QMainWindow):
             return
 
         from src.batch.models import biz_to_mgmt_no
+        from src.utils.log import log
         client_infos = []
         for c in clients:
             mgmt_no = biz_to_mgmt_no(c["business_number"])
+            log(f"  수임처: name='{c['name']}' biz='{c['business_number']}' mgmt='{mgmt_no}'")
             client_infos.append({
                 "name": c["name"],
                 "management_number": mgmt_no,

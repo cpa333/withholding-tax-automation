@@ -212,6 +212,7 @@ async def select_firm(popup, firm_name, management_number=""):
     management_number가 제공되면 사업장관리번호로 검색.
     그렇지 않으면 사업장명으로 기존 목록에서 찾은 후 검색.
     """
+    log(f"  select_firm: name='{firm_name}' mgmt_no='{management_number}'")
     if management_number:
         log(f"  사업장 검색: 관리번호 '{management_number}'")
         results = await search_firm(popup, management_number, search_type="number")
