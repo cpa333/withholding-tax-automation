@@ -96,30 +96,5 @@ class WehagoSalaryPdfWorkflow(BaseWorkflow):
 
     async def _cleanup_print_modals(self, page):
         """일괄인쇄/일괄PDF 모달 정리"""
-        for _ in range(3):
-            closed = await page.evaluate("""() => {
-                const all = document.querySelectorAll('*');
-                for (const el of all) {
-                    try {
-                        const cs = window.getComputedStyle(el);
-                        if ((cs.position !== 'fixed' && cs.position !== 'absolute')
-                            || cs.display === 'none' || el.offsetWidth < 50) continue;
-                        const z = parseInt(cs.zIndex);
-                        if (z < 1000) continue;
-                        if (!el.textContent.includes('일괄인쇄')
-                            && !el.textContent.includes('일괄PDF')) continue;
-                        const btns = el.querySelectorAll('button');
-                        for (const btn of btns) {
-                            if (btn.textContent.trim().startsWith('닫기')
-                                    && btn.offsetWidth > 0) {
-                                btn.click(); return 'closed';
-                            }
-                        }
-                    } catch(e) {}
-                }
-                return null;
-            }""")
-            if closed:
-                await asyncio.sleep(0.5)
-            else:
-                break
+        from src.automation.wehago._common import dismiss_print_modals
+        await dismiss_print_modals(page)
