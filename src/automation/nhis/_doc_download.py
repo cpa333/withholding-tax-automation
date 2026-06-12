@@ -6,6 +6,11 @@
   _click_print_button() — JS MouseEvent → Playwright locator → DOM click 3전략.
   각 전략 후 _find_preview_tab()으로 미리보기 탭 오픈 검증, 최대 3회 재시도.
   NPS _download.py의 _click_output_button 패턴과 동일.
+
+Nexacro 그리드 셀 ID:
+  패턴 = gridrow_{rowIdx}_cell_{rowIdx}_{colIdx}
+  colIdx: 0=순번, 1=받은일자, 2=번호, 3=서식명, 4=구분, 5=최종받은일자
+  중간 번호도 행 인덱스이므로 _cell_0_ 하드코딩 금지.
 """
 
 import asyncio
@@ -361,6 +366,9 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
 
     서식명(가입자 고지(산출) 내역서) 필터링 후, 그리드에서 고지년월이
     year/month와 일치하는 첫 번째 행을 찾아 상세 진입 후 PDF 저장.
+
+    Nexacro 그리드 셀 ID 패턴: gridrow_{idx}_cell_{idx}_{col}
+    중간 번호도 행 인덱스이므로 _cell_0_ 고정 금지.
     """
     # YYYYMM 타겟 계산
     now = datetime.now()
