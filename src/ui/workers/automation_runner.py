@@ -159,17 +159,17 @@ class AutomationRunner(AsyncWorker):
                 self.phase_changed.emit(phase_id, "failed")
                 return
 
-            # 포털별 로그인 대기
-            if not await self._wait_for_login(portal):
-                if self._stop_event.is_set():
-                    self.log_message.emit("[사용자 중단] 로그인 대기 중단")
-                else:
-                    self.phase_changed.emit(phase_id, "failed")
-                    self.error_occurred.emit("로그인 실패 또는 시간 초과")
-                return
+        # 포털별 로그인 대기 (세션 재사용 시에도 로그아웃 상태일 수 있으므로 항상 확인)
+        if not await self._wait_for_login(portal):
+            if self._stop_event.is_set():
+                self.log_message.emit("[사용자 중단] 로그인 대기 중단")
+            else:
+                self.phase_changed.emit(phase_id, "failed")
+                self.error_occurred.emit("로그인 실패 또는 시간 초과")
+            return
 
-            # 로그인 후 페이지 재연결 (인증 과정에서 탭이 바뀔 수 있음)
-            await self._reconnect_page(portal)
+        # 로그인 후 페이지 재연결 (인증 과정에서 탭이 바뀔 수 있음)
+        await self._reconnect_page(portal)
 
         # Phase 1은 "새로 가져오기" 버튼으로만 실행
         if phase_id == 1:
