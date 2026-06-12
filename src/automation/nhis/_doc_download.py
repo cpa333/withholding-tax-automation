@@ -1,6 +1,11 @@
 """NHIS EDI 문서 다운로드 모듈
 
-받은문서 열기, 서식 선택, PDF 다운로드, 탭 정리.
+받은문서 열기, 서식 선택, 인쇄(3전략), PDF 다운로드, 탭 정리.
+
+인쇄 버튼 클릭:
+  _click_print_button() — JS MouseEvent → Playwright locator → DOM click 3전략.
+  각 전략 후 _find_preview_tab()으로 미리보기 탭 오픈 검증, 최대 3회 재시도.
+  NPS _download.py의 _click_output_button 패턴과 동일.
 """
 
 import asyncio
