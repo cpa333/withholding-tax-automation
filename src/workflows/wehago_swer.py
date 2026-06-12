@@ -4,6 +4,8 @@
   0. WEHAGO 메인 복귀
   1. 수임처 급여 페이지 진입 (사업자번호 우선 → 이름 fallback)
   2. SWER0101 전자신고 파일 제작
+     - 사용자가 설정한 귀속연도/월(year, month kwargs)을 지급기간에 반영
+     - None이면 compute_target_period()로 직전월 자동 산출
 """
 
 from src.utils.human import human_delay

@@ -3,6 +3,11 @@
 SWER0101 이동 → 지급기간 설정 → 수임처 선택 → 제작(F4) →
 비밀번호 입력 → 전자신고 파일 제작 → WehagoNTS 폴더 선택 → 파일 저장.
 
+지급기간 설정:
+  - year/month가 전달되면 해당 연월을 지급기간에 반영
+  - None이면 compute_target_period()로 직전월 산출
+  - set_period_fields()에서 3회 재시도 검증으로 페이지 기본 연도 불일치 자동 복구
+
 사전 조건:
 - page가 이미 SmartA 급여 페이지에 있어야 함
 - Chrome CDP 모드(port 9223) 실행 상태
