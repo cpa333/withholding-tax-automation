@@ -17,6 +17,69 @@ from src.utils.log import log
 from src.config import WEHAGO_URL, WEHAGO_TAXAGENT_URL
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# SWSA0101 귀속연월 설정용 JS 상수
+# ═══════════════════════════════════════════════════════════════════════
+
+_READ_SWSA_YM_JS = """() => {
+    const items = document.querySelectorAll('#SearchMain .item');
+    for (const item of items) {
+        const title = item.querySelector('.item_title, strong');
+        if (title && title.textContent.trim() === '귀속연월') {
+            return item.querySelector('.fakeinput')?.textContent.trim() || '';
+        }
+    }
+    return '';
+}"""
+
+_READ_CALENDAR_YEAR_JS = """() => {
+    return document.querySelector('.LS_calendar .date_day_title')?.textContent.trim() || '';
+}"""
+
+_REACT_SET_CALENDAR_YEAR_JS = """(targetYear) => {
+    const all = document.querySelectorAll('*');
+    for (const el of all) {
+        const keys = Object.keys(el).filter(k => k.startsWith('__reactInternalInstance'));
+        for (const key of keys) {
+            let node = el[key];
+            const queue = [node];
+            const visited = new Set();
+            for (let depth = 0; depth < 25 && queue.length > 0; depth++) {
+                const current = queue.shift();
+                if (!current || visited.has(current)) continue;
+                visited.add(current);
+                const inst = current._instance;
+                if (inst && inst.state && inst.state.selectedDate
+                    && typeof inst.state.selectedDate.year === 'number') {
+                    const oldYear = inst.state.selectedDate.year;
+                    const oldMonth = inst.state.selectedDate.month;
+                    const newMax = {year: targetYear, month: 12};
+                    const newMin = inst.state.minDate
+                        ? {year: Math.min(inst.state.minDate.year, targetYear - 1), month: 1}
+                        : {year: targetYear - 1, month: 1};
+                    inst.setState({
+                        selectedDate: {year: targetYear, month: oldMonth},
+                        maxDate: newMax,
+                        minDate: newMin,
+                    });
+                    return {success: true, oldYear, oldMonth, newMax, newMin};
+                }
+                if (current._renderedChildren) {
+                    for (const child of Object.values(current._renderedChildren)) {
+                        if (child) queue.push(child);
+                    }
+                }
+                if (current._renderedComponent) queue.push(current._renderedComponent);
+                if (current.child) queue.push(current.child);
+                if (current.sibling) queue.push(current.sibling);
+                if (current.return) queue.push(current.return);
+            }
+        }
+    }
+    return {success: false};
+}"""
+
+
 async def _safe_evaluate(page, expression, *args, timeout=10):
     """page.evaluate with timeout guard. Returns None on timeout/error."""
     try:
@@ -1075,6 +1138,103 @@ async def set_period_fields(page, year, start_month, end_month):
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# SWSA0101 귀속연월 설정 (React LS_calendar)
+# ═══════════════════════════════════════════════════════════════════════
+
+async def set_swsa_ym(page, year: int, month: int) -> bool:
+    """SWSA0101 귀속연월 설정 (React LS_calendar component)
+
+    SWSA0101은 SWTA/SWER와 다른 React 기반 달력(LS_calendar)을 사용.
+    Playwright locator.click으로 캘린더 열고, React setState로 연도 변경 후 월 선택.
+
+    Args:
+        page: SWSA0101 페이지에 위치한 Playwright page
+        year: 목표 연도 (예: 2026)
+        month: 목표 월 (1-12)
+
+    Returns:
+        True if 귀속연월 설정 성공, False otherwise
+    """
+    target_ym = f"{year}.{month:02d}"
+
+    for attempt in range(3):
+        log(f"    [귀속연월] 시도 {attempt+1}/3: {target_ym}")
+
+        # ── 현재 값 읽기 ──────────────────────────────────────
+        cur_ym = await _safe_evaluate(page, _READ_SWSA_YM_JS)
+        if cur_ym == target_ym:
+            log(f"    [귀속연월] 이미 {target_ym} — 스킵")
+            return True
+
+        log(f"    [귀속연월] 현재: {cur_ym} → 목표: {target_ym}")
+
+        # ── 캘린더 열기 (반드시 Playwright click — JS evaluate는 합성 이벤트) ──
+        try:
+            await page.locator(
+                "#SearchMain .item:first-child .fakebutton"
+            ).click(timeout=5000)
+            await asyncio.sleep(1)
+        except Exception as e:
+            log(f"    [귀속연월] 캘린더 열기 실패: {e}")
+            await asyncio.sleep(1)
+            continue
+
+        # ── 연도 확인 및 React setState ──────────────────────
+        cal_yr_text = await _safe_evaluate(page, _READ_CALENDAR_YEAR_JS)
+        if not cal_yr_text:
+            log("    [귀속연월] 캘린더 연도 읽기 실패")
+            await asyncio.sleep(1)
+            continue
+
+        try:
+            cal_yr = int(cal_yr_text)
+        except (ValueError, TypeError):
+            cal_yr = None
+
+        if cal_yr is not None and cal_yr != year:
+            log(f"    [귀속연월] React setState: {cal_yr} → {year}")
+            result = await _safe_evaluate(
+                page, _REACT_SET_CALENDAR_YEAR_JS, year,
+            )
+            if not result or not result.get("success"):
+                log(f"    [귀속연월] React setState 실패: {result}")
+                await asyncio.sleep(1)
+                continue
+            await asyncio.sleep(1)
+
+            # 연도 변경 확인
+            new_cal_yr = await _safe_evaluate(page, _READ_CALENDAR_YEAR_JS)
+            if new_cal_yr != str(year):
+                log(f"    [귀속연월] 연도 변경 확인 실패: {new_cal_yr}")
+                await asyncio.sleep(1)
+                continue
+
+        # ── 월 클릭 ──────────────────────────────────────────
+        try:
+            month_btn = page.locator(
+                f'.LS_calendar td.date_day button:has-text("{month}월")'
+            )
+            await month_btn.first.click(timeout=3000)
+            await asyncio.sleep(1)
+        except Exception as e:
+            log(f"    [귀속연월] {month}월 클릭 실패: {e}")
+            await asyncio.sleep(1)
+            continue
+
+        # ── 최종 검증 ────────────────────────────────────────
+        final_ym = await _safe_evaluate(page, _READ_SWSA_YM_JS)
+        if final_ym == target_ym:
+            log(f"    [귀속연월] 설정 완료: {target_ym}")
+            return True
+
+        log(f"    [귀속연월] 검증 실패: {final_ym} (예상: {target_ym})")
+        await asyncio.sleep(1)
+
+    log(f"    [귀속연월] 3회 재시도 후 실패")
+    return False
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # 급여 워크플로우 공유 헬퍼 (Phase 4/5)
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -1200,8 +1360,8 @@ async def goto_salary_page_with_fallback(
     return goto_ok
 
 
-async def navigate_to_swsa0101(page) -> bool:
-    """SWSA0101 메뉴 이동 + 간이세액 모달 + 드롭다운 설정"""
+async def navigate_to_swsa0101(page, year: int = None, month: int = None) -> bool:
+    """SWSA0101 메뉴 이동 + 귀속연월 설정 + 간이세액 모달 + 드롭다운 설정"""
     current_url = page.url
     if "SWSA0101" not in current_url:
         await click_menu(page, "SWSA0101")
@@ -1229,6 +1389,13 @@ async def navigate_to_swsa0101(page) -> bool:
     }""")
     await asyncio.sleep(1)
     await dismiss_dialogs(page)
+
+    # ── 귀속연월 설정 (옵션) ─────────────────────────────────
+    if year is not None and month is not None:
+        ym_ok = await set_swsa_ym(page, year, month)
+        if not ym_ok:
+            log("  귀속연월 설정 실패")
+            return False
 
     # 구분 드롭다운 → 급여+상여
     await select_dropdown(page, 0, "급여+상여")

@@ -564,67 +564,30 @@ async def download_pdf(page, save_dir, print_format=DEFAULT_PRINT_FORMAT):
 # 메인 플로우
 # ═══════════════════════════════════════════════════════════════════════
 
-async def run_swsa0101(page, save_dir, *, dry_run=True):
+async def run_swsa0101(page, save_dir, *, dry_run=True, year=None, month=None):
     """급여자료입력 전체 자동화
 
     Args:
         page: SmartA 급여 페이지에 위치한 Playwright page
         save_dir: 파일 저장 디렉토리
         dry_run: True면 업로드 후 취소(테스트), False면 확인(실운영)
+        year: 귀속연도 (None이면 이전 달 자동 계산)
+        month: 귀속월 (None이면 이전 달 자동 계산)
     """
-    # [1] SWSA0101 메뉴 이동
-    # 다른 메뉴(SWTA/SWER) 실행 후 URL이 바뀐 상태일 수 있으므로
-    # 사이드바 클릭 → URL 해시 교체 순으로 시도
-    log("[SWSA0101] 급여자료입력 메뉴 이동...")
-    current_url = page.url
-    if "SWSA0101" not in current_url:
-        await click_menu(page, "SWSA0101")
-        await asyncio.sleep(3)
-        if "SWSA0101" not in page.url:
-            await goto_menu_page(page, "SWSA0101")
-            await asyncio.sleep(3)
-    await dismiss_dialogs(page)
+    from src.automation.wehago._common import (
+        navigate_to_swsa0101, compute_target_period,
+    )
 
-    # 간이세액 개정 안내 모달 닫기
-    log("[SWSA0101] 간이세액 안내 모달 닫기...")
-    await page.evaluate("""() => {
-        const all = document.querySelectorAll('*');
-        for (const el of all) {
-            const cs = window.getComputedStyle(el);
-            if (cs.position !== 'fixed' || cs.display === 'none' ||
-                parseInt(cs.zIndex) <= 100 || el.offsetWidth <= 100) continue;
-            if (!el.textContent.includes('간이세액')) continue;
-            const btns = el.querySelectorAll('button.WSC_LUXButton');
-            for (const btn of btns) {
-                if (!btn.textContent.trim() && btn.offsetWidth > 0) { btn.click(); return; }
-            }
-        }
-    }""")
-    await asyncio.sleep(1)
-    await dismiss_dialogs(page)
+    # year/month 기본값: 이전 달
+    if year is None or month is None:
+        year, month = compute_target_period()
 
-    # [2] 구분 드롭다운 → 급여+상여
-    log("[SWSA0101] 구분 → 급여+상여 선택...")
-    await select_dropdown(page, 0, "급여+상여")
-
-    # [3] 복사후 재계산 모달 (조건부)
-    await asyncio.sleep(1)
-    has_modal = await page.evaluate("""() => {
-        const selectors = ['._isDialog', '.LUX_basic_dialog'];
-        for (const sel of selectors) {
-            for (const d of document.querySelectorAll(sel)) {
-                if (d.style.display !== 'none') return true;
-            }
-        }
-        return false;
-    }""")
-    if has_modal:
-        log("[SWSA0101] 복사후 재계산 → 취소...")
-        await click_dialog_button(page, "복사후 재계산")
-        await asyncio.sleep(1)
-        await click_dialog_button(page, "취소")
-    else:
-        log("[SWSA0101] 모달 없음 - 스킵")
+    # [1] SWSA0101 메뉴 이동 + 귀속연월 설정
+    log(f"[SWSA0101] 급여자료입력 메뉴 이동 ({year}.{month:02d})...")
+    ok = await navigate_to_swsa0101(page, year=year, month=month)
+    if not ok:
+        log("[SWSA0101] 이동/설정 실패")
+        return
 
     # [4] 엑셀 다운로드
     log("[SWSA0101] 엑셀 다운로드...")
@@ -706,6 +669,11 @@ if __name__ == "__main__":
             print("수임처 이름이 필요합니다.")
             return
 
+        year_input = input("연도 (Enter=자동): ").strip()
+        month_input = input("월 (Enter=자동): ").strip()
+        year = int(year_input) if year_input else None
+        month = int(month_input) if month_input else None
+
         launch_chrome()
         async with async_playwright() as p:
             browser, context, page = await connect_page(p)
@@ -717,6 +685,6 @@ if __name__ == "__main__":
             await dismiss_dialogs(page)
 
             save_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "results"))
-            await run_swsa0101(page, save_dir, dry_run=True)
+            await run_swsa0101(page, save_dir, dry_run=True, year=year, month=month)
 
     asyncio.run(_main())
