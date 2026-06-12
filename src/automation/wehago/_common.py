@@ -993,7 +993,12 @@ async def get_report_period_type(page):
 
 
 async def set_period_fields(page, year, start_month, end_month):
-    """지급기간/귀속기간 설정. JS sprite click + 드롭다운 닫기 + 3회 재시도 검증."""
+    """지급기간/귀속기간 설정. JS sprite click + 드롭다운 닫기 + 3회 재시도 검증.
+
+    #SearchMain .item 중 '기간'이 포함된 모든 항목(귀속기간, 지급기간)을 순회하여
+    연도/시작월/종료월을 설정. 매월 모드에서는 두 기간이 연동되지만
+    반기 모드에서는 개별 설정이 필요하므로 모두 명시적으로 설정함.
+    """
     await page.evaluate("""() => {
         document.querySelectorAll('.WSC_LUXAlert').forEach(a => {
             const btn = a.querySelector('button.WSC_LUXButton');

@@ -4,6 +4,8 @@
   0. WEHAGO 메인 복귀
   1. 수임처 급여 페이지 진입 (사업자번호 우선 → 이름 fallback)
   2. SWTA0101 마감/마감해제 처리
+     - 사용자가 설정한 귀속연도/월(year, month kwargs)을 기간에 반영
+     - 매월: 지정월, 반기: 상반기(01~06) 또는 하반기(07~12)
 """
 
 from src.utils.human import human_delay
