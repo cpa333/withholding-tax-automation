@@ -64,9 +64,8 @@ class NpsEdiWorkflow(BaseWorkflow):
         # 2차 상세 열기
         if not state.should_skip_step(job_id, "open_detail"):
             state.before_step(job_id, "open_detail", 2)
-            ok = await open_decision_detail(page, round_filter="2차",
-                                            year=year, month=month)
-            if not ok:
+            ok = await open_decision_detail(page, year=year, month=month)
+            if not ok or not ok.get("ok"):
                 state.fail_step(job_id, "open_detail", "2차 결정내역 상세 진입 실패")
                 return False
             await human_delay(2)

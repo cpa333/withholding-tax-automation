@@ -165,64 +165,83 @@ async def navigate_to_decision_details(page):
     )
 
     log("결정내역 메뉴 클릭...")
-    await nexacro_click_button(page, TOP_MENU_ID)
+    result = await nexacro_click_button(page, TOP_MENU_ID)
+    if not result.get("ok"):
+        log(f"  ERROR: 결정내역 메뉴 클릭 실패 - {result}")
+        return False
     await human_delay(2)
 
     log("국민연금보험료 결정내역 서브메뉴 클릭...")
-    await nexacro_click_button(page, SUB_MENU_ID)
+    result = await nexacro_click_button(page, SUB_MENU_ID)
+    if not result.get("ok"):
+        log(f"  ERROR: 서브메뉴 클릭 실패 - {result}")
+        return False
     await human_delay(3)
+    return True
 
 
-async def open_decision_detail(page, round_filter="2차", year=None, month=None):
-    """결정내역 그리드에서 날짜/차수 조건으로 행 찾아 더블클릭
+async def open_decision_detail(page, year=None, month=None):
+    """결정내역 그리드에서 사용자 지정 월의 행을 찾아 더블클릭
 
-    그리드에서 처리결과 통지일 컬럼(col=6)이 {year}.{month:02d}로
-    시작하는 행을 찾아 상세 진입.
+    내용 컬럼(col=3)에서 해당 월의 2차를 우선 찾고,
+    2차가 없으면 해당 월의 첫 번째 아이템을 선택.
+    해당 월 자체가 없으면 첫 행으로 폴백.
     """
     now = datetime.now()
     _y = year if year is not None else now.year
     _m = month if month is not None else now.month
     month_prefix = f"{_y}.{_m:02d}"
 
-    log(f"  결정내역 검색: 차수={round_filter}, 월={month_prefix}...")
-
-    # 차수 필터 적용
-    await page.evaluate("""(args) => {
-        const combo = document.getElementById(
-            'mainframe.VFrameSet.FrameSdi.form.divWork_M08010000'
-            + '.form.divWork.form.div00.form.cboGichoSer'
-        );
-        if (combo) {
-            for (const opt of combo.options) {
-                if (opt.text.trim() === args.roundFilter) {
-                    combo.value = opt.value;
-                    combo.dispatchEvent(new Event('change', {bubbles: true}));
-                    break;
-                }
-            }
-        }
-    }""", {"roundFilter": round_filter})
-    await human_delay(1)
+    log(f"  결정내역 검색: 월={month_prefix}...")
 
     # 조회 버튼 클릭
     SEARCH_BTN = (
         "mainframe.VFrameSet.FrameSdi.form.divWork_M08010000"
-        ".form.divWork.form.div00.form.btnSearch"
+        ".form.divWork.form.div00.form.btn00"
     )
     await nexacro_click_button(page, SEARCH_BTN)
     await human_delay(3)
 
-    # 날짜 매칭 행 찾기
-    row = await nexacro_find_row(page, GRID_DECISION_LIST, col=6, text=month_prefix)
+    # 1순위: 해당 월의 2차 찾기 (col=3)
+    row = await _find_row_with_round(page, GRID_DECISION_LIST,
+                                     month_prefix, "2차")
+
+    # 2순위: 해당 월의 첫 번째 아이템
+    if row is None:
+        row = await nexacro_find_row(page, GRID_DECISION_LIST,
+                                     col=3, text=month_prefix)
 
     if row is None:
         log(f"  WARN: {month_prefix} 해당 결정내역 없음 — 첫 행으로 진행")
         row = 0
+    else:
+        log(f"  {month_prefix} 결정내역 발견 (row {row})")
 
     log(f"  결정내역 row {row} 더블클릭...")
     result = await nexacro_dblclick_cell(page, GRID_DECISION_LIST, row=row, col=1)
     await human_delay(3)
     return result
+
+
+
+async def _find_row_with_round(page, grid_id, month_prefix, round_text):
+    """내용 컬럼(col=3)에서 월+차수 동시 매칭 행 검색"""
+    return await page.evaluate(r"""(args) => {
+        const prefix = args.gridId + '.body.gridrow_';
+        const allCells = document.querySelectorAll('[id^="' + prefix + '"]');
+        for (const cell of allCells) {
+            const id = cell.id;
+            if (!id.includes('.cell_')) continue;
+            const match = id.match(/gridrow_(\d+)\.cell_\d+_(\d+)/);
+            if (!match) continue;
+            if (parseInt(match[2]) !== 3) continue;
+            const text = cell.textContent.trim();
+            if (text.includes(args.month) && text.includes(args.round)) {
+                return parseInt(match[1]);
+            }
+        }
+        return null;
+    }""", {"gridId": grid_id, "month": month_prefix, "round": round_text})
 
 
 # ─── 사업장 선택/전환 ────────────────────────────────────────────────────────

@@ -122,19 +122,27 @@ async def main():
 
         log("로그인 확인됨. 자동화 시작.\n")
 
-        # ═══ Phase 2: 모드 선택 ═══
+        # ═══ Phase 2: 날짜 입력 ═══
+        from datetime import datetime as _dt
+        _now = _dt.now()
+        _yr = input(f"연도 (기본={_now.year}): ").strip()
+        _mo = input(f"월 (기본={_now.month}): ").strip()
+        year = int(_yr) if _yr else None
+        month = int(_mo) if _mo else None
+
+        # ═══ Phase 3: 모드 선택 ═══
         log("실행 모드 선택:")
         log("  1. 전체 자동 (수임처별 전체 워크플로우)")
         log("  2. 대화형 메뉴")
         mode = input("\n선택 > ").strip()
 
         if mode == "1":
-            await run_full_auto(page, context)
+            await run_full_auto(page, context, year=year, month=month)
         else:
-            await run_interactive(page, context)
+            await run_interactive(page, context, year=year, month=month)
 
 
-async def run_full_auto(page, context):
+async def run_full_auto(page, context, year: int | None = None, month: int | None = None):
     """전체 자동 모드: 수임처를 하나씩 선택하며 전체 워크플로우 수행"""
     from src.automation.nps._common import select_workplace as _select_wp
     completed = 0
@@ -226,7 +234,8 @@ async def run_full_auto(page, context):
         log(f"{'='*55}")
 
         try:
-            await run_single_workplace(page, context, wp_name, is_first=(completed == 0))
+            await run_single_workplace(page, context, wp_name, is_first=(completed == 0),
+                                        year=year, month=month)
             completed += 1
             log(f"\n  {wp_name} 처리 완료. ({completed}개 완료)")
         except Exception as e:
@@ -268,8 +277,8 @@ async def run_single_workplace(page, context, workplace_name, is_first=False,
 
     # Step 3: 2차 상세 진입
     log("  2차 결정내역 진입...")
-    ok = await open_decision_detail(page)
-    if not ok:
+    result = await open_decision_detail(page, year=year, month=month)
+    if not result or not result.get("ok"):
         log(f"  ERROR: 2차 상세 진입 실패 - {workplace_name} 스킵")
         return
 
@@ -283,6 +292,7 @@ async def run_single_workplace(page, context, workplace_name, is_first=False,
         try:
             result = await process_tab_download(
                 page, context, save_dir, tab_idx, label, grid_sfx,
+                year=year, month=month,
             )
             if result["skipped"]:
                 log(f"  {label} 스킵 (데이터 없음)")
@@ -318,9 +328,10 @@ async def run_single_workplace(page, context, workplace_name, is_first=False,
     await human_delay(1)
 
 
-async def run_interactive(page, context):
+async def run_interactive(page, context, year: int | None = None, month: int | None = None):
     """대화형 메뉴 모드"""
     current_workplace = None  # 선택된 사업장명 추적
+    from datetime import datetime as _dt
 
     # ═══ Phase 2: 메뉴 루프 ═══
     while True:
@@ -361,7 +372,7 @@ async def run_interactive(page, context):
 
             elif choice == "4":
                 try:
-                    await open_decision_detail(page)
+                    await open_decision_detail(page, year=year, month=month)
                 except Exception as e:
                     log(f"ERROR: {e}")
                     import traceback
@@ -373,14 +384,15 @@ async def run_interactive(page, context):
                     await click_detail_tab(page, TAB_MEMBER)
                     await output_with_full_ssn(page)
 
-                    from datetime import datetime
-                    now = datetime.now()
-                    filename = f"국민연금보험료_결정내역_{now.strftime('%Y%m')}"
+                    _now = _dt.now()
+                    _y = year if year is not None else _now.year
+                    _m = month if month is not None else _now.month
+                    filename = f"국민연금보험료_결정내역_{_y}{_m:02d}"
                     wp = current_workplace or input("  수임처명: ").strip()
                     if not wp:
                         log("  수임처명이 필요합니다.")
                         continue
-                    save_dir = make_save_dir("국민연금", wp)
+                    save_dir = make_save_dir("국민연금", wp, year=year, month=month)
                     await download_pdf_from_preview(context, save_dir, filename)
                 except Exception as e:
                     log(f"ERROR: {e}")
@@ -389,14 +401,15 @@ async def run_interactive(page, context):
 
             elif choice == "6":
                 try:
-                    from datetime import datetime
-                    now = datetime.now()
+                    _now = _dt.now()
+                    _y = year if year is not None else _now.year
+                    _m = month if month is not None else _now.month
                     wp = current_workplace or input("  수임처명: ").strip()
                     if not wp:
                         log("  수임처명이 필요합니다.")
                         continue
-                    save_dir = make_save_dir("국민연금", wp)
-                    filename = f"국민연금보험료_결정내역_{now.strftime('%Y%m')}_엑셀"
+                    save_dir = make_save_dir("국민연금", wp, year=year, month=month)
+                    filename = f"국민연금보험료_결정내역_{_y}{_m:02d}_엑셀"
                     await save_excel(page, context, save_dir, filename)
                 except Exception as e:
                     log(f"ERROR: {e}")
@@ -409,12 +422,13 @@ async def run_interactive(page, context):
                     if not wp:
                         log("  수임처명이 필요합니다.")
                         continue
-                    save_dir = make_save_dir("국민연금", wp)
+                    save_dir = make_save_dir("국민연금", wp, year=year, month=month)
                     result = await process_tab_download(
                         page, context, save_dir,
                         tab_index=TAB_RETRO,
                         tab_label="소급분내역",
                         grid_suffix="grdList3",
+                        year=year, month=month,
                     )
                     if result["skipped"]:
                         log("소급분내역 데이터 없음, 스킵")
@@ -429,7 +443,7 @@ async def run_interactive(page, context):
                     if not wp:
                         log("  수임처명이 필요합니다.")
                         continue
-                    save_dir = make_save_dir("국민연금", wp)
+                    save_dir = make_save_dir("국민연금", wp, year=year, month=month)
                     tabs = [
                         (TAB_MEMBER, "가입자내역", "grdList2"),
                         (TAB_RETRO, "소급분내역", "grdList3"),
@@ -438,6 +452,7 @@ async def run_interactive(page, context):
                     for tab_idx, label, grid_sfx in tabs:
                         result = await process_tab_download(
                             page, context, save_dir, tab_idx, label, grid_sfx,
+                            year=year, month=month,
                         )
                         if result["skipped"]:
                             log(f"  {label} 스킵 (데이터 없음)")
