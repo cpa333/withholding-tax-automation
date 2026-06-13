@@ -557,8 +557,10 @@ class MainWindow(QMainWindow):
         self.company_table.set_buttons_enabled(False)
         self.company_table.set_selected_run_mode(False)
 
+        # dry-run 체크박스 값 전달 (선택건 실행도 일반 실행과 동일하게 반영)
+        extra_kwargs = {"dry_run": self.dry_run_check.isChecked()}
+
         # Phase 7/8: 비밀번호 전달
-        extra_kwargs = {}
         if self._selected_phase in (7, 8):
             pw = self.pw_input.text().strip()
             if not pw:
