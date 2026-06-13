@@ -212,9 +212,10 @@ def read_nps_retro_excel(excel_path: str) -> dict[str, int]:
 
 
 def read_nps_govt_excel(excel_path: str) -> dict[str, int]:
-    """NPS 국고지원내역 Excel → {성명: 전월분보험료지원금/2}
+    """NPS 국고지원내역 Excel → {성명: 국고지원금액(전액)/2}
 
-    국고지원금 절반을 국민연금에서 (-)로 반영하기 위함.
+    국고지원금액(근로자+사업장 합계, 전액)의 절반(=근로자 몫)을
+    국민연금에서 (-)로 차감하기 위함.
     파일이 없거나 파싱 실패 시 빈 dict 반환.
     """
     result: dict[str, int] = {}
@@ -223,9 +224,14 @@ def read_nps_govt_excel(excel_path: str) -> dict[str, int]:
         wb = openpyxl.load_workbook(excel_path, data_only=True)
         ws = wb.active
 
-        # 국고지원내역 구조 탐색: 헤더에서 "전월분보험료지원금" 또는 유사 컬럼 찾기
+        # 국고지원내역 구조 탐색
         support_col = None
         name_col = None
+        # 국고지원금액을 사용자(사업장)/본인(근로자) 몫으로 나눈 sub-column은
+        # 전액(국고지원금액) 컬럼 탐색에서 배제해야 함.
+        # (이전엔 이 sub-column까지 매칭→마지막인 '본인기여금(X/2)'이 선택되었고,
+        #  거기에 //2까지 더해져 차감액이 X/4로 과소 계산되었음)
+        SPLIT_SUFFIXES = ("사용자부담금", "사업장", "본인기여금", "근로자")
 
         for r in range(1, min(ws.max_row + 1, 10)):
             for c in range(1, ws.max_column + 1):
@@ -233,9 +239,11 @@ def read_nps_govt_excel(excel_path: str) -> dict[str, int]:
                 if not val:
                     continue
                 val_str = str(val).strip()
-                if "성명" in val_str:
+                if "성명" in val_str and name_col is None:
                     name_col = c
-                if "지원금" in val_str or "전월분" in val_str:
+                # 국고지원금액(전액) 컬럼만 선택 — 분할 sub-column(사용자/본인 몫) 제외
+                if ("지원금" in val_str or "전월분" in val_str) \
+                        and not any(s in val_str for s in SPLIT_SUFFIXES):
                     support_col = c
 
         if not name_col or not support_col:
@@ -252,7 +260,9 @@ def read_nps_govt_excel(excel_path: str) -> dict[str, int]:
                 continue
             name = str(name).strip()
             amount = _parse_int(ws.cell(r, support_col).value)
-            # 절반으로 나누어 음수로 저장 (국민연금에서 차감)
+            if amount <= 0:
+                continue  # 국고지원 미대상(0원) — 포함 시 국민연금 0 덮어쓰기 부작용 방지
+            # 전액의 절반(=근로자 몫)을 국민연금에서 (-) 차감
             half_amount = amount // 2
             if name in result:
                 result[name] += half_amount

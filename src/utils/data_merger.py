@@ -101,7 +101,7 @@ def apply_raw_data(
         nhis_data: {성명: NhisEmployeeData} or None
         nps_member_data: {성명: 근로자기여금} or None
         nps_retro_data: {성명: 본인기여금} or None
-        nps_govt_data: {성명: 전월분보험료지원금/2} or None
+        nps_govt_data: {성명: 국고지원금액(전액)/2} or None
 
     Returns:
         MergeResult
