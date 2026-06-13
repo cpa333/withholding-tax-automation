@@ -8,7 +8,7 @@ import os
 import sys
 
 from src.automation.wehago._common import (
-    log, dismiss_dialogs, click_menu, click_dialog_button,
+    log, dismiss_dialogs, click_menu,
     open_collect_menu, close_collect_menu, click_menu_item, _click_modal_text,
 )
 
@@ -203,6 +203,55 @@ async def _handle_jegasan_modal(page):
             await asyncio.sleep(1)
         else:
             break
+
+
+async def _retry_click_dialog_button(page, button_text, max_wait=15):
+    """click_dialog_button에 재시도 로직 추가
+
+    느린 환경에서 모달이 늦게 나타나는 경우를 대비해
+    max_wait초 동안 0.5초 간격으로 재시도.
+    _isDialog / LUX_basic_dialog 셀렉터 + high z-index overlay 모두 탐색.
+    """
+    attempts = int(max_wait / 0.5)
+    for i in range(attempts):
+        result = await page.evaluate("""(btnText) => {
+            // 1) _isDialog / LUX_basic_dialog
+            const selectors = ['._isDialog', '.LUX_basic_dialog'];
+            for (const sel of selectors) {
+                for (const d of document.querySelectorAll(sel)) {
+                    if (d.style.display === 'none' || d.offsetParent === null) continue;
+                    const btns = d.querySelectorAll('button, a');
+                    for (const b of btns) {
+                        if (b.textContent.trim().includes(btnText) && b.offsetWidth > 0) {
+                            b.click(); return 'dialog';
+                        }
+                    }
+                }
+            }
+            // 2) high z-index overlay (폴백)
+            const all = document.querySelectorAll('*');
+            for (const el of all) {
+                try {
+                    const cs = window.getComputedStyle(el);
+                    if (cs.display === 'none' || el.offsetWidth < 50) continue;
+                    const z = parseInt(cs.zIndex);
+                    if (z < 1000) continue;
+                    if (cs.position !== 'fixed' && cs.position !== 'absolute') continue;
+                    const btns = el.querySelectorAll('button');
+                    for (const b of btns) {
+                        if (b.textContent.trim() === btnText && b.offsetWidth > 0) {
+                            b.click(); return 'overlay';
+                        }
+                    }
+                } catch(e) {}
+            }
+            return null;
+        }""", button_text)
+        if result:
+            log(f"  모달 버튼 클릭: {button_text} ({result}, {(i+1)*0.5:.1f}초 대기)")
+            return True
+        await asyncio.sleep(0.5)
+    return False
 
 
 async def upload_excel(page, file_path, dry_run=True):
@@ -400,8 +449,14 @@ async def upload_excel(page, file_path, dry_run=True):
         log("[엑셀 업로드] 후속 4/5 → '변환이 취소' 확인...")
         await _click_modal_text(page, "변환이 취소", "확인")
     else:
-        log("[엑셀 업로드] 후속 4/5 → 완료 확인...")
-        await click_dialog_button(page, "확인")
+        log("[엑셀 업로드] 후속 4/5 → 변환 완료 대기...")
+        # 실제 업로드 처리 후 완료 모달이 늦게 나타날 수 있음.
+        # 최대 15초 재시도로 "확인" 버튼 탐색 (모달이 없으면 자동 스킵).
+        clicked = await _retry_click_dialog_button(page, "확인", max_wait=15)
+        if clicked:
+            log("[엑셀 업로드] 후속 4/5 → 완료 모달 확인 처리")
+        else:
+            log("[엑셀 업로드] 후속 4/5 → 완료 모달 없음 (자동 처리됨)")
     await asyncio.sleep(2)
 
     # 에러 감지
