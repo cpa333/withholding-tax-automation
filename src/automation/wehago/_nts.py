@@ -12,19 +12,11 @@ import time
 
 import comtypes.client
 
+from src.utils.save_path import get_desktop_path
 
-def _get_desktop_path():
-    """Windows KnownFolderPath API로 실제 바탕화면 경로 획득 (OneDrive 대응)"""
-    try:
-        import ctypes
-        buf = ctypes.create_unicode_buffer(512)
-        # FOLDERID_Desktop = {B4BFCC3A-DB2C-424C-B029-7FE99A87C641}
-        ctypes.windll.shell32.SHGetFolderPathW(0, 0, 0, 0, buf)
-        return buf.value
-    except Exception:
-        return os.path.join(os.environ.get("USERPROFILE", ""), "Desktop")
-
-DESKTOP_PATH = _get_desktop_path()
+# Windows Shell API로 구한 실제 바탕화면 경로 (OneDrive/한국어/GPO 대응).
+# 단일 소스(src.utils.save_path.get_desktop_path)에서 공급받는다.
+DESKTOP_PATH = get_desktop_path()
 
 
 def select_nts_folder(folder_name, target_path=None):

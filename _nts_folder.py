@@ -10,8 +10,11 @@ if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
 
-# 바탕화면 폴더 생성
-desktop_path = os.path.join(os.environ['USERPROFILE'], 'Desktop')
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+from src.utils.save_path import get_desktop_path
+
+# 바탕화면 폴더 생성 (OneDrive/한국어/GPO 리다이렉션 대응)
+desktop_path = get_desktop_path()
 folder_name = 'WEHAGO_전자신고'
 target_path = os.path.join(desktop_path, folder_name)
 

@@ -24,13 +24,14 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from playwright.async_api import async_playwright
 from src.utils.chrome_cdp import CDP_URL
+from src.utils.save_path import get_desktop_path
 
 if sys.platform == "win32":
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding="utf-8")
     sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding="utf-8")
 PASSWORD = "asdfghjk"
-DESKTOP_PATH = os.path.join(os.environ.get("USERPROFILE", ""), "Desktop")
+DESKTOP_PATH = get_desktop_path()
 NTS_FOLDER = "원천징수전자신고"
 
 

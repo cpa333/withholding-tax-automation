@@ -14,7 +14,7 @@ PDF 발급은 Phase 5(WEHAGO 급여명세 PDF)에서 별도 실행.
 import asyncio
 import os
 
-from src.utils.save_path import make_save_dir
+from src.utils.save_path import make_save_dir, get_desktop_path
 from src.utils.human import human_delay
 from src.workflows.registry import register
 from src.workflows.base import BaseWorkflow
@@ -171,7 +171,7 @@ class WehagoSwsaWorkflow(BaseWorkflow):
              "nps_retro": path|None, "nps_govt": path|None}
         """
         import glob
-        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+        desktop = get_desktop_path()
         folder = client_name.replace(" ", "_")
         period = f"{year}{int(month):02d}" if year and month else None
 
