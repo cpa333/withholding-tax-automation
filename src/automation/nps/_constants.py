@@ -32,6 +32,12 @@ BTN_OUTPUT = (
     "mainframe.VFrameSet.FrameSdi.form.divWork_M08010200"
     ".form.divWork.form.div00.form.btn02"
 )
+# 국고지원내역(GOVT, tabbutton_4=Tabpage5) 탭은 공용 BTN_OUTPUT(상단)이
+# 동작하지 않고, 탭 고유의 하단 출력 버튼을 써야 출력 모달이 열린다.
+BTN_OUTPUT_GOVT = (
+    "mainframe.VFrameSet.FrameSdi.form.divWork_M08010200"
+    ".form.divWork.form.tab00.Tabpage5.form.div00.form.btn01"
+)
 BTN_EXCEL_SAVE = (
     "mainframe.VFrameSet.FrameSdi.form.divWork_M08010200"
     ".form.divWork.form.div01.form.btn01"
