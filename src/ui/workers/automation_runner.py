@@ -74,6 +74,10 @@ class AutomationRunner(AsyncWorker):
         """비동기 메인 — Playwright 초기화 후 명령 대기"""
         from playwright.async_api import async_playwright
 
+        # 자동화 모듈의 log() 출력을 GUI 로그 패널에 실시간 표시
+        from src.utils.log import set_log_callback
+        set_log_callback(lambda msg: self.log_message.emit(msg))
+
         self.log_message.emit("자동화 러너 초기화 중...")
 
         async with async_playwright() as p:
