@@ -4,6 +4,7 @@ NHIS/NPS raw data를 사원명 기준으로 매칭하여 WEHAGO 업로드 엑셀
 공제항목(건강보험, 요양보험, 국민연금 등)에 덮어쓰기.
 """
 import logging
+import re
 from dataclasses import dataclass, field
 
 import openpyxl
@@ -46,13 +47,35 @@ class MergeResult:
     warnings: list[str] = field(default_factory=list)
 
 
+def _normalize(s) -> str:
+    """매칭용 정규화: 모든 공백 제거.
+
+    WEHAGO 다운로드 템플릿이 '건강보험 정산', '장기요양보험 정산'처럼
+    공백을 포함한 컬럼명을 사용하므로, alias(공백 없음)와 비교 전에 통일.
+    """
+    return re.sub(r"\s+", "", str(s))
+
+
 def _find_column_index(headers: list[str], target_key: str) -> int | None:
-    """헤더 리스트에서 target_key의 alias와 매칭되는 컬럼 인덱스(0-based) 반환"""
+    """헤더 리스트에서 target_key의 alias와 매칭되는 컬럼 인덱스(0-based) 반환.
+
+    헤더·alias 양쪽을 공백 제거한 뒤 ① 정확 일치 우선(오매칭 방지)
+    ② 부분문자열(괄호/접미사 변형 대비) 순으로 탐색.
+    """
     aliases = COLUMN_ALIASES.get(target_key, [target_key])
-    for alias in aliases:
-        for i, h in enumerate(headers):
-            if h and alias in str(h):
-                return i
+    norm_aliases = [_normalize(a) for a in aliases]
+    norm_headers = [_normalize(h) for h in headers]
+
+    # 1패스: 정확 일치 (정규화 후) — short alias가 더 긴 컬럼을 오인하는 경합 방지
+    for i, nh in enumerate(norm_headers):
+        if nh and nh in norm_aliases:
+            return i
+    # 2패스: 부분문자열 (정규화 후)
+    for i, nh in enumerate(norm_headers):
+        if not nh:
+            continue
+        if any(a and a in nh for a in norm_aliases):
+            return i
     return None
 
 
