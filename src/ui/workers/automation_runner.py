@@ -609,10 +609,12 @@ class AutomationRunner(AsyncWorker):
                     self.log_message.emit(f"[{display_name}] ({i+1}/{total}) {client_name} 완료")
                     results.append({"name": client_name, "success": True})
                 else:
-                    self.log_message.emit(f"[{display_name}] ({i+1}/{total}) {client_name} 실패")
-                    results.append({"name": client_name, "success": False, "error": "실패"})
+                    page_alive = await self._is_page_alive()
+                    detail = "브라우저 종료" if not page_alive else "워크플로우 실패(로그 확인)"
+                    self.log_message.emit(f"[{display_name}] ({i+1}/{total}) {client_name} 실패: {detail}")
+                    results.append({"name": client_name, "success": False, "error": detail})
 
-                    if not await self._is_page_alive():
+                    if not page_alive:
                         self.log_message.emit("브라우저가 종료되어 실행을 중단합니다.")
                         break
             except Exception as e:
@@ -699,8 +701,16 @@ class AutomationRunner(AsyncWorker):
                 )
 
     async def _ensure_browser(self, portal: str) -> bool:
-        """포털에 맞는 Chrome 인스턴스 실행"""
-        from src.utils.chrome_cdp import launch_chrome, kill_chrome, CDP_URL
+        """포털에 맞는 Chrome 인스턴스 실행/재사용.
+
+        CDP가 이미 살아있으면 Chrome을 kill 하지 않고 재사용한 뒤 포털 URL로
+        이동한다(WEHAGO→홈택스 같은 포털 전환도 안전). CDP가 죽었을 때만
+        새로 실행한다. kill→재실행 레이스(double-kill)와 위임(delegation)을
+        피하기 위해 가능하면 재사용한다.
+        """
+        from src.utils.chrome_cdp import (
+            launch_chrome, check_cdp_available, CDP_URL,
+        )
 
         if self._stop_event.is_set():
             return False
@@ -715,24 +725,52 @@ class AutomationRunner(AsyncWorker):
             self._context = None
             self._page = None
 
-        # 포털별 URL
         url = PORTAL_URLS.get(portal, PORTAL_URLS["wehago"])
+        self._current_portal = portal
 
-        # 포털이 변경되면 Chrome 재시작
-        if portal != getattr(self, '_current_portal', None):
-            if self._current_portal is not None:
-                self.log_message.emit(f"포털 전환: {self._current_portal} → {portal}")
-                kill_chrome()
-                await asyncio.sleep(2)
-            self._current_portal = portal
+        portal_host = {
+            "nhis_edi": "edi.nhis",
+            "nps_edi": "edi.nps",
+            "hometax": "hometax.go.kr",
+            "wehago": "wehago.com",
+        }.get(portal, "")
 
-        # Chrome 실행 (force=True로 항상 새로 실행)
-        result = launch_chrome(url, force=True)
+        # ① CDP가 이미 살아있으면 kill 없이 재사용 + 포털 URL로 이동
+        if await asyncio.to_thread(check_cdp_available):
+            try:
+                browser = await self._playwright.chromium.connect_over_cdp(CDP_URL)
+                context = browser.contexts[0]
+                # 포털 호스트 매칭 탭 우선, 없으면 첫 탭, 그것도 없으면 새 탭
+                target_page = None
+                for pg in context.pages:
+                    try:
+                        if portal_host and portal_host in pg.url:
+                            target_page = pg
+                            break
+                    except Exception:
+                        continue
+                if target_page is None:
+                    target_page = context.pages[0] if context.pages else await context.new_page()
+                self._browser = browser
+                self._context = context
+                self._page = target_page
+                # 포털 전환/초기 진입 보장 — timeout은 치명적 실패가 아님
+                try:
+                    await target_page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                except Exception as e:
+                    self.log_message.emit(f"  포털 페이지 이동 지연(무시 가능): {e}")
+                self.log_message.emit("Chrome 재사용 연결 완료")
+                return True
+            except Exception as e:
+                self.log_message.emit(f"  CDP 재사용 연결 실패, 새로 실행: {e}")
+                # 폴스루 — 새로 실행
+
+        # ② CDP가 비활성이면 새로 실행
+        # (force=False: launch_chrome 내부에서 CDP가 떠 있으면 재사용, 아니면 실행)
+        result = await asyncio.to_thread(launch_chrome, url, force=False)
         if not result["success"]:
             self.log_message.emit(f"Chrome 실행 실패: {result.get('error', '알 수 없음')}")
             return False
-
-        await asyncio.sleep(2)
 
         # Playwright 연결
         try:
@@ -776,10 +814,13 @@ class AutomationRunner(AsyncWorker):
         }.get(portal, "")
 
         try:
-            # 기존 페이지가 유효한지 확인
+            # 기존 페이지가 유효하고 올바른 포털에 있는지 확인.
+            # portal_host 가 아닌 페이지(예: reuse 중 goto 가 실패해 멈춘
+            # about:blank/타 포털)면 조기 반환하지 않고 아래 재연결로
+            # 올바른 탭을 다시 찾는다.
             url = self._page.url
-            if url:
-                return  # 아직 유효함
+            if url and portal_host in url:
+                return  # 올바른 포털 탭이 유효함
         except Exception:
             pass
 
@@ -838,6 +879,8 @@ class AutomationRunner(AsyncWorker):
         _check_browser_alive와 달리, 현재 페이지가 응답하지 않아도
         다른 탭 중 하나라도 살아있으면 브라우저가 살아있는 것으로 간주.
         """
+        if self._context is None:
+            raise _BrowserClosedError()
         if await self._is_page_alive():
             return
         for pg in self._context.pages:
@@ -953,7 +996,7 @@ class AutomationRunner(AsyncWorker):
             if self._stop_event.is_set():
                 return False
             await asyncio.sleep(5)
-            await self._check_browser_alive()
+            await self._check_browser_alive_soft()
             try:
                 url = self._page.url
                 if "hometax.go.kr" in url and "login" not in url.lower():

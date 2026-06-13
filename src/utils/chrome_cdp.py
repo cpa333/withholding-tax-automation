@@ -10,7 +10,9 @@ import glob
 
 
 CDP_PORT = 9223
-CDP_URL = f"http://localhost:{CDP_PORT}"
+# 127.0.0.1 명시 — Windows에서 localhost가 IPv6(::1)로 먼저 풀리면 Chrome의
+# IPv4(127.0.0.1) 디버그 서버와 연결이 간헐 실패(연결 거부)한다.
+CDP_URL = f"http://127.0.0.1:{CDP_PORT}"
 
 
 def find_chrome():
@@ -132,7 +134,7 @@ def _create_junction(user_data_dir):
 def check_cdp_available():
     """CDP 포트가 활성인지 확인"""
     try:
-        with urllib.request.urlopen(f"{CDP_URL}/json/version", timeout=2) as resp:
+        with urllib.request.urlopen(f"{CDP_URL}/json/version", timeout=3) as resp:
             return resp.status == 200
     except Exception:
         return False
@@ -144,6 +146,53 @@ def kill_chrome():
         ["taskkill", "/F", "/IM", "chrome.exe", "/T"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
+
+
+def _chrome_process_running() -> bool:
+    """chrome.exe 프로세스가 하나라도 실행 중인지 확인 (tasklist 기반, psutil 무의존)."""
+    try:
+        r = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq chrome.exe", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, encoding="oem", errors="ignore",
+            timeout=5,
+        )
+        out = r.stdout.strip()
+        if not out:
+            return False
+        # chrome이 없으면 "정보: ... 없습니다" / "INFO: No tasks" 만 출력됨.
+        return "chrome.exe" in out.lower()
+    except Exception:
+        return False
+
+
+def _attempt_launch(chrome_path, junc, profile, url, *, kill_wait=3) -> bool:
+    """Chrome 1회 실행 시도: kill → 잠금 해제 대기 → Popen → CDP 준비 대기.
+
+    Returns:
+        bool: CDP 포트가 활성화되었으면 True.
+    """
+    kill_chrome()
+    time.sleep(kill_wait)  # 프로필 SingletonLock 해제 대기
+
+    subprocess.Popen(
+        [
+            chrome_path,
+            f"--remote-debugging-port={CDP_PORT}",
+            f"--user-data-dir={junc}",
+            f"--profile-directory={profile}",
+            "--start-maximized",
+            url,
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    # CDP 활성 대기 — 0.5초 간격, 최대 약 30초
+    for _ in range(60):
+        time.sleep(0.5)
+        if check_cdp_available():
+            return True
+    return False
 
 
 def launch_chrome(url="https://www.wehago.com/", *, force=False):
@@ -187,32 +236,26 @@ def launch_chrome(url="https://www.wehago.com/", *, force=False):
     junc = _create_junction(user_data)
     result["junction"] = junc
 
-    # 기존 Chrome 종료
-    kill_chrome()
-    time.sleep(2)  # Chrome이 완전히 종료되고 프로필 잠금이 해제될 때까지 대기
+    # 1차 실행 시도
+    if _attempt_launch(chrome_path, junc, profile, url, kill_wait=3):
+        result["success"] = True
+        return result
 
-    # Chrome 실행
-    subprocess.Popen(
-        [
-            chrome_path,
-            f"--remote-debugging-port={CDP_PORT}",
-            f"--user-data-dir={junc}",
-            f"--profile-directory={profile}",
-            "--start-maximized",
-            url,
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    # CDP 활성 대기
-    for _ in range(20):
-        time.sleep(1)
-        if check_cdp_available():
+    # 위임(delegation) 감지: chrome.exe가 살아있는데 CDP 포트가 없으면
+    # 기존 Chrome 인스턴스로 위임되어 디버그 포트가 열리지 않은 상태.
+    # 모든 Chrome을 확실히 종료한 뒤 잠금 해제 대기를 연장해 1회 더 시도.
+    if _chrome_process_running():
+        if _attempt_launch(chrome_path, junc, profile, url, kill_wait=4):
             result["success"] = True
             return result
-
-    result["error"] = "CDP 포트 응답 없음 (Chrome 실행 실패)"
+        result["error"] = (
+            "CDP 포트 응답 없음 — 다른 Chrome 창이 열려 디버그 포트를 차지하고 있을 수 있습니다. "
+            "모든 Chrome 창을 닫은 후 다시 시도하세요."
+        )
+    else:
+        result["error"] = (
+            "CDP 포트 응답 없음 (Chrome 실행 실패) — Chrome 경로/프로필을 확인하세요."
+        )
     return result
 
 
