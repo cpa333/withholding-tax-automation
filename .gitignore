@@ -40,6 +40,11 @@ installer_output/
 # Runtime data
 data/
 
+# 인증 세션 (Supabase 토큰/이메일 평문 포함 — 절대 커밋 금지)
+auth_session.json
+auth_session*.json
+*_session.json
+
 # Screenshots / debug captures
 *.png
 *_preview.txt
