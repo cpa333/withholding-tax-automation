@@ -990,24 +990,62 @@ class AutomationRunner(AsyncWorker):
         return True
 
     async def _wait_for_login_hometax(self) -> bool:
-        """홈택스 로그인 대기"""
+        """홈택스 로그인 대기
+
+        브라우저 생존 판정은 page.evaluate가 아닌 CDP 포트(check_cdp_available)
+        기준으로 한다. 홈택스 초기 페이지/인증서 로그인은 네비게이션·보안모듈
+        구동 중 모든 탭의 evaluate가 일시적으로 타임아웃되어 _check_browser_alive_soft
+        가 false negative(브라우저 살아있는데 종료로 오판)를 내기 때문이다.
+        """
+        from src.utils.chrome_cdp import check_cdp_available
+
         self.log_message.emit("[홈택스] 로그인 대기 중... 인증서로 로그인해 주세요.")
         for i in range(180):
             if self._stop_event.is_set():
                 return False
             await asyncio.sleep(5)
-            await self._check_browser_alive_soft()
+
+            # CDP 포트가 죽었을 때만 실제 브라우저 종료로 간주
+            cdp_ok = await asyncio.to_thread(check_cdp_available)
+            if not cdp_ok:
+                raise _BrowserClosedError()
+
             try:
-                url = self._page.url
-                if "hometax.go.kr" in url and "login" not in url.lower():
+                if await self._hometax_logged_in():
                     self.log_message.emit("홈택스 로그인 확인됨")
                     return True
-            except _BrowserClosedError:
-                raise
             except Exception:
                 pass
             if i % 12 == 11:
                 self.log_message.emit(f"  로그인 대기 중... ({(i+1)*5}초)")
+        self.log_message.emit("홈택스 로그인 대기 시간 초과")
+        return False
+
+    async def _hometax_logged_in(self) -> bool:
+        """홈택스 실제 로그인 여부 판정.
+
+        메인 URL만으로는 로그인 전에도 통과하므로(false positive), 헤더에
+        '로그아웃' 컨트롤이 실제로 보이는지로 판정한다. 로그인 전에는 '로그인'만
+        보이고 '로그아웃'은 없다. 로그인된 홈택스 탭을 찾으면 self._page로 채택.
+        """
+        for pg in list(self._context.pages):
+            try:
+                if "hometax.go.kr" not in pg.url:
+                    continue
+                ok = await asyncio.wait_for(pg.evaluate("""() => {
+                    const els = document.querySelectorAll('a, button, input, span');
+                    for (const el of els) {
+                        if (el.offsetParent === null) continue;  // 보이는 것만
+                        const txt = (el.value || el.innerText || el.title || '').trim();
+                        if (txt === '로그아웃') return true;
+                    }
+                    return false;
+                }"""), timeout=5)
+                if ok:
+                    self._page = pg
+                    return True
+            except Exception:
+                continue
         return False
 
     async def _wait_for_login_wehago(self) -> bool:

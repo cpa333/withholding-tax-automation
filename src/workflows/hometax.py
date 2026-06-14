@@ -70,22 +70,30 @@ class HometaxWorkflow(BaseWorkflow):
                 goto_withholding_tax, goto_file_convert,
             )
             ht = page  # hometax_auto_cdp는 page를 직접 사용
-            await goto_withholding_tax(ht)
-            await goto_file_convert(ht)
+            if not await goto_withholding_tax(ht):
+                state.fail_step(job_id, "goto_filing", "원천세 일반신고 메뉴 이동 실패")
+                return False
+            if not await goto_file_convert(ht):
+                state.fail_step(job_id, "goto_filing", "파일변환신고 페이지 진입 실패")
+                return False
             state.after_step(job_id, "goto_filing")
 
         if not state.should_skip_step(job_id, "upload_file"):
             state.before_step(job_id, "upload_file", 3)
             from src.automation.hometax.hometax_auto_cdp import select_file
             ht = page
-            await select_file(ht, file_path)
+            if not await select_file(ht, file_path):
+                state.fail_step(job_id, "upload_file", "파일 선택 실패")
+                return False
             state.after_step(job_id, "upload_file")
 
         if not state.should_skip_step(job_id, "verify"):
             state.before_step(job_id, "verify", 4)
             from src.automation.hometax.hometax_auto_cdp import verify_file
             ht = page
-            await verify_file(ht)
+            if not await verify_file(ht):
+                state.fail_step(job_id, "verify", "파일검증 실패")
+                return False
             state.after_step(job_id, "verify")
 
         return True

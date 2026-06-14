@@ -15,8 +15,14 @@ import os
 
 if sys.platform == "win32":
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
-    sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
+    # CLI 단독 실행 시 Windows 콘솔 UTF-8 보정.
+    # GUI에서는 sys.stdout이 LogCapture로 교체돼 detach()를 지원하지 않으므로
+    # (io.UnsupportedOperation) 안전하게 건너뛴다.
+    try:
+        sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
+        sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
+    except (io.UnsupportedOperation, AttributeError, ValueError):
+        pass
 
 # PROJECT_ROOT to sys.path for src.* imports
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
