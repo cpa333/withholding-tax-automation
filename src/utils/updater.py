@@ -49,11 +49,32 @@ _CHECK_INTERVAL = timedelta(hours=20)  # 하루 1회 정도 자동 확인
 
 # ── 보안 유틸리티 ────────────────────────────────────────────────────────
 _CMD_META = re.compile(r'[&|><^%"!]')
+# GitHub release 다운로드는 github.com → release-assets.githubusercontent.com 으로
+# 302 리다이렉트된다. 최초 URL 도메인(github.com)만 허용 목록 검사를 거치므로
+# 리다이렉트 도메인도 명시해 둔다(향후 리다이렉트 검증 강화 대비).
 _ALLOWED_DOMAINS = (
     "github.com",
     "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
     "raw.githubusercontent.com",
 )
+
+
+def _encode_url(url: str) -> str:
+    """URL path 의 비-ASCII(한글 등)를 percent-encode.
+
+    urllib.request.urlopen 은 ASCII 만 받는다. release 에셋명에 한글이 들어오면
+    UnicodeEncodeError 가 발생해 다운로드가 조용히 실패하므로, scheme/host/query 는
+    보존하고 path 만 안전하게 인코딩한다. (release.py 를 ASCII 에셋명으로 바꾸는 것이
+    근본 해결이지만, 여기는 방어적 이중 처리다.)
+    """
+    try:
+        from urllib.parse import urlsplit, urlunsplit, quote
+        p = urlsplit(url)
+        path = quote(p.path, safe="/%")
+        return urlunsplit((p.scheme, p.netloc, path, p.query, p.fragment))
+    except Exception:
+        return url
 
 
 def _validate_path_for_cmd(path: str, label: str = "") -> str:
@@ -230,8 +251,9 @@ def download_installer(url: str, expected_size: int = 0, sha256: str = "",
     h = hashlib.sha256()
     done = 0
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        # 공개 release 에셋은 objects.githubusercontent.com 으로 302 → urllib 자동 추적, 무인증.
+        encoded_url = _encode_url(url)
+        req = urllib.request.Request(encoded_url, headers={"User-Agent": USER_AGENT})
+        # 공개 release 에셋은 release-assets.githubusercontent.com 으로 302 → urllib 자동 추적, 무인증.
         with urllib.request.urlopen(req, timeout=30) as resp, open(part, "wb") as out:
             total = expected_size or int(resp.headers.get("Content-Length") or 0)
             while True:

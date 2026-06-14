@@ -78,13 +78,16 @@ begin
   Result := True;
   if not ChromeInstalled then
   begin
-    if MsgBox(
+    // 이 프로그램은 모든 자동화가 Chrome CDP 제어에 의존하므로 Chrome 이 없으면
+    // 설치해도 무용지물이다. 비전공자가 "설치는 됐는데 안 된다"에 빠지지 않도록
+    // 설치 단계에서 명확히 차단하고 Chrome 설치를 안내한다.
+    MsgBox(
       'Google Chrome이 설치되어 있지 않습니다.' + #13#10 + #13#10 +
-      '이 프로그램은 Chrome이 필요합니다.' + #13#10 +
-      '설치 없이 계속하시겠습니까?' + #13#10 + #13#10 +
-      '(Chrome 다운로드: google.com/chrome)',
-      mbConfirmation, MB_YESNO) = IDNO then
-      Result := False;
+      '이 프로그램은 모든 기능이 Chrome 을 필요로 합니다.' + #13#10 +
+      '먼저 Chrome 을 설치한 뒤 이 설치파일을 다시 실행해 주세요.' + #13#10 + #13#10 +
+      'Chrome 다운로드: https://www.google.com/chrome/',
+      mbError, MB_OK);
+    Result := False;
   end;
 end;
 

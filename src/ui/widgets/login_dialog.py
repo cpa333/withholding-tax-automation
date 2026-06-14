@@ -46,6 +46,15 @@ class LoginDialog(QDialog):
         subtitle.setAlignment(Qt.AlignCenter)
         layout.addWidget(subtitle)
 
+        # 계정 안내 — 계정이 없는 비전공자가 막히지 않도록 안내
+        help_label = QLabel(
+            "계정이 없으신가요? 계정 발급은 담당자에게 문의해 주세요."
+        )
+        help_label.setStyleSheet("font-size: 11px; color: #999;")
+        help_label.setAlignment(Qt.AlignCenter)
+        help_label.setWordWrap(True)
+        layout.addWidget(help_label)
+
         layout.addSpacing(16)
 
         # 이메일

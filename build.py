@@ -101,6 +101,18 @@ def build_pyinstaller(driver_dir):
         # openpyxl
         "--hidden-import=openpyxl",
 
+        # PDF 파싱 — 함수 내부 import라 PyInstaller 정적 분석이 못 잡음. 명시 수집 필수.
+        # (누락 시 런타임 ModuleNotFoundError: No module named 'pdfplumber')
+        "--collect-submodules=pdfplumber",
+        "--collect-submodules=PyMuPDF",
+        "--hidden-import=fitz",
+        "--hidden-import=pdfplumber",
+        "--hidden-import=pdfminer",
+        "--hidden-import=pdfminer.high_level",
+
+        # src 전체 서브모듈 수집 — workflows/automation/utils 하위 동적 import 보장
+        "--collect-submodules=src",
+
         # src 패키지 (워크플로우, 자동화, 유틸)
         "--hidden-import=src",
         "--hidden-import=src.version",
@@ -157,6 +169,82 @@ def build_pyinstaller(driver_dir):
         print("\n[ERROR] 빌드 완료되었으나 exe 파일을 찾을 수 없습니다.")
         sys.exit(1)
 
+    return True
+
+
+def verify_bundle():
+    """빌드 결과물의 핵심 의존 포함 여부 검증.
+
+    PyInstaller 6.x onedir 은 두 종류로 나뉜다:
+      - 순수-Python 패키지(pdfplumber/openpyxl/pywinauto/comtypes/src.*) →
+        exe 에 임베드된 PYZ 아카이브. dist/_internal 에 폴더가 없는 것이 정상.
+        → build/원천징수자동화/PYZ-00.toc 에 모듈명이 있는지로 검증.
+      - 네이티브 확장/DLL(PyMuPDF _mupdf.pyd, Qt 플러그인, node.exe, sqlite3) →
+        dist/_internal 하위 느슨한 파일. 실제 경로로 검증.
+
+    "빌드 성공 = 번들 완전"이 아니므로 릴리스 전 필수.
+    """
+    internal = os.path.join("dist", "원천징수자동화", "_internal")
+    pyz_toc = os.path.join("build", "원천징수자동화", "PYZ-00.toc")
+    if not os.path.isdir(internal):
+        print(f"\n[ERROR] _internal 디렉토리 없음: {internal}")
+        sys.exit(1)
+    pyz_text = ""
+    if os.path.isfile(pyz_toc):
+        try:
+            with open(pyz_toc, encoding="utf-8") as f:
+                pyz_text = f.read()
+        except Exception:
+            pyz_text = ""
+    else:
+        print(f"[WARN] PYZ TOC 없음(순수-Python 검증 생략): {pyz_toc}")
+
+    def in_pyz(modname):
+        return f"'{modname}'" in pyz_text or f'"{modname}"' in pyz_text
+
+    checks = [
+        # 순수-Python 패키지 → PYZ TOC 검증 (함수 내부 import 의존 포함)
+        ("pdfplumber (PYZ)", lambda: in_pyz("pdfplumber")),
+        ("PyMuPDF fitz 쉠 (PYZ)", lambda: in_pyz("fitz")),
+        ("openpyxl (PYZ)", lambda: in_pyz("openpyxl")),
+        ("pywinauto (PYZ)", lambda: in_pyz("pywinauto")),
+        ("comtypes (PYZ)", lambda: in_pyz("comtypes")),
+        ("src.utils.raw_data_reader (PYZ)",
+         lambda: in_pyz("src.utils.raw_data_reader")),
+        ("src.utils.data_merger (PYZ)",
+         lambda: in_pyz("src.utils.data_merger")),
+        # 네이티브 확장/DLL → _internal 실제 파일 검증
+        ("PyMuPDF 네이티브(_mupdf.pyd)",
+         lambda: os.path.isfile(os.path.join(internal, "pymupdf", "_mupdf.pyd"))),
+        ("PySide6 qwindows 플러그인",
+         lambda: os.path.isfile(os.path.join(
+             internal, "PySide6", "plugins", "platforms", "qwindows.dll"))),
+        ("playwright node 드라이버",
+         lambda: os.path.isfile(os.path.join(
+             internal, "playwright", "driver", "node.exe"))),
+        ("sqlite3 dll",
+         lambda: os.path.isfile(os.path.join(internal, "sqlite3.dll"))),
+        ("VC 런타임",
+         lambda: os.path.isfile(os.path.join(internal, "VCRUNTIME140.dll"))),
+    ]
+
+    print("\n[번들 검증]")
+    missing = []
+    for name, ok in checks:
+        try:
+            passed = ok()
+        except Exception:
+            passed = False
+        mark = "[OK]  " if passed else "[FAIL]"
+        print(f"  {mark} {name}")
+        if not passed:
+            missing.append(name)
+
+    if missing:
+        print(f"\n[ERROR] 번들에서 누락된 핵심 의존: {', '.join(missing)}")
+        print("  build.py 의 --collect-submodules / --hidden-import / --add-data 를 점검하세요.")
+        sys.exit(1)
+    print("  → 모든 핵심 의존 포함 확인\n")
     return True
 
 
@@ -248,6 +336,8 @@ def main():
 
     driver_dir = find_playwright_driver()
     build_pyinstaller(driver_dir)
+
+    verify_bundle()  # 핵심 의존(pdfplumber/fitz/Qt/node 등) 실제 포함 여부 검증
 
     if ensure_inno_setup():
         build_installer()

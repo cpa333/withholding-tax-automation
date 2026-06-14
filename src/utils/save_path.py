@@ -5,9 +5,33 @@
 
 바탕화면 경로는 OneDrive 백업/한국어 윈도우/GPO 리다이렉션에
 무관하게 Windows Shell API로 실제 경로를 구한다 (get_desktop_path).
+바탕화면이 쓰기 불가(회사 GPO/OneDrive 오프라인)일 때를 대비해
+문서/홈/LOCALAPPDATA/TEMP 로 순차 폴백한다.
 """
 import os
 from datetime import datetime
+
+
+APP_SLUG = "원천징수자동화"
+
+
+def _documents_path() -> str:
+    """내 문서 경로 (CSIDL_PERSONAL=5). 실패 시 빈 문자열."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(512)
+            ctypes.windll.shell32.SHGetFolderPathW(0, 5, 0, 0, buf)
+            if buf.value:
+                return buf.value
+        except Exception:
+            pass
+    return ""
+
+
+def _local_app_data() -> str:
+    """%LOCALAPPDATA% 경로. 실패 시 빈 문자열."""
+    return os.environ.get("LOCALAPPDATA", "")
 
 
 def get_desktop_path() -> str:
@@ -60,10 +84,26 @@ def make_save_dir(
     period = f"{y}{m:02d}"
 
     folder_name = client_name.replace(" ", "_")
-    save_dir = os.path.join(
-        get_desktop_path(),
-        f"{site_name}_{period}",
-        folder_name,
-    )
-    os.makedirs(save_dir, exist_ok=True)
-    return save_dir
+    rel = os.path.join(f"{site_name}_{period}", folder_name)
+    desktop = get_desktop_path()
+    save_dir = os.path.join(desktop, rel)
+
+    # 바탕화면이 읽기전용(회사 GPO)이거나 OneDrive 오프라인 동기화 중단 등으로
+    # 쓸 수 없으면, 자동화 전체가 예외로 멈추고 windowed 모드라 원인이 안 보인다.
+    # 실패 시 사용자 쓰기 가능 경로(문서 폴더 → 홈 → LOCALAPPDATA)로 순차 폴백.
+    for base in (desktop, _documents_path(),
+                 os.path.expanduser("~"), _local_app_data()):
+        if not base:
+            continue
+        candidate = os.path.join(base, rel)
+        try:
+            os.makedirs(candidate, exist_ok=True)
+            return candidate
+        except OSError:
+            continue
+
+    # 모든 폴백 실패 — 최후 수단으로 TEMP(거의 항상 쓰기 가능)에 시도.
+    import tempfile
+    fallback = os.path.join(tempfile.gettempdir(), APP_SLUG, rel)
+    os.makedirs(fallback, exist_ok=True)
+    return fallback

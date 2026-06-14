@@ -31,7 +31,12 @@ from src.utils import updater                # noqa: E402
 
 REPO = f"{updater.RELEASES_OWNER}/{updater.RELEASES_REPO}"
 INSTALLER = os.path.join("installer_output", "원천징수자동화_설치.exe")
-ASSET_NAME = "원천징수자동화_설치.exe"
+# GitHub release 에셋명은 ASCII만 안전 — 한글 파일명은
+#   (1) gh CLI 업로드 시 _.exe 로 깨지고,
+#   (2) updater 가 URL 을 urllib 로 요청할 때 UnicodeEncodeError/404 를 낸다.
+# 따라서 공개 release 에셋은 ASCII 이름으로 올리고, 사용자 PC 로컬 저장명은
+# updater 가 APP_NAME 기반(원천징수자동화_설치.exe)으로 별도 지정한다.
+ASSET_NAME = "whta_setup.exe"
 
 
 def sha256_of(path: str) -> str:
@@ -97,8 +102,9 @@ def main():
 
     # [4] 게시 안내
     print("\n[4] 게시")
-    print("  (a) 릴리스 에셋 업로드:")
-    print(f"      gh release create {tag} \"{INSTALLER}\" "
+    print("  (a) 릴리스 에셋 업로드 (에셋명은 ASCII):")
+    print(f"      cp \"{INSTALLER}\" installer_output/{ASSET_NAME}")
+    print(f"      gh release create {tag} \"installer_output/{ASSET_NAME}\" "
           f"--repo {REPO} --title \"{tag}\" --notes \"{args.notes}\"")
     print("  (b) version.json 을 공개 저장소 main 에 커밋 (앱이 raw URL 로 조회):")
     print(f"      {out} → {REPO} 저장소 루트 version.json 으로 복사 후 commit/push")
@@ -106,14 +112,24 @@ def main():
 
     if args.publish:
         print("\n[4-a] gh release create 실행...")
+        # 에셋명은 ASCII(ASSET_NAME)로 업로드 — 한글 파일명은 gh 가 _.exe 로 깨뜨리고
+        # updater 의 URL 요청도 실패시킨다. 같은 내용을 ASCII 이름으로 복사해 업로드.
+        upload_file = os.path.join("installer_output", ASSET_NAME)
         try:
-            rc = subprocess.run([
-                "gh", "release", "create", tag, INSTALLER,
-                "--repo", REPO, "--title", tag, "--notes", args.notes,
-            ]).returncode
-        except FileNotFoundError:
-            print("[ERROR] 'gh' CLI가 설치되어 있지 않습니다. https://cli.github.com/")
+            import shutil
+            shutil.copyfile(INSTALLER, upload_file)
+        except Exception as e:
+            print(f"[ERROR] 업로드용 파일 복사 실패: {e}")
             rc = 1
+        else:
+            try:
+                rc = subprocess.run([
+                    "gh", "release", "create", tag, upload_file,
+                    "--repo", REPO, "--title", tag, "--notes", args.notes,
+                ]).returncode
+            except FileNotFoundError:
+                print("[ERROR] 'gh' CLI가 설치되어 있지 않습니다. https://cli.github.com/")
+                rc = 1
         if rc != 0:
             print("[WARN] gh release create 실패. 수동 확인 필요.")
         else:
