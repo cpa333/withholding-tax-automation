@@ -326,15 +326,25 @@ steps     (id, job_id, step_name, step_index, status, started_at, ...)
 
 ## 9. 빌드 및 실행
 
-### 초기 환경 설정 (처음 실행하는 PC)
+### 배포 방식 (최종 사용자 PC)
 
-`setup.bat`를 **관리자 권한으로 실행** (우클릭 → 관리자 권한으로 실행):
+최종 사용자는 **인스톨러(`원천징수자동화_설치.exe`, Inno Setup)** 로 설치합니다. **Python이나 패키지 설치 불필요** — PyInstaller onedir 번들에 Python 인터프리터·모든 의존·Playwright node 드라이버·Qt 플러그인·VC++ 런타임이 모두 포함됩니다. 관리자 권한도 불필요(`%LOCALAPPDATA%` per-user 설치).
+
+> **중요**: 인스톨러/본 exe 모두 **코드 서명이 없어** 최초 실행 시 Windows SmartScreen 파란 차단 화면이 뜹니다. 사용자가 "추가 정보 → 실행"으로 우회해야 합니다. (USB/공유폴더 직접 전달 시 SmartScreen 비발생.)
+
+실행 전제 조건(최종 사용자):
+- **Google Chrome**(공식 stable) 설치 — 인스톨러가 미설치 시 설치를 차단
+- 프로그램 계정(Supabase) — 첫 실행 로그인. 담당자 발급
+
+### 개발 환경 설정 (개발자 PC)
+
+`setup.bat`를 **관리자 권한으로 실행** (우클릭 → 관리자 권한으로 실행) — **개발자 전용**:
 
 1. 관리자 권한 확인
 2. Python 3.10+ 설치 여부 및 버전 확인
 3. pip 업그레이드
-4. `requirements.txt` 패키지 일괄 설치 (PySide6, Playwright, pywinauto, PyMuPDF 등)
-5. Playwright Chromium 브라우저 바이너리 설치 (~150MB)
+4. `requirements.txt` 패키지 일괄 설치 (PySide6, Playwright, pywinauto, PyMuPDF, pdfplumber 등)
+5. Playwright node 드라이버 설치 (`playwright install chromium` — **개발용**)
 6. Google Chrome 설치 여부 확인
 
 사전 요구:
@@ -346,7 +356,7 @@ steps     (id, job_id, step_name, step_index, status, started_at, ...)
 ```bash
 # 의존성 설치
 pip install -r requirements.txt
-playwright install chromium
+playwright install chromium   # 개발용 드라이버. 배포 exe에는 포함되지 않음(아래 참고)
 
 # GUI 실행
 python gui_main.py
@@ -355,23 +365,27 @@ python gui_main.py
 python main.py
 ```
 
-### EXE 빌드
+### EXE 빌드 + 인스톨러
 
 ```bash
 python build.py
-# 산출물: dist/원천징수자동화.exe (~294 MB)
+# 산출물:
+#   dist/원천징수자동화/             (PyInstaller onedir: 원천징수자동화.exe + _internal/)
+#   installer_output/원천징수자동화_설치.exe  (Inno Setup 인스톨러, ~233MB)
 ```
 
-빌드 설정:
-- `--windowed`: 콘솔 창 없이 GUI만 표시
-- `--onefile`: 단일 exe 파일
-- PySide6, Playwright, pywinauto, comtypes 서브모듈 전체 수집
-- `style.qss` 리소스 파일 번들
-- `gui_main.py`에서 `sys._MEIPASS`로 리소스 경로 처리
+빌드 설정 (`build.py`):
+- `--windowed` + `--noupx`: 콘솔 없는 GUI, 압축 없음(안정성)
+- **onedir** (onefile 아님) — `dist/원천징수자동화/` 폴더 + `_internal/`
+- `--collect-submodules`: PySide6, playwright, playwright_stealth, comtypes, pywinauto, **pdfplumber, PyMuPDF, src** (함수 내부 import 누락 방지)
+- `--add-data`: Playwright node 드라이버(`playwright/driver/node.exe`), `style.qss`
+- **`verify_bundle()`**: 빌드 후 PYZ(순수-Python) + `_internal`(네이티브) 핵심 의존 실제 포함 여부 검증 (릴리스 전 필수)
 
-실행 전제 조건:
-- Chrome이 시스템에 설치되어 있어야 함
-- Playwright 브라우저 바이너리 설치 필요 (`playwright install chromium`)
+> **Playwright 브라우저 바이너리는 배포에 필요 없음**: production 코드는 `chromium.launch()` 대신 **`connect_over_cdp`** 로 사용자의 실제 Chrome(포트 9223)에 연결합니다. 따라서 `playwright install chromium`의 결과물(수백 MB)을 번들에 포함하지 않습니다. `playwright install`은 개발용 드라이버 확보 목적으로만 사용합니다.
+
+실행 전제 조건(배포 exe):
+- Chrome이 시스템에 설치되어 있어야 함 (인스톨러가 검사)
+- **Playwright 브라우저 바이너리 설치 불필요** (`connect_over_cdp` 사용)
 
 ## 10. 의존성
 
@@ -384,6 +398,7 @@ python build.py
 | openpyxl | Excel 파일 처리 |
 | comtypes | COM 인터페이스 |
 | PyMuPDF | PDF 텍스트/표 추출 |
+| pdfplumber | NHIS 가입자고지내역서 PDF 파싱 (raw_data_reader) |
 | pyinstaller | exe 빌드 |
 
 ## 11. 핵심 설계 결정

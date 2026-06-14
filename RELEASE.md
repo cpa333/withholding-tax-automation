@@ -13,7 +13,7 @@
   설치파일 릴리스 에셋만. 소스 코드는 없음.
 - **조회 경로:**
   - `version.json` → `https://raw.githubusercontent.com/cobaetoo/withholding-tax-releases/main/version.json`
-  - 설치파일 → 릴리스 에셋 `…/releases/download/v{버전}/원천징수자동화_설치.exe`
+  - 설치파일 → 릴리스 에셋 `…/releases/download/v{버전}/whta_setup.exe` (에셋명은 **ASCII 필수**)
 
 > 저장소 소유자/이름을 바꾸면 `src/utils/updater.py` 의 `RELEASES_OWNER` / `RELEASES_REPO`
 > 와 `release.py` 를 함께 수정한다. `installer.iss` / `gui_main.py` 의 `AppMutex`
@@ -29,22 +29,30 @@
 
 ```bash
 # 1) 버전 올리기
-#    src/version.py → __version__ = "1.0.1"
+#    src/version.py → __version__ = "1.0.3"
 
 # 2) (선택) 소스 태그
-git tag v1.0.1 && git push origin master --tags
+git tag v1.0.3 && git push origin master --tags
 
-# 3) 빌드 + version.json 생성 + 게시 명령 출력
-python release.py                 # 빌드만 + 안내
-python release.py --publish       # gh release create 로 에셋 업로드까지
-python release.py --publish --mandatory --notes "홈택스 변경 대응 필수 업데이트"
+# 3) 빌드 + version.json 생성 + 에셋 업로드
+PYTHONUTF8=1 python release.py                 # 빌드만 + 안내 (인코딩 안전)
+PYTHONUTF8=1 python release.py --publish       # gh release create 로 에셋 업로드까지
+PYTHONUTF8=1 python release.py --publish --skip-build          # 기존 빌드 재사용해 재게시
+PYTHONUTF8=1 python release.py --publish --mandatory --notes "홈택스 변경 대응 필수 업데이트"
 
-# 4) version.json 을 공개 저장소 main 에 커밋  (release.py 가 installer_output/version.json 생성)
-#    → 공개 저장소 루트의 version.json 으로 복사 후 commit/push
+# 4) version.json 을 공개 저장소 main 에 반영 (앱이 새 버전을 인식하려면 필수)
+#    release.py 는 installer_output/version.json 생성만 하므로 아래로 공개 repo 에 반영:
+SHA=$(gh api repos/cobaetoo/withholding-tax-releases/contents/version.json --jq '.sha')
+gh api repos/cobaetoo/withholding-tax-releases/contents/version.json -X PUT \
+  -f message="release v1.0.3" -f branch=main \
+  -f content="$(base64 -w0 installer_output/version.json)" -f sha="$SHA" --jq '.commit.sha'
 ```
 
-`--publish` 는 설치파일을 릴리스 에셋으로 업로드한다. **`version.json` 커밋(4단계)은
-공개 저장소 작업 트리에서 수동으로 수행**해야 앱이 새 버전을 인식한다.
+> **`PYTHONUTF8=1` 필수** — cp949 콘솔에서 한글/유니코드 처리 실패로 gh 직전에 종료되는 것을 방지.
+
+`--publish` 는 설치파일을 **ASCII 에셋명 `whta_setup.exe`** 로 업로드한다.
+한글 파일명은 (1) gh 업로드 시 `_.exe` 로 깨지고 (2) updater 의 urllib URL 요청이 `UnicodeEncodeError` 로 실패하므로 반드시 ASCII 여야 한다.
+`version.json` 반영(4단계)은 앱이 새 버전을 인식하는 데 필수이며, 위 `gh api contents` PUT 한 줄로 완료된다 (raw URL 반영에 수십 초~1분 지연 있음).
 
 ## version.json 스키마
 
@@ -73,9 +81,27 @@ python release.py --publish --mandatory --notes "홈택스 변경 대응 필수 
   손상 다운로드는 size+sha256 검증으로 차단.
 - **개발 모드:** 소스로 실행(`python gui_main.py`)하면 설치를 진행하지 않는다.
 
-## 후속 과제 (선택)
+## 코드 서명 / SmartScreen 현황 (v1.0.3 현재)
 
-- **코드 서명(Authenticode):** 미서명 설치파일은 SmartScreen 경고가 날 수 있음.
-  외부 배포 신뢰도를 위해 OV 인증서 + `SignTool` 도입 권장.
+인스톨러와 본 exe 모두 **미서명**입니다. 인터넷(카페/클라우드/메신저/GitHub)에서 받은 파일은
+Windows SmartScreen 파란 차단 화면이 뜨며, 사용자가 "추가 정보 → 실행"으로 우회해야 합니다.
+
+현재 채택한 대응(코드 서명 없이):
+- **`docs/설치안내서.md`** — 비전공자용 A4 1장 안내(SmartScreen 대처법 중심) 배포
+- **USB / 사내 공유 폴더 직접 전달** 시 MotW 가 붙지 않아 SmartScreen 이 뜨지 않음 (소수 실무자 배포에 최적)
+- 인스톨러가 Chrome 미설치를 설치 단계에서 차단
+
+향후 옵션(필요 시):
+- **인스톨러만 서명** (Azure Trusted Signing 월 $9.99 또는 저가 OV cert): 본 exe 는 미서명 유지하되 사용자가 SmartScreen 을 안 보게 가능
+- **winget 배포** (`microsoft/winget-pkgs` 매니페스트 PR): `winget install` 경로는 SmartScreen 을 타지 않음
 - **CI 자동 게시:** 비공개 저장소 태그 push 시 GitHub Actions(windows-runner + Inno)로
-  빌드해 공개 저장소에 에셋/version.json 자동 게시 (교차 저장소 PAT는 Actions 시크릿).
+  빌드해 공개 저장소에 에셋/version.json 자동 게시 (교차 저장소 PAT는 Actions 시크릿)
+
+## v1.0.3 변경 요약
+
+- 빌드 번들 보강: `--collect-submodules pdfplumber/PyMuPDF/src` + `verify_bundle()` (함수 내부 import 누락으로 NHIS PDF 파싱 시 ModuleNotFoundError 났던 블로커 해결)
+- 자동업데이트: 릴리스 에셋명 ASCII(`whta_setup.exe`)화 + `updater._encode_url()` 로 URL path percent-encode (한글 파일명 UnicodeEncodeError/404 해결)
+- 인스톨러 Chrome 미설치 시 설치 차단 게이트 추가
+- 로그인 창 계정 발급/문의 안내 추가
+- 바탕화면 쓰기 불가 시 저장 경로 폴백(문서/홈/LOCALAPPDATA/TEMP)
+- 보안: `auth_session.json` git 추적 해제 + `.gitignore` (※ 히스토리 잔존 — Supabase refresh_token 회전 필요)
