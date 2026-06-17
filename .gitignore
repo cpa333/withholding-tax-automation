@@ -52,3 +52,6 @@ auth_session*.json
 
 # Claude memory
 .claude/
+
+# macOS
+.DS_Store
