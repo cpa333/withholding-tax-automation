@@ -1,5 +1,10 @@
 # Withholding Tax Automation
 
+> **정확성 안내 — NHIS 섹션은 구 버전 기준입니다.** 아래 NHIS 관련 서술 중 일부가 현재 코드와 다릅니다:
+> (1) `nhis_auto_cdp.py` 파일은 **존재하지 않습니다**. 현재는 `nhis_edi_auto_cdp.py` + `_firm_selector`/`_doc_download`/`_doc_access`/`_nexacro`/`_common_edi` 모듈 구조입니다.
+> (2) `auto_session_extend`/세션 연장 기능은 **hometax에만** 존재하며 NHIS에는 없습니다. NHIS 자동화는 개인용이 아닌 **법인용 EDI**로 변경되었습니다.
+> 정확한 현재 구조는 `src/automation/nhis/` 코드와 GUIDE.md를 기준으로 하세요.
+
 This project automates withholding tax processes by controlling external platforms (Health Insurance Corporation, WEHAGO, Hometax) and is delivered as a Windows executable.
 
 ## Project Overview

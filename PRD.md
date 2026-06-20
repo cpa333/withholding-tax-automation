@@ -1,5 +1,8 @@
 # PRD: Health Insurance Corporation Automation (공단 사이트 제어)
 
+> **참고 — 초기(MVP) 설계 문서입니다.** 현재 구현은 GUIDE.md / GEMINI.md 및 코드(`src/`)를 기준으로 합니다.
+> 주요 변화: NHIS는 개인용(www.nhis.or.kr)이 아닌 **법인용 EDI(edi.nhis.or.kr)** 자동화로 발전했고, PyAutoGUI 대신 **Playwright/CDP**를 사용합니다.
+
 ## 1. 개요
 본 문서는 국민건강보험(NHIS) 및 국민연금(NPS) EDI 사이트의 자동화를 위한 기술적 요구사항과 구현 전략을 정의합니다.
 

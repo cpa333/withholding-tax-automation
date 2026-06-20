@@ -1,5 +1,9 @@
 # WEHAGO 원천세 신고 Canvas 화면 AI/RPA 자동화 설계 정리
 
+> **아카이브 안내 — 초기 설계 탐색 문서입니다.** 본 문서는 WEHAGO 원천세 화면이 `canvas` 기반이라는 **전제**로 작성되었으나,
+> **실제 구현은 canvas가 아닌 DOM(LS_ngh_select2 / WSC_LUXButton) + COM UIAutomation 기반**입니다(`src/automation/wehago/`).
+> 채택된 아키텍처는 **GUIDE.md**를 참조하세요. 본 문서는 설계 논의 기록으로만 활용합니다.
+
 ## 0. 문서 목적
 
 이 문서는 더존 WEHAGO의 회계·세무 기장 관련 솔루션, 특히 **원천세 신고 페이지**처럼 입력 영역이 일반 HTML DOM 구조가 아니라 `canvas` 태그 기반으로 구성된 화면을 AI와 자동화 도구로 제어하기 위한 접근 방법을 정리한 것이다.
