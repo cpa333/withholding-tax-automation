@@ -31,6 +31,10 @@ src/automation/wehago/_full_run.py
 # Results
 results/
 
+# Test artifacts
+.pytest_cache/
+tests/golden/
+
 # Build artifacts
 build/
 dist/
