@@ -228,6 +228,15 @@ class MainWindow(QMainWindow):
 
         from src.workflows.registry import get_all_phases
         phases = get_all_phases()
+
+        # ⛔ 임시 조치: Phase 4~8은 UI에 표시만 하고 클릭 불가(비활성 처리).
+        # 워크플로우/레지스트리 기능은 전혀 건드리지 않고 사이드바 버튼만 비활성.
+        # (PhaseButton.enabled=False → 회색 표시 + 클릭 시그널 미연결)
+        # 복구하려면 아래 3줄을 삭제하면 됨.
+        for phase in phases:
+            if phase["phase_id"] >= 4:
+                phase["enabled"] = False
+
         self.sidebar.set_phases(phases)
 
     # ── Slot ──
