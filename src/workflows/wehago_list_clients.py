@@ -10,6 +10,7 @@ from src.batch.state import StateManager
     phase_id=1,
     portal="wehago",
     display_name="수임처 리스트 확보",
+    is_list_phase=True,
 )
 class WehagoListClientsWorkflow(BaseWorkflow):
     steps = [

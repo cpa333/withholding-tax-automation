@@ -15,16 +15,23 @@ class BaseWorkflow(ABC):
     """포털 자동화 워크플로우 어댑터.
 
     Attributes:
-        phase_id: 페이즈 번호 (1-7)
+        phase_id: 페이즈 번호 (1-8)
         portal: Portal enum value ("wehago", "nhis_edi", ...)
         display_name: UI 표시명
         steps: 단계 정의 [{"name": "...", "index": 0}, ...]
+        needs_password: UI 비밀번호 필드 필요 여부 (Phase 7, 8)
+        is_list_phase: 수임처 리스트 모드 Phase (Phase 1)
+        ui_locked: UI 버튼 잠금 여부 (현재 Phase 4~8 임시 비활성)
     """
 
     phase_id: int = 0
     portal: str = ""
     display_name: str = ""
     steps: list[dict] = []
+    # UI/동작 메타데이터 — 매직넘버 분기(main_window/runner) 대체용
+    needs_password: bool = False
+    is_list_phase: bool = False
+    ui_locked: bool = False
 
     @abstractmethod
     async def run_single(

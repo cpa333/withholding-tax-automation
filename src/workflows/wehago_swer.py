@@ -20,6 +20,8 @@ from src.batch.state import StateManager
     portal="wehago",
     display_name="WEHAGO 원천전자신고",
     enabled=True,
+    ui_locked=True,
+    needs_password=True,
 )
 class WehagoSwerWorkflow(BaseWorkflow):
     steps = [

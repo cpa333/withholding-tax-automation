@@ -229,12 +229,11 @@ class MainWindow(QMainWindow):
         from src.workflows.registry import get_all_phases
         phases = get_all_phases()
 
-        # ⛔ 임시 조치: Phase 4~8은 UI에 표시만 하고 클릭 불가(비활성 처리).
-        # 워크플로우/레지스트리 기능은 전혀 건드리지 않고 사이드바 버튼만 비활성.
+        # UI 잠금: registry 의 ui_locked 플래그(phase 4~8)가 True면 버튼 비활성.
+        # 기능(워크플로우/레지스트리)은 건드리지 않고 사이드바 버튼만 비활성화.
         # (PhaseButton.enabled=False → 회색 표시 + 클릭 시그널 미연결)
-        # 복구하려면 아래 3줄을 삭제하면 됨.
         for phase in phases:
-            if phase["phase_id"] >= 4:
+            if phase.get("ui_locked"):
                 phase["enabled"] = False
 
         self.sidebar.set_phases(phases)
@@ -259,12 +258,12 @@ class MainWindow(QMainWindow):
             self.pause_btn.setEnabled(False)
             self._poll_timer.stop()
             self.company_table.set_buttons_enabled(True)
-            if self._selected_phase == 1:
+            if self._is_list_phase(self._selected_phase):
                 self.company_table.full_run_btn.setEnabled(False)
-            if self._selected_phase >= 2:
+            if not self._is_list_phase(self._selected_phase):
                 self.company_table.set_selected_run_mode(True)
 
-        if phase_id == 1 and status == "completed":
+        if self._is_list_phase(phase_id) and status == "completed":
             self._load_client_list()
 
     def _on_batch_progress(self, progress: dict):
@@ -288,7 +287,7 @@ class MainWindow(QMainWindow):
 
     def _on_phase_selected(self, phase_id: int):
         self._selected_phase = phase_id
-        if phase_id == 1:
+        if self._is_list_phase(phase_id):
             self._load_client_list()
             self.company_table.full_run_btn.setVisible(False)
             self.company_table.set_client_mode(True)
@@ -300,14 +299,14 @@ class MainWindow(QMainWindow):
             self.company_table.set_selected_run_mode(True)
 
         # Phase 1 선택 시 이름 필드 표시
-        show_name = (phase_id == 1)
+        show_name = self._is_list_phase(phase_id)
         self.name_label.setVisible(show_name)
         self.name_input.setVisible(show_name)
         if show_name:
             self.name_input.setFocus()
 
         # Phase 7 선택 시 비밀번호 필드 표시
-        show_pw = (phase_id == 7 or phase_id == 8)
+        show_pw = self._needs_password(phase_id)
         self.pw_label.setVisible(show_pw)
         self.pw_input.setVisible(show_pw)
         if show_pw:
@@ -320,6 +319,18 @@ class MainWindow(QMainWindow):
         from src.workflows.registry import get_phase_info
         info = get_phase_info(phase_id)
         return info["portal"] if info else None
+
+    def _phase_info(self, phase_id: int) -> dict:
+        from src.workflows.registry import get_phase_info
+        return get_phase_info(phase_id) or {}
+
+    def _is_list_phase(self, phase_id: int) -> bool:
+        """수임처 리스트 모드 phase(Phase 1) 여부."""
+        return bool(self._phase_info(phase_id).get("is_list_phase"))
+
+    def _needs_password(self, phase_id: int) -> bool:
+        """UI 비밀번호 필드가 필요한 phase(Phase 7, 8) 여부."""
+        return bool(self._phase_info(phase_id).get("needs_password"))
 
     def _load_client_list(self, portal_override: str | None = None):
         """DB에서 수임처 목록을 조회하여 테이블에 표시
@@ -367,12 +378,12 @@ class MainWindow(QMainWindow):
 
     def _on_runner_finished(self):
         self.company_table.set_run_active(False)
-        if self._selected_phase == 1:
+        if self._is_list_phase(self._selected_phase):
             self.company_table.full_run_btn.setEnabled(False)
         self.pause_btn.setEnabled(False)
         self._poll_timer.stop()
         self.company_table.set_buttons_enabled(True)
-        if self._selected_phase >= 2:
+        if not self._is_list_phase(self._selected_phase):
             self.company_table.set_selected_run_mode(True)
 
     def _poll_step_detail(self):
@@ -410,14 +421,14 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("페이즈를 먼저 선택하세요")
             return
 
-        # Phase 1은 "새로 가져오기" 버튼으로만 실행
-        if self._selected_phase == 1:
+        # list phase(수임처 리스트)는 "새로 가져오기" 버튼으로만 실행
+        if self._is_list_phase(self._selected_phase):
             self.statusBar().showMessage("수임처 리스트는 '새로 가져오기' 버튼을 사용하세요")
             return
 
-        # Phase 7/8: 툴바 비밀번호 필드에서 읽기
+        # 비밀번호 필요 phase: 툴바 비밀번호 필드에서 읽기
         password = ""
-        if self._selected_phase in (7, 8):
+        if self._needs_password(self._selected_phase):
             password = self.pw_input.text().strip()
             if not password:
                 self.statusBar().showMessage("전자신고 비밀번호를 입력하세요")
@@ -547,7 +558,7 @@ class MainWindow(QMainWindow):
 
     def _on_selected_run(self, clients: list[dict]):
         """선택건 실행: 선택된 수임처 여러 건에 대해 순차 자동화 실행"""
-        if not self._selected_phase or self._selected_phase == 1:
+        if not self._selected_phase or self._is_list_phase(self._selected_phase):
             return
 
         from src.batch.models import biz_to_mgmt_no
@@ -569,8 +580,8 @@ class MainWindow(QMainWindow):
         # dry-run 체크박스 값 전달 (선택건 실행도 일반 실행과 동일하게 반영)
         extra_kwargs = {"dry_run": self.dry_run_check.isChecked()}
 
-        # Phase 7/8: 비밀번호 전달
-        if self._selected_phase in (7, 8):
+        # 비밀번호 필요 phase: 비밀번호 전달
+        if self._needs_password(self._selected_phase):
             pw = self.pw_input.text().strip()
             if not pw:
                 self.statusBar().showMessage("전자신고 비밀번호를 입력하세요")

@@ -175,8 +175,9 @@ class AutomationRunner(AsyncWorker):
         # 로그인 후 페이지 재연결 (인증 과정에서 탭이 바뀔 수 있음)
         await self._reconnect_page(portal)
 
-        # Phase 1은 "새로 가져오기" 버튼으로만 실행
-        if phase_id == 1:
+        # list phase(수임처 리스트)는 "새로 가져오기" 버튼으로만 실행
+        from src.workflows.registry import get_phase_info
+        if (get_phase_info(phase_id) or {}).get("is_list_phase"):
             self.log_message.emit("수임처 리스트는 '새로 가져오기' 버튼을 사용하세요")
             self.phase_changed.emit(1, "completed")
             return
@@ -679,7 +680,8 @@ class AutomationRunner(AsyncWorker):
 
         with BatchDB(db_path) as db:
             conn = db.conn
-            if phase_id == 1:
+            from src.workflows.registry import get_phase_info
+            if (get_phase_info(phase_id) or {}).get("is_list_phase"):
                 conn.execute("DELETE FROM steps")
                 conn.execute("DELETE FROM jobs")
                 conn.execute("DELETE FROM batches")

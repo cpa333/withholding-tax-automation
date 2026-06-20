@@ -14,6 +14,8 @@ from src.batch.state import StateManager
     portal="hometax",
     display_name="홈택스 원천세 신고",
     enabled=True,
+    ui_locked=True,
+    needs_password=True,
 )
 class HometaxWorkflow(BaseWorkflow):
     steps = [

@@ -24,6 +24,7 @@ from src.batch.state import StateManager
     portal="wehago",
     display_name="WEHAGO 급여명세 PDF",
     enabled=True,
+    ui_locked=True,
 )
 class WehagoSalaryPdfWorkflow(BaseWorkflow):
     steps = [
