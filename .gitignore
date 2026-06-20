@@ -21,7 +21,9 @@ _resolution_*.py
 _timing_audit*.py
 debug_page_content.html
 _test_*.py
-_run_wehago.py
+_run_*.py
+_nts_folder.py
+_open_browser.py
 src/automation/wehago/_check_*.py
 src/automation/wehago/_debug_*.py
 src/automation/wehago/_nav.py
