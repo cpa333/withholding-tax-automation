@@ -101,7 +101,9 @@ def apply_raw_data(
         nhis_data: {성명: NhisEmployeeData} or None
         nps_member_data: {성명: 근로자기여금} or None
         nps_retro_data: {성명: 본인기여금} or None
-        nps_govt_data: {성명: 국고지원금액(전액)/2} or None
+        nps_govt_data: {성명: 국고지원 본인몫} or None
+            (구 3파일 경로=국고지원금액(전액)/2, 통합엑셀 경로=col24 국고지원금액_본인기여금.
+             둘 다 국민연금에서 차감할 근로자 본인몫으로 등가 취급.)
 
     Returns:
         MergeResult

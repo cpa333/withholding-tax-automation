@@ -113,21 +113,31 @@ class WehagoSwsaWorkflow(BaseWorkflow):
                 raw = self._locate_raw_data(client_name, year, month)
                 if raw:
                     from src.utils.raw_data_reader import (
-                        read_nhis_pdf, read_nps_member_excel,
-                        read_nps_retro_excel, read_nps_govt_excel,
+                        read_nhis_pdf, read_nps_integrated_excel,
+                        read_nps_member_excel, read_nps_retro_excel,
+                        read_nps_govt_excel,
                     )
                     if raw.get("nhis_pdf"):
                         nhis_data = read_nhis_pdf(raw["nhis_pdf"])
                         log(f"  NHIS 데이터: {len(nhis_data)}명")
-                    if raw.get("nps_member"):
-                        nps_member_data = read_nps_member_excel(raw["nps_member"])
-                        log(f"  NPS 가입자내역: {len(nps_member_data)}명")
-                    if raw.get("nps_retro"):
-                        nps_retro_data = read_nps_retro_excel(raw["nps_retro"])
-                        log(f"  NPS 소급분내역: {len(nps_retro_data)}명")
-                    if raw.get("nps_govt"):
-                        nps_govt_data = read_nps_govt_excel(raw["nps_govt"])
-                        log(f"  NPS 국고지원내역: {len(nps_govt_data)}명")
+                    # NPS: 통합엑셀 우선 — 1장에서 member/retro/govt 3 dict 추출.
+                    # 통합엑셀이 없으면 구 3파일 폴백(레거시/롤백 경로).
+                    if raw.get("nps_integrated"):
+                        nps_member_data, nps_retro_data, nps_govt_data = (
+                            read_nps_integrated_excel(raw["nps_integrated"])
+                        )
+                        log(f"  NPS 통합엑셀: member {len(nps_member_data)}, "
+                            f"retro {len(nps_retro_data)}, govt {len(nps_govt_data)}명")
+                    else:
+                        if raw.get("nps_member"):
+                            nps_member_data = read_nps_member_excel(raw["nps_member"])
+                            log(f"  NPS 가입자내역: {len(nps_member_data)}명")
+                        if raw.get("nps_retro"):
+                            nps_retro_data = read_nps_retro_excel(raw["nps_retro"])
+                            log(f"  NPS 소급분내역: {len(nps_retro_data)}명")
+                        if raw.get("nps_govt"):
+                            nps_govt_data = read_nps_govt_excel(raw["nps_govt"])
+                            log(f"  NPS 국고지원내역: {len(nps_govt_data)}명")
             except Exception as e:
                 log(f"  원천데이터 읽기 스킵: {e}")
 
@@ -181,6 +191,7 @@ class WehagoSwsaWorkflow(BaseWorkflow):
 
         result = {
             "nhis_pdf": None,
+            "nps_integrated": None,
             "nps_member": None,
             "nps_retro": None,
             "nps_govt": None,
@@ -193,17 +204,22 @@ class WehagoSwsaWorkflow(BaseWorkflow):
             if matches:
                 result["nhis_pdf"] = matches[0]
 
-        # 국민연금 Excel
+        # 국민연금 — 통합엑셀(최종결정내역 통합저장) 우선, 없으면 구 3파일 폴백.
         nps_dir = os.path.join(desktop, f"국민연금_{period}", folder)
         if os.path.isdir(nps_dir):
             for f in os.listdir(nps_dir):
-                full = os.path.join(nps_dir, f)
-                if "가입자내역_엑셀" in f and f.endswith(".xlsx"):
-                    result["nps_member"] = full
-                elif "소급분내역_엑셀" in f and f.endswith(".xlsx"):
-                    result["nps_retro"] = full
-                elif "국고지원내역_엑셀" in f and f.endswith(".xlsx"):
-                    result["nps_govt"] = full
+                if "결정내역통보서" in f and f.endswith(".xlsx"):
+                    result["nps_integrated"] = os.path.join(nps_dir, f)
+            # 통합엑셀이 없으면 구 3파일(레거시/롤백 경로)
+            if not result["nps_integrated"]:
+                for f in os.listdir(nps_dir):
+                    full = os.path.join(nps_dir, f)
+                    if "가입자내역_엑셀" in f and f.endswith(".xlsx"):
+                        result["nps_member"] = full
+                    elif "소급분내역_엑셀" in f and f.endswith(".xlsx"):
+                        result["nps_retro"] = full
+                    elif "국고지원내역_엑셀" in f and f.endswith(".xlsx"):
+                        result["nps_govt"] = full
 
         # 하나라도 있으면 dict 반환, 전부 None이면 None 반환
         if any(result.values()):

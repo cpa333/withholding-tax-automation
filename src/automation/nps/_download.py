@@ -18,7 +18,7 @@ from src.utils.nexacro import (
     nexacro_get_grid_data,
 )
 from src.automation.nps._constants import (
-    TAB_BTN_PREFIX, GRID_DECISION_DETAIL,
+    TAB_BTN_PREFIX, GRID_DECISION_DETAIL, TAB_FINAL,
     BTN_OUTPUT, BTN_OUTPUT_GOVT, BTN_EXCEL_SAVE, BTN_INTEGRATED_SAVE,
     BTN_MODAL_CONFIRM, BTN_MODAL_CANCEL,
     MODAL_PREFIX, RADIO_FULL_SSN,
@@ -533,6 +533,36 @@ async def save_integrated(page, context, save_dir, filename):
         radio_full_ssn_id=INTEGRATED_RADIO_FULL_SSN,
         label="integrated save",
     )
+
+
+async def download_final_integrated(page, context, save_dir, *,
+                                    year: int | None = None,
+                                    month: int | None = None):
+    """최종결정내역 탭(tab 0) 통합저장(전체표출) → 단일 통합엑셀 다운로드.
+
+    3개 탭(가입자/소급/국고) 개별 다운로드를 대체하는 단일 소스.
+    최종결정내역 탭에서 통합저장해야 "2차결정내역통보서" 전체 데이터
+    (가입자+소급+국고, 성명 단위)가 한 장에 담긴다.
+    내부적으로 save_integrated(BTN_INTEGRATED_SAVE → 주민번호 전체표출 radio → 확인)를 재사용.
+
+    Returns:
+        저장된 엑셀 경로, 실패 시 None.
+    """
+    from datetime import datetime
+    now = datetime.now()
+    _y = year if year is not None else now.year
+    _m = month if month is not None else now.month
+    base = f"결정내역통보서_{_y}{_m:02d}"
+
+    log("최종결정내역(tab 0) 이동...")
+    ok = await click_detail_tab(page, TAB_FINAL)
+    if not ok:
+        log("  ERROR: 최종결정내역 탭 전환 실패")
+        return None
+    await human_delay(2)
+
+    log("통합저장(전체표출) 실행...")
+    return await save_integrated(page, context, save_dir, base)
 
 
 # --- Tab download pipeline ---------------------------------------------------

@@ -35,7 +35,8 @@ from src.automation.nps._common import (
     open_workplace_selector, select_workplace, select_workplace_by_index,
     list_workplaces, navigate_to_decision_details, open_decision_detail,
     click_detail_tab, output_with_full_ssn, download_pdf_from_preview,
-    save_excel, save_integrated, process_tab_download, switch_workplace,
+    save_excel, save_integrated, download_final_integrated,
+    process_tab_download, switch_workplace,
     nexacro_click_button,
     BTN_CHANGE_WORKPLACE, BTN_MODAL_CONFIRM, BTN_MODAL_CANCEL,
     TAB_MEMBER, TAB_RETRO, TAB_GOVT,
@@ -266,9 +267,8 @@ async def run_single_workplace(page, context, workplace_name, is_first=False,
     플로우:
     1. 결정내역 이동
     2. 2차 상세 진입
-    3. 가입자내역 → PDF + 엑셀
-    4. 소급분내역 → PDF + 엑셀 (빈 경우 스킵)
-    5. 국고지원내역 → PDF + 통합저장 (빈 경우 스킵)
+    3. 최종결정내역 탭 통합저장(전체표출) → 통합엑셀 1장
+       (구 3탭 가입자/소급/국고 개별 수신을 1장으로 단일화)
     """
     save_dir = make_save_dir("국민연금", workplace_name, year=year, month=month)
 
@@ -288,47 +288,45 @@ async def run_single_workplace(page, context, workplace_name, is_first=False,
         log(f"  ERROR: 2차 상세 진입 실패 - {workplace_name} 스킵")
         return
 
-    # Step 4~6: 탭별 다운로드
-    tabs = [
-        (TAB_MEMBER, "가입자내역", "grdList2"),
-        (TAB_RETRO, "소급분내역", "grdList3"),
-        (TAB_GOVT, "국고지원내역", "grdList4"),
-    ]
-    for tab_idx, label, grid_sfx in tabs:
+    # 최종결정내역 통합엑셀 다운로드 — 3탭(가입자/소급/국고) 개별 수신을 1장으로 대체.
+    try:
+        await download_final_integrated(
+            page, context, save_dir, year=year, month=month,
+        )
+    except Exception as e:
+        log(f"  ERROR: 통합 다운로드 중 예외 발생 - {e}")
+        import traceback
+        traceback.print_exc()
+        # 잔여 상태 정리: 열린 모달 닫기
         try:
-            result = await process_tab_download(
-                page, context, save_dir, tab_idx, label, grid_sfx,
-                year=year, month=month,
+            stale = await page.evaluate(
+                '(elId) => !!document.getElementById(elId)', BTN_MODAL_CONFIRM
             )
-            if result["skipped"]:
-                log(f"  {label} 스킵 (데이터 없음)")
-        except Exception as e:
-            log(f"  ERROR: {label} 처리 중 예외 발생 - {e}")
-            import traceback
-            traceback.print_exc()
-            # 잔여 상태 정리: 열린 모달 / rdPreview 탭 닫기
-            try:
-                stale = await page.evaluate(
-                    '(elId) => !!document.getElementById(elId)', BTN_MODAL_CONFIRM
-                )
-                if stale:
-                    await nexacro_click_button(page, BTN_MODAL_CANCEL)
-                    await human_delay(0.5)
-            except Exception:
-                pass
-            for pg in context.pages:
-                try:
-                    if "rdPreview" in pg.url:
-                        await pg.close()
-                except Exception:
-                    continue
-        await human_delay(1)
+            if stale:
+                await nexacro_click_button(page, BTN_MODAL_CANCEL)
+                await human_delay(0.5)
+        except Exception:
+            pass
 
     log(f"  저장 경로: {save_dir}")
 
-    # 페이지 상태 정리: 첫 번째 탭으로 복귀
-    await click_detail_tab(page, TAB_MEMBER)
-    await human_delay(1)
+    # [롤백] 3탭 개별 PDF+엑셀로 되돌리려면 아래 루프 활성화.
+    # process_tab_download 는 run_interactive 메뉴(수동 탭별 다운로드)에서 계속 사용.
+    # tabs = [
+    #     (TAB_MEMBER, "가입자내역", "grdList2"),
+    #     (TAB_RETRO, "소급분내역", "grdList3"),
+    #     (TAB_GOVT, "국고지원내역", "grdList4"),
+    # ]
+    # for tab_idx, label, grid_sfx in tabs:
+    #     try:
+    #         result = await process_tab_download(
+    #             page, context, save_dir, tab_idx, label, grid_sfx,
+    #             year=year, month=month,
+    #         )
+    #         if result["skipped"]:
+    #             log(f"  {label} 스킵 (데이터 없음)")
+    #     except Exception as e:
+    #         ...
 
 
 async def run_interactive(page, context, year: int | None = None, month: int | None = None):

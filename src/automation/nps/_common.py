@@ -63,6 +63,7 @@ from src.automation.nps._download import (
     download_pdf_from_preview,
     save_excel,
     save_integrated,
+    download_final_integrated,
     process_tab_download,
 )
 

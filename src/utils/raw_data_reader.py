@@ -277,3 +277,92 @@ def read_nps_govt_excel(excel_path: str) -> dict[str, int]:
 
     logger.info("NPS 국고지원내역: %d명 파싱 완료 (%s)", len(result), excel_path)
     return result
+
+
+def read_nps_integrated_excel(
+    excel_path: str,
+) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
+    """NPS 최종결정내역 탭 통합저장(전체표출) Excel → (member, retro, govt) 3개 dict.
+
+    3개 탭(가입자/소급/국고) 개별 엑셀을 한 장으로 대체하는 단일 소스.
+    컬럼을 헤더명으로 탐색(레이아웃 변경 내성):
+      - member (당월분 본인기여금) = 근로자기여금   → 국민연금 기본값
+      - retro  (소급분 본인기여금)                  → 국민연금정산/누적
+      - govt   (국고지원금액 본인기여금, 이미 분할) → 국민연금에서 차감
+    상실(퇴사) 행은 당월분 본인기여금이 공란이므로 member에서 제외되며,
+    retro/govt는 0 초과인 경우만 포함(구 read_nps_retro/govt_excel 동작과 일치).
+
+    Returns:
+        (member_dict, retro_dict, govt_dict) — {성명: 금액}. 파싱 실패 시 빈 dict 3개.
+    """
+    member: dict[str, int] = {}
+    retro: dict[str, int] = {}
+    govt: dict[str, int] = {}
+
+    try:
+        wb = openpyxl.load_workbook(excel_path, data_only=True)
+        ws = wb.active
+
+        # 헤더 행 탐색 ("성명" 셀) + 3개 본인기여금 컬럼 식별.
+        # "본인기여금"이 4컬럼(당월분/소급분/총부담금계/국고지원)에 공통 포함되므로
+        # 접두사(당월분/소급분/국고지원)로 구분. 총부담금계(col19)는 의도적 배제.
+        header_row = None
+        name_col = member_col = retro_col = govt_col = None
+        for r in range(1, min(ws.max_row + 1, 11)):
+            for c in range(1, ws.max_column + 1):
+                val = ws.cell(r, c).value
+                if not val:
+                    continue
+                h = str(val).strip()
+                if h == "성명" and name_col is None:
+                    name_col = c
+                    header_row = r
+                if "본인기여금" in h:
+                    if "당월분" in h and member_col is None:
+                        member_col = c
+                    elif "소급분" in h and retro_col is None:
+                        retro_col = c
+                    elif "국고지원" in h and govt_col is None:
+                        govt_col = c
+
+        if not header_row or not name_col:
+            logger.warning(
+                "NPS 통합엑셀: 헤더/성명 컬럼 미발견 (header_row=%s, name_col=%s)",
+                header_row, name_col,
+            )
+            wb.close()
+            return {}, {}, {}
+
+        for r in range(header_row + 1, ws.max_row + 1):
+            name = ws.cell(r, name_col).value
+            if not name or not str(name).strip():
+                continue
+            name = str(name).strip()
+
+            # member: 당월분 본인기여금 (공란=상실/퇴사 → 제외)
+            if member_col is not None:
+                mv = ws.cell(r, member_col).value
+                if mv is not None and str(mv).strip() != "":
+                    member[name] = member.get(name, 0) + _parse_int(mv)
+            # retro: 소급분 본인기여금 (0 초과만)
+            if retro_col is not None:
+                rv = _parse_int(ws.cell(r, retro_col).value)
+                if rv > 0:
+                    retro[name] = retro.get(name, 0) + rv
+            # govt: 국고지원 본인기여금 (0 초과만 — 이미 분할된 본인몫)
+            if govt_col is not None:
+                gv = _parse_int(ws.cell(r, govt_col).value)
+                if gv > 0:
+                    govt[name] = govt.get(name, 0) + gv
+
+        wb.close()
+
+    except Exception as e:
+        logger.warning("NPS 통합엑셀 파싱 실패 (%s): %s", excel_path, e)
+        return {}, {}, {}
+
+    logger.info(
+        "NPS 통합엑셀: member %d명, retro %d명, govt %d명 (%s)",
+        len(member), len(retro), len(govt), excel_path,
+    )
+    return member, retro, govt
