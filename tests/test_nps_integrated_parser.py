@@ -179,6 +179,29 @@ def test_missing_file_returns_empty():
     assert read_nps_integrated_excel(missing) == ({}, {}, {})
 
 
+def test_float_cells(tmp_path):
+    """openpyxl 이 숫자 셀을 float(154370.0)로 반환하는 경우 — _parse_int 의
+    int(float(s)) 경로. 실제 NPS 통합엑셀은 float 셀을 쓰므로 핵심 경로.
+    이 경로가 깨지면(int(s) 회귀) '154370.0' → ValueError → 0 로 모든 값 추락."""
+    wb = Workbook()
+    ws = wb.active
+    for c, val in enumerate(HEADERS, start=1):
+        ws.cell(1, c).value = val
+    ws.cell(2, 3).value = "실수맨"
+    ws.cell(2, 10).value = 154370.0     # float — openpyxl 실제 반환 타입
+    ws.cell(2, 16).value = 10000.5      # float 소수 → int truncation 10000
+    ws.cell(2, 24).value = 5000.0
+    ws.cell(3, 3).value = "문자열실수"
+    ws.cell(3, 10).value = "204150.0"   # 문자열 '204150.0' 도 int(float) 처리
+    path = str(tmp_path / "float.xlsx")
+    wb.save(path)
+    wb.close()
+    m, r, g = read_nps_integrated_excel(path)
+    assert m == {"실수맨": 154370, "문자열실수": 204150}
+    assert r == {"실수맨": 10000}   # 10000.5 → truncation
+    assert g == {"실수맨": 5000}
+
+
 def test_col19_total_excluded(tmp_path):
     """총부담금계(col19)는 '본인기여금' 포함이나 접두사(당월/소급/국고) 없어
     매칭에서 배제됨 → col10 만 member 로 사용(col19 값은 무시). 동작보존 핵심."""
