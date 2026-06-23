@@ -10,7 +10,7 @@ from src.batch.state import StateManager
 
 
 @register(
-    phase_id=8,
+    phase_id=9,
     portal="hometax",
     display_name="홈택스 원천세 신고",
     enabled=True,

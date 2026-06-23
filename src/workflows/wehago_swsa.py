@@ -22,7 +22,7 @@ from src.batch.state import StateManager
 
 
 @register(
-    phase_id=4,
+    phase_id=5,
     portal="wehago",
     display_name="WEHAGO 급여자료입력",
     enabled=True,

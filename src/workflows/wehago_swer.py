@@ -16,7 +16,7 @@ from src.batch.state import StateManager
 
 
 @register(
-    phase_id=7,
+    phase_id=8,
     portal="wehago",
     display_name="WEHAGO 원천전자신고",
     enabled=True,

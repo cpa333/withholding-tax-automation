@@ -48,20 +48,20 @@ def test_real_eight_phases_registered_in_order():
         pytest.skip(f"워크플로우 모듈 import 불가(의존성): {e}")
 
     ids = [p["phase_id"] for p in get_all_phases()]
-    # 다른 테스트가 임시 phase(901 등)를 등록했을 수 있으므로 1~8 포함 여부만 확인
-    assert ids[:8] == [1, 2, 3, 4, 5, 6, 7, 8]
-    for pid in range(1, 9):
+    # 병렬 phase(2)는 테스트에서 등록 안 함(main_window 에서만). 8개 워크플로우 = phase_id 1,3..9.
+    assert ids[:8] == [1, 3, 4, 5, 6, 7, 8, 9]
+    for pid in (1, 3, 4, 5, 6, 7, 8, 9):
         assert get_phase_info(pid) is not None
         assert get_workflow(pid) is not None
 
-    # capability 메타데이터 검증 (Wave 2) — 이전 phase_id==1/7/8/>=4 매직넘버와 동등
+    # capability 메타데이터 검증 — phase 2(병렬)은 테스트 미등록
     assert get_phase_info(1)["is_list_phase"] is True
-    assert get_phase_info(2)["is_list_phase"] is False
-    for pid in (4, 5, 6, 7, 8):
+    assert get_phase_info(3)["is_list_phase"] is False
+    for pid in (5, 6, 7, 8, 9):
         assert get_phase_info(pid)["ui_locked"] is True, f"phase {pid} 잠금 기대"
-    for pid in (1, 2, 3):
+    for pid in (1, 3, 4):
         assert get_phase_info(pid)["ui_locked"] is False, f"phase {pid} 활성 기대"
-    assert get_phase_info(7)["needs_password"] is True
     assert get_phase_info(8)["needs_password"] is True
-    for pid in (1, 2, 3, 4, 5, 6):
+    assert get_phase_info(9)["needs_password"] is True
+    for pid in (1, 3, 4, 5, 6, 7):
         assert get_phase_info(pid)["needs_password"] is False

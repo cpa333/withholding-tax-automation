@@ -9,7 +9,7 @@ from src.utils.save_path import make_save_dir
 
 
 @register(
-    phase_id=3,
+    phase_id=4,
     portal="nps_edi",
     display_name="국민연금 EDI",
 )

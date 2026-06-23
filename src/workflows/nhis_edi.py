@@ -6,7 +6,7 @@ from src.batch.state import StateManager
 
 
 @register(
-    phase_id=2,
+    phase_id=3,
     portal="nhis_edi",
     display_name="국민건강보험 EDI",
 )

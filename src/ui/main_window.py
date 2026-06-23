@@ -40,6 +40,12 @@ class MainWindow(QMainWindow):
         self.runner.job_changed.connect(self._on_job_changed)
         self.runner.finished_ok.connect(self._on_runner_finished)
 
+        # 병렬 자동화(NPS+NHIS subprocess) — 단일 runner 와 독립, 회귀 0
+        from src.ui.workers.parallel_cli_worker import ParallelCliRunner
+        self.parallel_runner = ParallelCliRunner(self)
+        self.parallel_runner.log_message.connect(self._on_log)
+        self.parallel_runner.all_finished.connect(self._on_parallel_finished)
+
         self._selected_phase = 1
         self._selected_job_id = 0
 
@@ -226,7 +232,9 @@ class MainWindow(QMainWindow):
         import src.workflows.wehago_swer          # noqa: F401
         import src.workflows.hometax              # noqa: F401
 
-        from src.workflows.registry import get_all_phases
+        from src.workflows.registry import get_all_phases, register_parallel_phase
+        # 사이드바 "공단 EDI 병렬 자동화" Phase 2 (메타데이터 전용, is_parallel=True)
+        register_parallel_phase(2, "공단 EDI 병렬 자동화")
         phases = get_all_phases()
 
         # UI 잠금: registry 의 ui_locked 플래그(phase 4~8)가 True면 버튼 비활성.
@@ -328,6 +336,10 @@ class MainWindow(QMainWindow):
         """수임처 리스트 모드 phase(Phase 1) 여부."""
         return bool(self._phase_info(phase_id).get("is_list_phase"))
 
+    def _is_parallel(self) -> bool:
+        """현재 선택 phase 가 병렬(공단 EDI 병렬 자동화)인지."""
+        return bool(self._phase_info(self._selected_phase).get("is_parallel"))
+
     def _needs_password(self, phase_id: int) -> bool:
         """UI 비밀번호 필드가 필요한 phase(Phase 7, 8) 여부."""
         return bool(self._phase_info(phase_id).get("needs_password"))
@@ -376,6 +388,12 @@ class MainWindow(QMainWindow):
         self._selected_job_id = job_id
         self._poll_step_detail()
 
+    def _on_parallel_finished(self):
+        self.company_table.set_run_active(False)
+        self.company_table.set_buttons_enabled(True)
+        self.company_table.set_selected_run_mode(True)
+        self._on_log("[병렬] 모든 subprocess 완료")
+
     def _on_runner_finished(self):
         self.company_table.set_run_active(False)
         if self._is_list_phase(self._selected_phase):
@@ -417,6 +435,9 @@ class MainWindow(QMainWindow):
     # ── 제어 ──
 
     def _on_start(self):
+        if self.parallel_runner.is_running():
+            self._on_log("[병렬 실행 중] 단일 전체실행은 병렬 종료 후 가능합니다.")
+            return
         if not self._selected_phase:
             self.statusBar().showMessage("페이즈를 먼저 선택하세요")
             return
@@ -424,6 +445,17 @@ class MainWindow(QMainWindow):
         # list phase(수임처 리스트)는 "새로 가져오기" 버튼으로만 실행
         if self._is_list_phase(self._selected_phase):
             self.statusBar().showMessage("수임처 리스트는 '새로 가져오기' 버튼을 사용하세요")
+            return
+
+        # ── Phase 9: 공단 EDI 병렬 자동화 (NPS+NHIS subprocess 동시 실행) ──
+        if self._is_parallel():
+            year = self.year_spin.value()
+            month = self.month_spin.value()
+            self.company_table.set_run_active(True)
+            self.parallel_runner.start(nps_port=9223, nhis_port=9224,
+                                       firms=None, year=year, month=month)
+            self._on_log("[병렬] NPS(9223)/NHIS(9224) 백그라운드 시작 (전체 수임처)")
+            self._on_log("[병렬] 두 Chrome이 열리면 각각 공동인증서로 로그인하세요 (첫 1회, 이후 세션 재사용)")
             return
 
         # 비밀번호 필요 phase: 툴바 비밀번호 필드에서 읽기
@@ -457,6 +489,11 @@ class MainWindow(QMainWindow):
             self.pause_btn.setText("재개")
 
     def _on_stop(self):
+        # Phase 9 병렬 정지
+        if self._is_parallel():
+            self.parallel_runner.stop()
+            self._on_log("[병렬] 정지 요청 — subprocess/Chrome 종료 중")
+            return
         self.runner.request_stop()
         self.runner.cleanup_session()
         self.company_table.set_run_active(False)
@@ -558,7 +595,26 @@ class MainWindow(QMainWindow):
 
     def _on_selected_run(self, clients: list[dict]):
         """선택건 실행: 선택된 수임처 여러 건에 대해 순차 자동화 실행"""
+        if self.parallel_runner.is_running():
+            self._on_log("[병렬 실행 중] 단일 선택실행은 병렬 종료 후 가능합니다.")
+            return
         if not self._selected_phase or self._is_list_phase(self._selected_phase):
+            return
+
+        # ── Phase 9: 공단 EDI 병렬 (선택 수임처) ──
+        if self._is_parallel():
+            firms = [c.get("name") for c in clients if c.get("name")] or None
+            if not firms:
+                self.statusBar().showMessage("수임처를 선택하세요")
+                return
+            year = self.year_spin.value()
+            month = self.month_spin.value()
+            self.company_table.set_run_active(True)
+            self.company_table.set_buttons_enabled(False)
+            self.company_table.set_selected_run_mode(False)
+            self.parallel_runner.start(nps_port=9223, nhis_port=9224,
+                                       firms=firms, year=year, month=month)
+            self._on_log(f"[병렬] 선택 수임처 {len(firms)}건 병렬 실행: {', '.join(firms)}")
             return
 
         from src.batch.models import biz_to_mgmt_no
