@@ -538,15 +538,17 @@ async def save_integrated(page, context, save_dir, filename):
 async def download_final_integrated(page, context, save_dir, *,
                                     year: int | None = None,
                                     month: int | None = None):
-    """최종결정내역 탭(tab 0) 통합저장(전체표출) → 단일 통합엑셀 다운로드.
+    """최종결정내역 탭(tab 0) 통합엑셀 + 출력 PDF 다운로드.
 
     3개 탭(가입자/소급/국고) 개별 다운로드를 대체하는 단일 소스.
-    최종결정내역 탭에서 통합저장해야 "2차결정내역통보서" 전체 데이터
-    (가입자+소급+국고, 성명 단위)가 한 장에 담긴다.
-    내부적으로 save_integrated(BTN_INTEGRATED_SAVE → 주민번호 전체표출 radio → 확인)를 재사용.
+    최종결정내역 탭에서 전체표출(주민번호 full)로 받아야 "2차결정내역통보서"
+    전체 데이터(가입자+소급+국고, 성명 단위)가 한 장에 담긴다.
+
+    1) 통합엑셀(BTN_INTEGRATED_SAVE → 전체표출 → 확인) — WEHAGO 자동입력 데이터 소스
+    2) PDF(BTN_OUTPUT → 전체표출 → 확인 → Crownix rdPreview) — 사용자 열람용(베타 요구)
 
     Returns:
-        저장된 엑셀 경로, 실패 시 None.
+        {"excel": 경로|None, "pdf": 경로|None}
     """
     from datetime import datetime
     now = datetime.now()
@@ -558,11 +560,54 @@ async def download_final_integrated(page, context, save_dir, *,
     ok = await click_detail_tab(page, TAB_FINAL)
     if not ok:
         log("  ERROR: 최종결정내역 탭 전환 실패")
-        return None
+        return {"excel": None, "pdf": None}
     await human_delay(2)
 
-    log("통합저장(전체표출) 실행...")
-    return await save_integrated(page, context, save_dir, base)
+    # 1) 통합엑셀 (WEHAGO 자동입력 데이터 소스)
+    log("통합저장(전체표출) 실행 — 엑셀...")
+    excel_path = await save_integrated(page, context, save_dir, base)
+
+    # 엑셀 모달(UHJE0002P2) 잔여 정리 — output_with_full_ssn은 출력 모달(UHJE0002P1)만
+    # 정리하므로, 통합 모달이 남아있으면 BTN_OUTPUT 클릭 전 명시적으로 닫는다.
+    try:
+        stale_integrated = await page.evaluate(
+            '(elId) => !!document.getElementById(elId)', INTEGRATED_BTN_CONFIRM
+        )
+        if stale_integrated:
+            log("  잔여 통합 모달 정리...")
+            await nexacro_click_button(page, INTEGRATED_BTN_CANCEL)
+            await human_delay(1)
+    except Exception:
+        pass
+
+    # 2) PDF — 상단 출력 버튼(BTN_OUTPUT, div00.btn02) → 전체표출 → Crownix.
+    # 구 3탭 파이프라인(process_tab_download)에서 검증된 output_with_full_ssn +
+    # download_pdf_from_preview 체인을 tab 0에 동일하게 적용.
+    log("출력(PDF) 실행 — 상단 출력 버튼(BTN_OUTPUT)...")
+    pdf_path = None
+    if await output_with_full_ssn(page, button_id=BTN_OUTPUT):
+        pdf_path = await download_pdf_from_preview(context, save_dir, f"{base}_출력")
+
+    # 잔여 출력 모달(UHJE0002P1) + rdPreview 탭 정리 (process_tab_download 패턴)
+    try:
+        stale_output = await page.evaluate(
+            '(elId) => !!document.getElementById(elId)', BTN_MODAL_CONFIRM
+        )
+        if stale_output:
+            log("  잔여 출력 모달 정리...")
+            await nexacro_click_button(page, BTN_MODAL_CANCEL)
+            await human_delay(1)
+    except Exception:
+        pass
+    for pg in context.pages:
+        try:
+            if "rdPreview" in pg.url:
+                await pg.close()
+                log("  잔여 rdPreview 탭 닫기 완료")
+        except Exception:
+            continue
+
+    return {"excel": excel_path, "pdf": pdf_path}
 
 
 # --- Tab download pipeline ---------------------------------------------------
