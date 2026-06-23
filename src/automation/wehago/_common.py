@@ -1240,15 +1240,18 @@ async def search_company_by_biz(page, biz_number: str) -> str | None:
 
 async def goto_salary_page_with_fallback(
     page, client_name: str, management_number: str = "",
+    business_number: str = "",
 ) -> bool:
-    """사업자번호 검색 → 수임처명 fallback → 급여 페이지 진입"""
+    """사업자등록번호 검색 → 수임처명 fallback → 급여 페이지 진입
+
+    위하고는 항상 DB의 사업자등록번호(business_number)로 검색한다.
+    management_number(사업장관리번호)는 위하고 검색에 사용하지 않는다 —
+    랜덤 접미사 override 수임처에서 '0' 제거 역추론이 틀리는 것을 방지.
+    (management_number는 건강보험/국민연금 EDI 사업장관리번호 전용)
+    """
     goto_ok = False
 
-    biz_number = (
-        management_number[:-1]
-        if management_number and management_number.endswith("0")
-        else management_number
-    )
+    biz_number = business_number.replace("-", "") if business_number else ""
     if biz_number:
         try:
             found_name = await search_company_by_biz(page, biz_number)

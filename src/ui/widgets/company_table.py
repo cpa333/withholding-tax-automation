@@ -8,13 +8,19 @@ from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal
 from PySide6.QtGui import QColor
 
 from src.ui.styles import STATUS_DISPLAY, BTN_BLUE, BTN_RED, BTN_ORANGE, BTN_GREEN
+from src.batch.models import biz_to_mgmt_no
 
 _HEADERS_JOBS = ["수임처명", "상태", "현재 단계", "소요시간", "에러"]
-_HEADERS_CLIENTS = ["수임처명", "사업자등록번호", "포털", "활성"]
+_HEADERS_CLIENTS = ["수임처명", "사업자등록번호", "관리번호", "포털", "활성"]
 
 
 class CompanyTableModel(QAbstractTableModel):
     """수임처 Job 목록을 테이블로 표시하는 모델"""
+
+    # clients_mode 관리번호 컬럼 인덱스 (직접 key-in 편집 대상)
+    _MGMT_COL = 2
+
+    management_number_changed = Signal(int, str)  # (client_id, override_value)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -29,7 +35,8 @@ class CompanyTableModel(QAbstractTableModel):
         self.endResetModel()
 
     def set_clients(self, clients: list[dict]):
-        """clients: [{"name", "portal", "enabled"}, ...]"""
+        """clients: [{"id","name","business_number","management_number",
+                     "management_number_override","portal","enabled"}, ...]"""
         self.beginResetModel()
         self._jobs = clients
         self._clients_mode = True
@@ -55,11 +62,14 @@ class CompanyTableModel(QAbstractTableModel):
         col = index.column()
 
         if self._clients_mode:
-            if role == Qt.ItemDataRole.DisplayRole:
+            # EditRole 도 DisplayRole 과 동일값 반환 → 관리번호 셀 편집 시
+            # 현재 값이 빈칸이 아니라 기존 관리번호로 미리 채워진 채로 수정 가능
+            if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
                 if col == 0: return row_data.get("name", "")
                 elif col == 1: return row_data.get("business_number", "")
-                elif col == 2: return row_data.get("portal", "")
-                elif col == 3: return "O" if row_data.get("enabled", True) else "X"
+                elif col == 2: return row_data.get("management_number", "")
+                elif col == 3: return row_data.get("portal", "")
+                elif col == 4: return "O" if row_data.get("enabled", True) else "X"
             return None
 
         if role == Qt.ItemDataRole.DisplayRole:
@@ -81,6 +91,36 @@ class CompanyTableModel(QAbstractTableModel):
 
         return None
 
+    def flags(self, index):
+        if not index.isValid():
+            return Qt.ItemFlag.NoItemFlags
+        base = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        # clients_mode 의 관리번호 컬럼만 직접 key-in 편집 허용
+        if self._clients_mode and index.column() == self._MGMT_COL:
+            base |= Qt.ItemFlag.ItemIsEditable
+        return base
+
+    def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
+        if role != Qt.ItemDataRole.EditRole:
+            return False
+        if not (self._clients_mode and index.column() == self._MGMT_COL):
+            return False
+        row_data = self._jobs[index.row()]
+        client_id = row_data.get("id")
+        if client_id is None:
+            return False
+
+        normalized = (value or "").strip()
+        # 빈 값은 override 해제(원복) → biz_to_mgmt_no 자동계산 표시
+        derived = biz_to_mgmt_no(row_data.get("business_number", ""))
+        row_data["management_number_override"] = normalized
+        row_data["management_number"] = normalized if normalized else derived
+
+        tl = self.index(index.row(), self._MGMT_COL)
+        self.dataChanged.emit(tl, tl, [Qt.ItemDataRole.DisplayRole])
+        self.management_number_changed.emit(client_id, normalized)
+        return True
+
     def get_job_at(self, row: int) -> dict | None:
         if 0 <= row < len(self._jobs):
             return self._jobs[row]
@@ -96,6 +136,7 @@ class CompanyTable(QWidget):
     selected_run_requested = Signal(list)  # [{"name": str, "business_number": str}, ...]
     full_run_requested = Signal()
     stop_requested = Signal()
+    management_number_changed = Signal(int, str)  # (client_id, override_value) — DB 저장용 릴레이
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -161,16 +202,22 @@ class CompanyTable(QWidget):
         self.table = QTableView()
         self.model = CompanyTableModel()
         self.table.setModel(self.model)
+        # 모델의 관리번호 편집 → CompanyTable 릴레이 → main_window DB 저장
+        self.model.management_number_changed.connect(self.management_number_changed)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableView.SelectRows)
         self.table.setSelectionMode(QTableView.ExtendedSelection)
-        self.table.setEditTriggers(QTableView.NoEditTriggers)
+        # 관리번호 컬럼만 편집 가능 — flags()가 해당 컬럼만 ItemIsEditable 부여
+        self.table.setEditTriggers(
+            QTableView.DoubleClicked | QTableView.EditKeyPressed | QTableView.AnyKeyPressed
+        )
 
         # 컬럼 너비 (Job 모드 기준)
         self.table.setColumnWidth(0, 200)  # 수임처명
         self.table.setColumnWidth(1, 130)  # 사업자등록번호 / 상태
-        self.table.setColumnWidth(2, 70)   # 포털 / 현재 단계
-        self.table.setColumnWidth(3, 70)   # 활성 / 소요시간
+        self.table.setColumnWidth(2, 120)  # 관리번호(편집) / 현재 단계
+        self.table.setColumnWidth(3, 70)   # 포털 / 소요시간
+        self.table.setColumnWidth(4, 70)   # 활성 / 에러
         self.table.horizontalHeader().setStretchLastSection(True)
 
         layout.addWidget(self.table)
@@ -240,6 +287,7 @@ class CompanyTable(QWidget):
                 self._selected_clients.append({
                     "name": job.get("name", ""),
                     "business_number": job.get("business_number", ""),
+                    "management_number": job.get("management_number", ""),
                 })
         self.selected_run_btn.setEnabled(len(self._selected_clients) > 0)
 

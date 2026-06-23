@@ -103,6 +103,7 @@ class Client:
     notes: str = ""                 # 메모
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    management_number: str = ""     # 사업장관리번호 override (빈=biz_to_mgmt_no 자동계산)
 
 
 @dataclass
@@ -185,6 +186,17 @@ def biz_to_mgmt_no(business_number: str) -> str:
     """
     digits = business_number.replace("-", "")
     return digits + "0" if digits else ""
+
+
+def get_management_number(client: "Client") -> str:
+    """수임처의 실제 사업장관리번호 반환.
+
+    사람이 직접 입력한 override(client.management_number)가 있으면 그것을,
+    없으면 biz_to_mgmt_no(business_number)로 자동 계산(biz+'0').
+    override는 건강보험/국민연금 EDI 사업장관리번호에만 반영되며,
+    위하고는 항상 DB의 business_number로 검색한다(역추론 금지).
+    """
+    return client.management_number if client.management_number else biz_to_mgmt_no(client.business_number)
 
 
 def make_batch_key(year: int, month: int, portal: str) -> str:

@@ -66,6 +66,7 @@ class MainWindow(QMainWindow):
         self.company_table.selected_run_requested.connect(self._on_selected_run)
         self.company_table.full_run_requested.connect(self._on_start)
         self.company_table.stop_requested.connect(self._on_stop)
+        self.company_table.management_number_changed.connect(self._on_management_number_changed)
 
         # 시작 시 DB에서 수임처 목록 로드
         self._load_client_list()
@@ -352,6 +353,7 @@ class MainWindow(QMainWindow):
         """
         import os
         from src.batch.db import BatchDB, ClientRepository
+        from src.batch.models import get_management_number
 
         try:
             if not os.path.exists(DB_PATH):
@@ -372,8 +374,11 @@ class MainWindow(QMainWindow):
 
                 client_dicts = [
                     {
+                        "id": c.id,
                         "name": c.name.replace("[테스트] ", ""),
                         "business_number": c.business_number,
+                        "management_number": get_management_number(c),
+                        "management_number_override": c.management_number or "",
                         "portal": c.portal,
                         "enabled": c.enabled,
                     }
@@ -621,11 +626,13 @@ class MainWindow(QMainWindow):
         from src.utils.log import log
         client_infos = []
         for c in clients:
-            mgmt_no = biz_to_mgmt_no(c["business_number"])
-            log(f"  수임처: name='{c['name']}' biz='{c['business_number']}' mgmt='{mgmt_no}'")
+            # override 관리번호 우선(건강보험/국민연금 사업장관리번호), 없으면 biz+'0'
+            mgmt_no = c.get("management_number") or biz_to_mgmt_no(c.get("business_number", ""))
+            log(f"  수임처: name='{c['name']}' biz='{c.get('business_number','')}' mgmt='{mgmt_no}'")
             client_infos.append({
                 "name": c["name"],
                 "management_number": mgmt_no,
+                "business_number": c.get("business_number", ""),
             })
 
         self.company_table.set_run_active(True)
@@ -659,6 +666,19 @@ class MainWindow(QMainWindow):
         self.company_table.set_buttons_enabled(False)
         name = self.name_input.text().strip() if hasattr(self, 'name_input') else ""
         self.runner.start_refresh_clients(name=name)
+
+    def _on_management_number_changed(self, client_id: int, value: str):
+        """표에서 관리번호 key-in 편집 → DB override 저장 (건강보험/국민연금용).
+
+        빈 값이면 override 해제(원복). 위하고는 항상 DB 사업자등록번호로 검색하므로
+        여기서 저장한 값은 NHIS/NPS 사업장관리번호에만 반영된다.
+        """
+        from src.batch.db import BatchDB, ClientRepository
+        try:
+            with BatchDB(DB_PATH) as db:
+                ClientRepository(db).update_management_number(client_id, value)
+        except Exception as e:
+            self._on_log(f"관리번호 저장 실패 (client_id={client_id}): {e}")
 
     def _on_delete_all_clients(self):
         """DB에서 수임처 모두 삭제"""

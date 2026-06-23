@@ -43,6 +43,7 @@ class WehagoSwerWorkflow(BaseWorkflow):
         nts_folder = kwargs.get("nts_folder", "원천징수전자신고")
         year = kwargs.get("year")
         month = kwargs.get("month")
+        business_number = kwargs.get("business_number", "")
         save_dir = make_save_dir("원천전자신고", client_name, year=year, month=month)
 
         if not password:
@@ -60,6 +61,7 @@ class WehagoSwerWorkflow(BaseWorkflow):
             state.before_step(job_id, "goto_salary_page", 1)
             goto_ok = await goto_salary_page_with_fallback(
                 page, client_name, management_number,
+                business_number=business_number,
             )
             if not goto_ok:
                 state.fail_step(job_id, "goto_salary_page", "급여 페이지 이동 실패")

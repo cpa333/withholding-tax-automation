@@ -53,6 +53,7 @@ class WehagoSwsaWorkflow(BaseWorkflow):
         year = kwargs.get("year")
         month = kwargs.get("month")
         dry_run = kwargs.get("dry_run", True)
+        business_number = kwargs.get("business_number", "")
 
         # ── Step 0: WEHAGO 메인 복귀 ──────────────────────────────────
         if not state.should_skip_step(job_id, "navigate_to_wehago_main"):
@@ -65,6 +66,7 @@ class WehagoSwsaWorkflow(BaseWorkflow):
             state.before_step(job_id, "goto_salary_page", 1)
             goto_ok = await goto_salary_page_with_fallback(
                 page, client_name, management_number,
+                business_number=business_number,
             )
             if not goto_ok:
                 state.fail_step(job_id, "goto_salary_page", "급여 페이지 이동 실패")

@@ -29,7 +29,7 @@ def test_prepare_batch_enqueues_active_clients(engine_with_jobs):
 def test_run_completes_all_jobs_when_workflow_succeeds(engine_with_jobs):
     engine, batch = engine_with_jobs
 
-    async def wf(page, context, job, state, *, management_number):
+    async def wf(page, context, job, state, *, management_number, **kwargs):
         return True
 
     result = _run(engine.run(wf))
@@ -43,7 +43,7 @@ def test_run_completes_all_jobs_when_workflow_succeeds(engine_with_jobs):
 def test_run_marks_failed_when_workflow_returns_false(engine_with_jobs):
     engine, batch = engine_with_jobs
 
-    async def wf(page, context, job, state, *, management_number):
+    async def wf(page, context, job, state, *, management_number, **kwargs):
         return False
 
     result = _run(engine.run(wf))
@@ -58,7 +58,7 @@ def test_run_records_traceback_on_exception(engine_with_jobs):
     """Wave 3 복원 대상: 예외 시 error_traceback 이 DB 에 저장되는지."""
     engine, batch = engine_with_jobs
 
-    async def wf(page, context, job, state, *, management_number):
+    async def wf(page, context, job, state, *, management_number, **kwargs):
         raise RuntimeError("boom-unique-marker")
 
     _run(engine.run(wf))
@@ -80,7 +80,7 @@ def test_run_resets_partial_execution_steps(engine_with_jobs, db_path):
     with BatchDB(db_path) as db:
         StepRepository(db).mark_running(job.id, "download_pdf")
 
-    async def wf(page, context, job, state, *, management_number):
+    async def wf(page, context, job, state, *, management_number, **kwargs):
         # _run_job 이 reset_partial_steps 를 호출했다면 running 단계는 더 없음
         assert state.detect_partial_execution(job.id) == []
         return True
@@ -91,7 +91,7 @@ def test_run_resets_partial_execution_steps(engine_with_jobs, db_path):
 def test_get_progress_reports_counts(engine_with_jobs):
     engine, batch = engine_with_jobs
 
-    async def wf(page, context, job, state, *, management_number):
+    async def wf(page, context, job, state, *, management_number, **kwargs):
         return True
 
     _run(engine.run(wf))

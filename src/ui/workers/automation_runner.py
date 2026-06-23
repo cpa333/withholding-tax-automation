@@ -188,7 +188,7 @@ class AutomationRunner(AsyncWorker):
 
         # Phase 2+: BatchEngine으로 배치 실행
         from src.batch.engine import BatchEngine
-        from src.batch.models import Client, BatchStatus, biz_to_mgmt_no
+        from src.batch.models import Client, BatchStatus, get_management_number
 
         os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
 
@@ -263,15 +263,18 @@ class AutomationRunner(AsyncWorker):
                     engine.job_repo.mark_running(job.id)
 
                     mgmt_no = ""
+                    biz_no = ""
                     if job.client_id:
                         client = engine.client_repo.get(job.client_id)
-                        if client and client.business_number:
-                            mgmt_no = biz_to_mgmt_no(client.business_number)
+                        if client:
+                            mgmt_no = get_management_number(client)
+                            biz_no = client.business_number or ""
 
                     try:
                         success = await workflow_func(
                             self._page, self._context, job, engine.state,
                             management_number=mgmt_no,
+                            business_number=biz_no,
                         )
                         if success:
                             engine.job_repo.mark_completed(job.id)
@@ -608,6 +611,7 @@ class AutomationRunner(AsyncWorker):
                     client_name, job_id=0,
                     state=state,
                     management_number=management_number,
+                    business_number=client_info.get("business_number", ""),
                     year=year,
                     month=month,
                     **extra_kwargs,

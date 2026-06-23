@@ -30,7 +30,7 @@ from src.batch.models import (
 # 스키마 버전
 # ═══════════════════════════════════════════════════════════════════════
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA_SQL = """
 -- ═══════════════════════════════════════════════════════════════════════
@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS clients (
     notes           TEXT    DEFAULT '',
     created_at      TEXT    DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
     updated_at      TEXT    DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
+    management_number TEXT  DEFAULT '',   -- 사업장관리번호 override (빈=biz_to_mgmt_no 자동계산)
 
     CONSTRAINT uq_client_portal UNIQUE (name, portal)
 );
@@ -233,7 +234,7 @@ class BatchDB:
             self.conn.execute("BEGIN")
             try:
                 if current_version == 0:
-                    # 최초 생성
+                    # 최초 생성 (SCHEMA_SQL에 management_number 포함)
                     for stmt in SCHEMA_SQL.split(";"):
                         stmt = stmt.strip()
                         if stmt:
@@ -242,10 +243,16 @@ class BatchDB:
                         "INSERT INTO schema_version (version) VALUES (?)",
                         (SCHEMA_VERSION,),
                     )
-                # 향후 마이그레이션은 여기에 추가:
-                # if current_version < 2:
-                #     self.conn.execute("ALTER TABLE ...")
-                #     self.conn.execute("UPDATE schema_version SET version = 2")
+                    current_version = SCHEMA_VERSION
+                # 마이그레이션:
+                if current_version < 2:
+                    # v1 → v2: clients.management_number override 컬럼 추가
+                    self.conn.execute(
+                        "ALTER TABLE clients ADD COLUMN management_number TEXT DEFAULT ''"
+                    )
+                    self.conn.execute(
+                        "UPDATE schema_version SET version = 2"
+                    )
 
                 self.conn.execute("COMMIT")
             except Exception:
@@ -364,6 +371,28 @@ class ClientRepository:
         """수임처 삭제 (비활성화 권장)"""
         self.db.conn.execute("DELETE FROM clients WHERE id = ?", (client_id,))
 
+    def update_management_number(self, client_id: int, value: str) -> bool:
+        """수임처의 사업장관리번호 override 갱신 (GUI key-in 편집용).
+
+        빈 문자열이면 override 해제(원복) — biz_to_mgmt_no 자동계산으로 회귀.
+        upsert(name 기준)와 달리 id 기반 단일 UPDATE라 안전·가벼움.
+
+        Returns:
+            갱신된 행 존재 여부
+        """
+        now = now_iso()
+        self.db.begin()
+        try:
+            cur = self.db.conn.execute(
+                "UPDATE clients SET management_number = ?, updated_at = ? WHERE id = ?",
+                ((value or "").strip(), now, client_id),
+            )
+            self.db.commit()
+            return cur.rowcount > 0
+        except Exception:
+            self.db.rollback()
+            raise
+
     @staticmethod
     def _row_to_client(row: tuple) -> Client:
         return Client(
@@ -376,6 +405,7 @@ class ClientRepository:
             notes=row[6] or "",
             created_at=row[7],
             updated_at=row[8],
+            management_number=row[9] if len(row) > 9 and row[9] else "",
         )
 
 
