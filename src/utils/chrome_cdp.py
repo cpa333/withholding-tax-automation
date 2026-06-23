@@ -9,10 +9,15 @@ import urllib.request
 import glob
 
 
-CDP_PORT = 9223
+# WTAX_NO_DELAY 선례: env 미설정 → 9223(직렬, 현행). WTAX_CDP_PORT=9224 등으로 병렬 분리.
+CDP_PORT = int(os.environ.get("WTAX_CDP_PORT", "9223"))
 # 127.0.0.1 명시 — Windows에서 localhost가 IPv6(::1)로 먼저 풀리면 Chrome의
 # IPv4(127.0.0.1) 디버그 서버와 연결이 간헐 실패(연결 거부)한다.
 CDP_URL = f"http://127.0.0.1:{CDP_PORT}"
+
+# 병렬(포트 분리)에서 자기 Chrome PID만 정밀 종료하기 위한 레지스트리: port → pid.
+# _attempt_launch 가 Popen.pid 를 등록하고 kill_chrome(port=...)이 조회한다.
+_launched_pids: dict[int, int] = {}
 
 
 def find_chrome():
@@ -131,17 +136,44 @@ def _create_junction(user_data_dir):
     return junc
 
 
-def check_cdp_available():
-    """CDP 포트가 활성인지 확인"""
+def check_cdp_available(*, url: str = CDP_URL):
+    """CDP 포트가 활성인지 확인 (url 미지정 시 모듈 기본 포트)."""
     try:
-        with urllib.request.urlopen(f"{CDP_URL}/json/version", timeout=3) as resp:
+        with urllib.request.urlopen(f"{url}/json/version", timeout=3) as resp:
             return resp.status == 200
     except Exception:
         return False
 
 
-def kill_chrome():
-    """기존 Chrome 프로세스 종료"""
+def kill_chrome(*, pid: int | None = None, port: int | None = None):
+    """Chrome 종료. 인자 없음=전체 kill(콜드부팅 폴백, 현행 동작 보존).
+    pid 지정=해당 PID 트리만(taskkill /PID /T). port 지정=_launched_pids[port]로 pid 해석.
+    병렬에서는 pid/port로 자기 Chrome만 종료 → 타 포트 Chrome 보호.
+    """
+    if pid is None and port is not None:
+        pid = _launched_pids.get(port)
+    if pid is not None:
+        # PID 재사용 방어: 해당 PID가 여전히 chrome.exe인지 확인 후 kill.
+        if not _process_running(pid):
+            if port is not None:
+                _launched_pids.pop(port, None)
+            return
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        if port is not None:
+            _launched_pids.pop(port, None)
+        return
+    # pid 없음 — 직렬(port=9223 + env 미설정)만 전체 kill(현행 회귀 보존).
+    # 병렬(WTAX_CDP_PORT 설정 또는 port!=9223)은 자기 Chrome을 띄운 적 없으므로
+    # 전체 kill 금지(다른 병렬 Chrome 보호) → 스킵. 동시 launch 레이스 회피.
+    is_parallel = (
+        os.environ.get("WTAX_CDP_PORT") is not None
+        or (port is not None and port != 9223)
+    )
+    if is_parallel:
+        return
     subprocess.run(
         ["taskkill", "/F", "/IM", "chrome.exe", "/T"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -165,19 +197,36 @@ def _chrome_process_running() -> bool:
         return False
 
 
-def _attempt_launch(chrome_path, junc, profile, url, *, kill_wait=3) -> bool:
+def _process_running(pid: int) -> bool:
+    """특정 PID가 chrome.exe로 실행 중인지 확인 (PID 재사용 방어).
+    _chrome_process_running(이름 전체 검사)의 PID 정밀 버전.
+    """
+    try:
+        r = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, encoding="oem", errors="ignore",
+            timeout=5,
+        )
+        out = r.stdout.strip()
+        return bool(out) and str(pid) in out and "chrome.exe" in out.lower()
+    except Exception:
+        return False
+
+
+def _attempt_launch(chrome_path, junc, profile, url, *, port=CDP_PORT, kill_wait=3) -> dict:
     """Chrome 1회 실행 시도: kill → 잠금 해제 대기 → Popen → CDP 준비 대기.
 
     Returns:
-        bool: CDP 포트가 활성화되었으면 True.
+        {"success": bool, "pid": int|None}: CDP 활성화 여부와 Popen.pid.
+        port 지정 시 자기 포트 Chrome만 kill(kill_chrome(port=port)) → 병렬 안전.
     """
-    kill_chrome()
+    kill_chrome(port=port)
     time.sleep(kill_wait)  # 프로필 SingletonLock 해제 대기
 
-    subprocess.Popen(
+    proc = subprocess.Popen(
         [
             chrome_path,
-            f"--remote-debugging-port={CDP_PORT}",
+            f"--remote-debugging-port={port}",
             f"--user-data-dir={junc}",
             f"--profile-directory={profile}",
             "--start-maximized",
@@ -186,31 +235,55 @@ def _attempt_launch(chrome_path, junc, profile, url, *, kill_wait=3) -> bool:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    pid = proc.pid
+    if port is not None:
+        _launched_pids[port] = pid
 
+    cdp_url = f"http://127.0.0.1:{port}"
     # CDP 활성 대기 — 0.5초 간격, 최대 약 30초
     for _ in range(60):
         time.sleep(0.5)
-        if check_cdp_available():
-            return True
-    return False
+        if check_cdp_available(url=cdp_url):
+            return {"success": True, "pid": pid}
+    return {"success": False, "pid": pid}
 
 
-def launch_chrome(url="https://www.wehago.com/", *, force=False):
+def _prepare_user_data_dir(port: int) -> str:
+    """병렬 모드 전용: 포트별 빈 user-data-dir 생성 (SingletonLock 완전 회피).
+    %TEMP%/chrome-cdp-{port} — WEHAGO run_chrome_cdp.bat 임시 프로필 패턴과 동일.
+    잔존 SingletonLock 파일이 있으면 정리(빈 dir이므로 프로필 데이터 손실 0).
+    """
+    tmp = os.environ.get("TEMP", "/tmp")
+    path = os.path.join(tmp, f"chrome-cdp-{port}")
+    os.makedirs(path, exist_ok=True)
+    for lockname in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        try:
+            os.remove(os.path.join(path, lockname))
+        except OSError:
+            pass
+    return path
+
+
+def launch_chrome(url="https://www.wehago.com/", *, port=CDP_PORT, force=False):
     """Chrome을 CDP 디버깅 모드로 실행.
 
     Args:
         url: 시작 시 열 URL
+        port: CDP 디버그 포트(기본 CDP_PORT=env). 병렬 시 포트별 분리.
         force: True면 이미 CDP가 활성이어도 재실행
 
     Returns:
-        dict: {"success": bool, "chrome_path": str, "profile": str, "junction": str, ...}
+        dict: {success, chrome_path?, profile?, junction?, pid?, reused?,
+               separate_user_data?, error?}
     """
     result = {"success": False, "error": None}
+    cdp_url = f"http://127.0.0.1:{port}"
 
-    # 이미 CDP 활성이면 재사용
-    if not force and check_cdp_available():
+    # 이미 CDP 활성이면 재사용 (재사용은 우리가 띄운 Chrome이 아닐 수 있어 pid는 레지스트리 조회)
+    if not force and check_cdp_available(url=cdp_url):
         result["success"] = True
         result["reused"] = True
+        result["pid"] = _launched_pids.get(port)
         return result
 
     # Chrome 경로 탐지
@@ -220,33 +293,45 @@ def launch_chrome(url="https://www.wehago.com/", *, force=False):
         return result
     result["chrome_path"] = chrome_path
 
-    # User Data 경로 탐지
-    user_data = find_chrome_user_data()
-    if not user_data:
-        result["error"] = "Chrome User Data 디렉토리를 찾을 수 없습니다"
-        return result
-
-    # 프로필 탐지
-    profile = find_chrome_profile(user_data)
-    if not profile:
+    # 병렬 신호: WTAX_CDP_PORT 명시적 설정(배치)이거나 port!=기본이거나 별도 env.
+    # 배치가 WTAX_CDP_PORT=9223 이라도 명시 설정이면 빈 dir(일반 Chrome과 Lock 충돌 회피).
+    # 직렬(env 완전 미설정 + port=9223)만 현행 junction 경로 100% 보존.
+    use_separate = (
+        os.environ.get("WTAX_CDP_PORT") is not None
+        or port != 9223
+        or os.environ.get("WTAX_SEPARATE_USER_DATA", "").strip().lower()
+            in ("1", "true", "yes", "on")
+    )
+    if use_separate:
+        junc = _prepare_user_data_dir(port)
         profile = "Default"
+        result["separate_user_data"] = True
+    else:
+        user_data = find_chrome_user_data()
+        if not user_data:
+            result["error"] = "Chrome User Data 디렉토리를 찾을 수 없습니다"
+            return result
+        profile = find_chrome_profile(user_data)
+        if not profile:
+            profile = "Default"
+        junc = _create_junction(user_data)
     result["profile"] = profile
-
-    # Junction 링크 생성
-    junc = _create_junction(user_data)
     result["junction"] = junc
 
-    # 1차 실행 시도
-    if _attempt_launch(chrome_path, junc, profile, url, kill_wait=3):
+    # 1차 실행 시도 (port 전달 → 자기 포트만 kill)
+    attempt = _attempt_launch(chrome_path, junc, profile, url, port=port, kill_wait=3)
+    if attempt["success"]:
         result["success"] = True
+        result["pid"] = attempt["pid"]
         return result
 
-    # 위임(delegation) 감지: chrome.exe가 살아있는데 CDP 포트가 없으면
-    # 기존 Chrome 인스턴스로 위임되어 디버그 포트가 열리지 않은 상태.
-    # 모든 Chrome을 확실히 종료한 뒤 잠금 해제 대기를 연장해 1회 더 시도.
+    # 위임(delegation) 감지: chrome.exe가 살아있는데 CDP 포트가 없으면 재시도.
+    # (병렬 빈 dir에서는 위임 자체가 발생하지 않음 — 직렬 경로 위주)
     if _chrome_process_running():
-        if _attempt_launch(chrome_path, junc, profile, url, kill_wait=4):
+        attempt2 = _attempt_launch(chrome_path, junc, profile, url, port=port, kill_wait=4)
+        if attempt2["success"]:
             result["success"] = True
+            result["pid"] = attempt2["pid"]
             return result
         result["error"] = (
             "CDP 포트 응답 없음 — 다른 Chrome 창이 열려 디버그 포트를 차지하고 있을 수 있습니다. "
@@ -259,16 +344,16 @@ def launch_chrome(url="https://www.wehago.com/", *, force=False):
     return result
 
 
-async def launch_chrome_async(url="https://www.wehago.com/", *, force=False):
+async def launch_chrome_async(url="https://www.wehago.com/", *, port=CDP_PORT, force=False):
     """launch_chrome의 async 버전"""
-    return launch_chrome(url, force=force)
+    return launch_chrome(url, port=port, force=force)
 
 
-async def connect_page(playwright):
-    """CDP로 Chrome에 연결하고 WEHAGO 탭 우선 반환"""
+async def connect_page(playwright, *, url: str = CDP_URL):
+    """CDP로 Chrome에 연결하고 WEHAGO 탭 우선 반환 (url 미지정 시 기본 포트)"""
     from src.utils.stealth import stealth_all_pages, register_auto_stealth
 
-    browser = await playwright.chromium.connect_over_cdp(CDP_URL)
+    browser = await playwright.chromium.connect_over_cdp(url)
     context = browser.contexts[0]
 
     await stealth_all_pages(context)
@@ -287,10 +372,10 @@ async def connect_page(playwright):
     return browser, context, page
 
 
-def list_tabs():
-    """현재 열린 Chrome 탭 목록 반환"""
+def list_tabs(*, url: str = CDP_URL):
+    """현재 열린 Chrome 탭 목록 반환 (url 미지정 시 기본 포트)"""
     try:
-        with urllib.request.urlopen(f"{CDP_URL}/json", timeout=3) as resp:
+        with urllib.request.urlopen(f"{url}/json", timeout=3) as resp:
             tabs = json.loads(resp.read())
             return [
                 {"title": t.get("title", ""), "url": t.get("url", ""), "type": t.get("type", "")}

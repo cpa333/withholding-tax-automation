@@ -81,11 +81,11 @@ from src.automation.nhis._doc_download import (
 
 # ─── 연결/로그인 ────────────────────────────────────────────────────────────
 
-async def connect_page(playwright):
-    """CDP로 Chrome에 연결하고 NHIS EDI 탭 우선 반환"""
+async def connect_page(playwright, *, url: str = CDP_URL):
+    """CDP로 Chrome에 연결하고 NHIS EDI 탭 우선 반환 (url 미지정 시 기본 포트)"""
     from src.utils.stealth import stealth_all_pages, register_auto_stealth
 
-    browser = await playwright.chromium.connect_over_cdp(CDP_URL)
+    browser = await playwright.chromium.connect_over_cdp(url)
     context = browser.contexts[0]
 
     await stealth_all_pages(context)
@@ -143,7 +143,8 @@ async def close_popups(context):
             continue
 
     if not main_page:
-        return
+        # 메인(retrieveMain) 탭이 없으면(로그인 전 등) 첫 페이지 반환 — 팝업 닫기 스킵.
+        return context.pages[0] if context.pages else None
 
     for pg in context.pages[:]:
         if pg != main_page:
@@ -151,3 +152,4 @@ async def close_popups(context):
                 await pg.close()
             except Exception:
                 pass
+    return main_page

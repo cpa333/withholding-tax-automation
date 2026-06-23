@@ -102,7 +102,53 @@ async def handle_select_workplace(page):
     return choice
 
 
-async def main():
+async def run_auto_batch(page, context, *, firms, year, month):
+    """비대화형 일괄 실행 (--auto 모드). firms=None → 전체(--all).
+
+    run_full_auto 의 input 루프를 비대화형으로 재작성. 사업장 전환/선택/실행은
+    기존 함수(switch_workplace_open/select_workplace/run_single_workplace/list_workplaces) 재사용.
+    """
+    if firms is None:
+        # --all: 사업장 전체 이름 수집
+        if not await switch_workplace_open(page):
+            log("ERROR: 사업장전환 모달 오픈 실패")
+            return
+        await human_delay(2)
+        workplaces = await list_workplaces(page)
+        targets = [wp["name"] for wp in workplaces] if workplaces else []
+        if not targets:
+            log("ERROR: 사업장 목록을 불러오지 못했습니다.")
+            return
+    else:
+        targets = list(firms)
+
+    log(f"비대화형 일괄 실행: {len(targets)}개 수임처 (year={year}, month={month})")
+    completed = 0
+    for i, wp_name in enumerate(targets, 1):
+        log(f"\n{'='*55}")
+        log(f"  [{i}/{len(targets)}] {wp_name}")
+        try:
+            if not await switch_workplace_open(page):
+                log(f"  ERROR: 사업장전환 실패 - {wp_name} 스킵")
+                continue
+            await human_delay(2)
+            ok = await select_workplace(page, wp_name)
+            if not ok:
+                log(f"  스킵: '{wp_name}' 사업장 미발견")
+                continue
+            await run_single_workplace(page, context, wp_name,
+                                       is_first=(completed == 0),
+                                       year=year, month=month)
+            completed += 1
+            log(f"  {wp_name} 처리 완료. ({completed}개 완료)")
+        except Exception as e:
+            log(f"  ERROR: {wp_name} 처리 실패 - {e}")
+            import traceback
+            traceback.print_exc()
+    log(f"\n총 {completed}개 수임처 자동화 완료.")
+
+
+async def main(args=None):
     print_header()
 
     # ═══ Phase 1: Chrome 실행 + 연결 ═══
@@ -131,6 +177,14 @@ async def main():
             return
 
         log("로그인 확인됨. 자동화 시작.\n")
+
+        # --auto 비대화형 모드: 날짜/mode input 없이 run_auto_batch 로 일괄 실행.
+        if args is not None and getattr(args, "auto", False):
+            firms = ([s.strip() for s in args.firms.split(",") if s.strip()]
+                     if args.firms else None)
+            await run_auto_batch(page, context, firms=firms,
+                                 year=args.year, month=args.month)
+            return
 
         # ═══ Phase 2: 날짜 입력 ═══
         _now = _dt.now()
@@ -487,12 +541,22 @@ async def run_interactive(page, context, year: int | None = None, month: int | N
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="국민연금 EDI 자동화")
+    parser.add_argument("--auto", action="store_true",
+                        help="비대화형 일괄 모드 (GUI 병렬 subprocess 용)")
+    parser.add_argument("--year", type=int, default=None)
+    parser.add_argument("--month", type=int, default=None)
+    parser.add_argument("--firms", type=str, default=None,
+                        help="콤마로 구분된 사업장명 (미지정 시 전체)")
+    args = parser.parse_args()
     try:
-        asyncio.run(main())
+        asyncio.run(main(args))
     except Exception as e:
         print(f"\nFATAL ERROR: {e}")
         import traceback
         traceback.print_exc()
     finally:
-        print("\n프로그램을 종료하려면 Enter를 누르세요...")
-        input()
+        if not args.auto:
+            print("\n프로그램을 종료하려면 Enter를 누르세요...")
+            input()

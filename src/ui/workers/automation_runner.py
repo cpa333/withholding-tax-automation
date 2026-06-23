@@ -69,6 +69,10 @@ class AutomationRunner(AsyncWorker):
         self._page = None
         self._current_portal = None
         self._last_phase_id = 1  # 가장 최근 실행 페이즈 추적
+        # Chrome PID/포트 — 정밀 kill(자기 Chrome만 종료)용. 병렬 시 포트 분리.
+        from src.utils.chrome_cdp import CDP_PORT as _default_cdp_port
+        self._chrome_pid: int | None = None
+        self._chrome_port: int = _default_cdp_port
 
     async def _async_main(self):
         """비동기 메인 — Playwright 초기화 후 명령 대기"""
@@ -485,7 +489,8 @@ class AutomationRunner(AsyncWorker):
             except Exception:
                 pass
         from src.utils.chrome_cdp import kill_chrome
-        kill_chrome()
+        kill_chrome(pid=self._chrome_pid, port=self._chrome_port)
+        self._chrome_pid = None
         self._browser = None
         self._context = None
         self._page = None
@@ -494,7 +499,8 @@ class AutomationRunner(AsyncWorker):
     def cleanup_session(self):
         """정지 버튼 클릭 시 호출 — Chrome 종료 + 세션 초기화"""
         from src.utils.chrome_cdp import kill_chrome
-        kill_chrome()
+        kill_chrome(pid=self._chrome_pid, port=self._chrome_port)
+        self._chrome_pid = None
         self._browser = None
         self._context = None
         self._page = None
@@ -769,10 +775,13 @@ class AutomationRunner(AsyncWorker):
 
         # ② CDP가 비활성이면 새로 실행
         # (force=False: launch_chrome 내부에서 CDP가 떠 있으면 재사용, 아니면 실행)
-        result = await asyncio.to_thread(launch_chrome, url, force=False)
+        result = await asyncio.to_thread(
+            launch_chrome, url, port=self._chrome_port, force=False
+        )
         if not result["success"]:
             self.log_message.emit(f"Chrome 실행 실패: {result.get('error', '알 수 없음')}")
             return False
+        self._chrome_pid = result.get("pid")
 
         # Playwright 연결
         try:

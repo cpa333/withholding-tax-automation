@@ -243,7 +243,67 @@ async def run_full_auto(page, context):
             traceback.print_exc()
 
 
-async def main():
+async def run_auto_batch(page, context, *, firms):
+    """비대화형 일괄 실행 (--auto 모드). firms=None → 전체.
+
+    run_full_auto 의 input 루프를 비대화형으로 재작성. 사업장 선택/실행은
+    기존 함수(open_firm_selector/select_firm/close_firm_popup/run_single_firm_workflow) 재사용.
+    """
+    if firms is None:
+        popup = await open_firm_selector(page, context)
+        if not popup:
+            log("ERROR: 사업장 선택 팝업 오픈 실패")
+            return
+        await asyncio.sleep(2)
+        result = await popup.evaluate(r"""() => {
+            const rows = document.querySelectorAll('table.list tbody tr');
+            const firms = [];
+            rows.forEach(tr => {
+                const tds = tr.querySelectorAll('td');
+                if (tds.length >= 5 && /^\d+$/.test(tds[1].textContent.trim())) {
+                    firms.push(tds[2].textContent.trim());
+                }
+            });
+            return firms;
+        }""")
+        targets = list(result) if result else []
+        await close_firm_popup(context, popup)
+        if not targets:
+            log("ERROR: 사업장 목록을 불러오지 못했습니다.")
+            return
+    else:
+        targets = list(firms)
+
+    log(f"비대화형 일괄 실행: {len(targets)}개 수임처")
+    completed = 0
+    for i, firm_name in enumerate(targets, 1):
+        log(f"\n{'='*55}")
+        log(f"  [{i}/{len(targets)}] {firm_name}")
+        try:
+            popup = await open_firm_selector(page, context)
+            if not popup:
+                log(f"  ERROR: 팝업 오픈 실패 - {firm_name} 스킵")
+                continue
+            await asyncio.sleep(2)
+            ok = await select_firm(popup, firm_name)
+            await close_firm_popup(context, popup)
+            if not ok:
+                log(f"  스킵: '{firm_name}' 사업장 미발견")
+                continue
+            ok = await run_single_firm_workflow(page, context, firm_name)
+            if ok:
+                completed += 1
+                log(f"  {firm_name} 처리 완료. ({completed}개 완료)")
+            else:
+                log(f"  {firm_name} 처리 실패.")
+        except Exception as e:
+            log(f"  ERROR: {firm_name} 처리 실패 - {e}")
+            import traceback
+            traceback.print_exc()
+    log(f"\n총 {completed}개 수임처 자동화 완료.")
+
+
+async def main(args=None):
     print_header()
 
     # Phase 1: Chrome 실행 + 연결
@@ -264,8 +324,18 @@ async def main():
             return
 
         # 이미 NHIS EDI 페이지면 재로딩하지 않음 (팝업 재생성 방지)
+        # 빈 프로필(병렬) 첫 로딩이 느릴 수 있어 timeout 연장 + 재시도.
         if "edi.nhis.or.kr" not in page.url:
-            await page.goto(NHIS_EDI_URL, wait_until="domcontentloaded", timeout=30000)
+            for _attempt in range(3):
+                try:
+                    await page.goto(NHIS_EDI_URL, wait_until="domcontentloaded", timeout=60000)
+                    break
+                except Exception as e:
+                    log(f"  NHIS 페이지 로딩 재시도... ({e})")
+                    await asyncio.sleep(3)
+            else:
+                log("ERROR: NHIS 페이지 로딩 실패")
+                return
 
         # 팝업 먼저 닫기 — popup 탭이 pages[0]일 수 있어 로그인 인식 방해
         page = await close_popups(context)
@@ -276,6 +346,13 @@ async def main():
             return
 
         log("로그인 확인됨. 자동화 시작.\n")
+
+        # --auto 비대화형 모드: mode input 없이 run_auto_batch 로 일괄 실행.
+        if args is not None and getattr(args, "auto", False):
+            firms = ([s.strip() for s in args.firms.split(",") if s.strip()]
+                     if args.firms else None)
+            await run_auto_batch(page, context, firms=firms)
+            return
 
         # Phase 2: 모드 선택
         log("실행 모드 선택:")
@@ -336,12 +413,20 @@ async def run_interactive(page, context):
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="국민건강보험 EDI 자동화")
+    parser.add_argument("--auto", action="store_true",
+                        help="비대화형 일괄 모드 (GUI 병렬 subprocess 용)")
+    parser.add_argument("--firms", type=str, default=None,
+                        help="콤마로 구분된 사업장명 (미지정 시 전체)")
+    args = parser.parse_args()
     try:
-        asyncio.run(main())
+        asyncio.run(main(args))
     except Exception as e:
         print(f"\nFATAL ERROR: {e}")
         import traceback
         traceback.print_exc()
     finally:
-        print("\n프로그램을 종료하려면 Enter를 누르세요...")
-        input()
+        if not args.auto:
+            print("\n프로그램을 종료하려면 Enter를 누르세요...")
+            input()

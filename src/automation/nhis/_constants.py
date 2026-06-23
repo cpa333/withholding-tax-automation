@@ -22,7 +22,7 @@ FIRM_LIST_URL = "retrieveFirmList.do"
 # ─── 타임아웃 / 리트리 ────────────────────────────────────────────────────────
 LOGIN_TIMEOUT_S = 900           # 15분 (180 * 5초)
 DOCS_READY_TIMEOUT_S = 20       # 받은문서 페이지 안정 대기
-PRINT_PREVIEW_TIMEOUT_S = 5     # 미리보기 탭 감지 타임아웃
+PRINT_PREVIEW_TIMEOUT_S = 10    # 미리보기 탭 감지 타임아웃 (빈 프로필 첫 로딩 대비, NPS와 동일)
 PRINT_CLICK_RETRIES = 3         # 인쇄 버튼 3전략 재시도 횟수
 CROWNIX_LOAD_TIMEOUT_S = 15     # Crownix 뷰어 로딩 대기
 PDF_DOWNLOAD_TIMEOUT_S = 60     # PDF 다운로드 완료 대기

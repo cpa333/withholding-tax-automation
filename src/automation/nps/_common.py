@@ -76,11 +76,11 @@ nexacro_click_button = nexacro_click_button_viewport
 
 # ─── 연결/로그인 ────────────────────────────────────────────────────────────
 
-async def connect_page(playwright):
-    """CDP로 Chrome에 연결하고 NPS EDI 탭 우선 반환"""
+async def connect_page(playwright, *, url: str = CDP_URL):
+    """CDP로 Chrome에 연결하고 NPS EDI 탭 우선 반환 (url 미지정 시 기본 포트)"""
     from src.utils.stealth import stealth_all_pages, register_auto_stealth
 
-    browser = await playwright.chromium.connect_over_cdp(CDP_URL)
+    browser = await playwright.chromium.connect_over_cdp(url)
     context = browser.contexts[0]
 
     await stealth_all_pages(context)
