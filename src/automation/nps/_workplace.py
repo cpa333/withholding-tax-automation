@@ -5,6 +5,8 @@
 
 import sys
 import os
+import asyncio
+import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 from src.utils.log import log
@@ -25,19 +27,70 @@ nexacro_click_button = nexacro_click_button_viewport
 
 # ─── 사업장 전환 ───────────────────────────────────────────────────────────────
 
-async def switch_workplace(page, workplace_name, management_number=""):
-    """사업장전환 버튼으로 사업장 전환"""
-    log("사업장전환 버튼 클릭...")
-    result = await nexacro_click_button(page, BTN_CHANGE_WORKPLACE)
-    if not result.get("ok"):
-        log(f"  ERROR: 사업장전환 버튼 실패 - {result}")
-        return False
-    await human_delay(2)
+async def _open_workplace_modal_verified(page, max_attempts=3):
+    """사업장전환 모달 오픈 — 그리드 행 출현으로 유일하게 검증.
 
+    nexacro_click_button 의 {ok:True} 는 거짓 양성이므로, BTN_CHANGE_WORKPLACE
+    클릭 후 GRID_WORKPLACE 그리드가 로드(행≥1)되어야 성공으로 본다.
+    실패 시 메뉴(open_workplace_selector) 폴백 후 재시도.
+    """
+    for attempt in range(max_attempts):
+        # 시도 A: BTN_CHANGE_WORKPLACE (화면 상태 무관, 헤더 버튼)
+        await nexacro_click_button(page, BTN_CHANGE_WORKPLACE)
+        if await _wait_workplace_grid(page, timeout=6):
+            log(f"  사업장전환 모달 오픈 (BTN, 시도 {attempt + 1}/{max_attempts})")
+            return True
+        # 시도 B: 메뉴 (메인 화면에서만 동작)
+        await open_workplace_selector(page)
+        if await _wait_workplace_grid(page, timeout=6):
+            log(f"  사업장전환 모달 오픈 (메뉴, 시도 {attempt + 1}/{max_attempts})")
+            return True
+        log(f"  WARN: 사업장전환 모달 오픈 재시도 ({attempt + 1}/{max_attempts})")
+    log("  ERROR: 사업장전환 모달 오픈 실패")
+    return False
+
+
+async def _wait_workplace_closed(page, timeout=10, interval=0.5):
+    """사업장전환 모달 닫힘 대기 + Nexacro 프레임워크 안정화.
+
+    사업장 선택(더블클릭) 후 모달이 닫히며 화면이 리프레시되는데, 이 대기가
+    없으면 다음 단계에서 컨텍스트 불일치/그리드 0개 가 발생한다(다중 사업장
+    2번째부터의 주원인).
+    """
+    modal_id = "mainframe.VFrameSet.FrameSdi.ChangeBusi"
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            visible = await page.evaluate(
+                '(id) => { const e = document.getElementById(id); '
+                'return !!(e && e.offsetParent !== null); }', modal_id)
+            if not visible:
+                break
+        except Exception:
+            break
+        await asyncio.sleep(interval)
+    # Nexacro 프레임워크 재준비 대기 (BTN_CHANGE_WORKPLACE 출현)
+    from src.automation.nps._common import wait_for_nexacro_ready
+    await wait_for_nexacro_ready(page, max_wait=10)
+
+
+async def switch_workplace(page, workplace_name, management_number=""):
+    """사업장전환 모달 오픈(검증) → 사업장 선택."""
+    if not await _open_workplace_modal_verified(page):
+        return False
     ok = await select_workplace(page, workplace_name, management_number)
     if ok:
         log(f"  사업장 전환 완료: {workplace_name}")
     return ok
+
+
+async def switch_workplace_open(page):
+    """사업장전환 모달 열기(검증). 선택은 하지 않는다.
+
+    nps_auto_cdp.run_full_auto 가 모달 열기/목록 조회/선택을 분리 제어하기 위해
+    사용. 본체는 _open_workplace_modal_verified 에 위임.
+    """
+    return await _open_workplace_modal_verified(page)
 
 
 async def _search_workplace_in_modal(page, search_text, search_by_mgmt_no=False):
@@ -158,15 +211,42 @@ async def select_workplace_by_index(page, index):
 
     if result.get("ok"):
         log(f"  사업장 선택 완료: {result.get('text', '')}")
-        await human_delay(3)
+        await _wait_workplace_closed(page)  # 모달 닫힘 + nexacro 안정화 대기
         return True
 
     log(f"  사업장 선택 실패: {result}")
     return False
 
 
-async def list_workplaces(page):
-    """현재 사업장 목록의 가시 행 데이터 반환"""
+async def _wait_workplace_grid(page, timeout=10, interval=0.5):
+    """GRID_WORKPLACE 그리드 행(gridrow_N)이 출현할 때까지 폴링.
+
+    사업장전환 모달 오픈 후 그리드가 비동기로 로드되므로 human_delay만으로는
+    레이스 컨디션(빈 목록)이 발생한다. 행이 1개라도 보일 때까지 대기.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            count = await page.evaluate(
+                '(gid) => document.querySelectorAll(\'[id^="\' + gid + \'.body.gridrow_"]\').length',
+                GRID_WORKPLACE,
+            )
+            if count and count > 0:
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(interval)
+    return False
+
+
+async def list_workplaces(page, *, retry=True):
+    """현재 사업장 목록의 가시 행 데이터 반환.
+
+    retry=True(기본)면 그리드 행 출현까지 폴링 후 읽는다(모달 오픈 후 비동기
+    로드 대기). 내부 경로에서 이미 대기한 경우 retry=False로 스킵.
+    """
+    if retry and not await _wait_workplace_grid(page):
+        return []
     data = await nexacro_get_grid_data(page, GRID_WORKPLACE)
     workplaces = []
     for i, row in enumerate(data):

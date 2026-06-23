@@ -36,7 +36,7 @@ from src.automation.nps._common import (
     list_workplaces, navigate_to_decision_details, open_decision_detail,
     click_detail_tab, output_with_full_ssn, download_pdf_from_preview,
     save_excel, save_integrated, download_final_integrated,
-    process_tab_download, switch_workplace,
+    process_tab_download, switch_workplace, switch_workplace_open,
     nexacro_click_button,
     BTN_CHANGE_WORKPLACE, BTN_MODAL_CONFIRM, BTN_MODAL_CANCEL,
     TAB_MEMBER, TAB_RETRO, TAB_GOVT,
@@ -188,12 +188,14 @@ async def run_full_auto(page, context, year: int | None = None, month: int | Non
                 return
 
             wp_name = None
+            wp_idx = None  # 번호로 선택한 경우 인덱스(cbo00/find_row 회피 경로)
 
             # 번호로 선택 시도
             try:
                 idx = int(choice) - 1
                 if 0 <= idx < len(workplaces):
                     wp_name = workplaces[idx]["name"]
+                    wp_idx = idx
             except ValueError:
                 pass
 
@@ -221,8 +223,12 @@ async def run_full_auto(page, context, year: int | None = None, month: int | Non
                 wp_name = choice
                 log(f"  '{choice}' — 표시 목록에 없음, 이름으로 검색합니다.")
 
-            # 사업장 선택 시도 (모달 내 검색 포함)
-            ok = await select_workplace(page, wp_name)
+            # 사업장 선택: 번호로 고른 경우 인덱스 직접 선택(cbo00/find_row 회피),
+            # 이름/직접 입력인 경우 검색 경로(모달 검색 포함).
+            if wp_idx is not None:
+                ok = await select_workplace_by_index(page, wp_idx)
+            else:
+                ok = await select_workplace(page, wp_name)
             if ok:
                 break  # 선택 성공 → 워크플로우 진행
 
@@ -251,11 +257,6 @@ async def run_full_auto(page, context, year: int | None = None, month: int | Non
             import traceback
             traceback.print_exc()
             continue
-
-
-async def switch_workplace_open(page):
-    """사업장전환 버튼 클릭하여 모달 열기 (선택은 하지 않음)"""
-    await nexacro_click_button(page, BTN_CHANGE_WORKPLACE)
 
 
 async def run_single_workplace(page, context, workplace_name, is_first=False,

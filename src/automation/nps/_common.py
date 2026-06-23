@@ -16,6 +16,7 @@ Nexacro 기반 edi.nps.or.kr 사이트 제어를 위한 유틸리티.
 import asyncio
 import sys
 import os
+import time
 from datetime import datetime
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
@@ -50,6 +51,7 @@ from src.automation.nps._constants import (
 # ─── 사업장 선택 재export ────────────────────────────────────────────────────
 from src.automation.nps._workplace import (
     switch_workplace,
+    switch_workplace_open,
     open_workplace_selector,
     select_workplace,
     select_workplace_by_index,
@@ -166,6 +168,27 @@ async def navigate_to_decision_details(page):
     return True
 
 
+async def _wait_decision_grid(page, timeout=6, interval=0.5):
+    """GRID_DECISION_LIST 행(gridrow_N)이 출현할 때까지 폴링.
+
+    사업장 전환 직후 결정내역 그리드가 늦게 로드되면 행 매칭이 빈 결과로
+    스킵되는 레이스 컨디션을 방지한다.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            count = await page.evaluate(
+                '(gid) => document.querySelectorAll(\'[id^="\' + gid + \'.body.gridrow_"]\').length',
+                GRID_DECISION_LIST,
+            )
+            if count and count > 0:
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(interval)
+    return False
+
+
 async def open_decision_detail(page, year=None, month=None):
     """결정내역 그리드에서 사용자 지정 월의 행을 찾아 더블클릭
 
@@ -186,16 +209,24 @@ async def open_decision_detail(page, year=None, month=None):
         ".form.divWork.form.div00.form.btn00"
     )
     await nexacro_click_button(page, SEARCH_BTN)
-    await human_delay(3)
 
-    # 1순위: 해당 월의 2차 찾기 (col=3)
-    row = await _find_row_with_round(page, GRID_DECISION_LIST,
-                                     month_prefix, "2차")
-
-    # 2순위: 해당 월의 첫 번째 아이템
-    if row is None:
-        row = await nexacro_find_row(page, GRID_DECISION_LIST,
-                                     col=3, text=month_prefix)
+    # 결정내역 그리드 로드 대기 + 행 매칭 (사업장 전환 직후 그리드 지연 대응).
+    # 그리드 자체가 안 로드(0행)면 재시도, 로드됐으면 매칭 결과(있/없) 확정.
+    row = None
+    for attempt in range(3):
+        if not await _wait_decision_grid(page, timeout=6):
+            log(f"  결정내역 그리드 로드 대기 중... ({attempt + 1}/3)")
+            if attempt < 2:
+                await human_delay(2)
+            continue
+        # 1순위: 해당 월의 2차 찾기 (col=3)
+        row = await _find_row_with_round(page, GRID_DECISION_LIST,
+                                         month_prefix, "2차")
+        # 2순위: 해당 월의 첫 번째 아이템
+        if row is None:
+            row = await nexacro_find_row(page, GRID_DECISION_LIST,
+                                         col=3, text=month_prefix)
+        break  # 그리드 로드됨 — 매칭 결과 확정
 
     if row is None:
         log(f"  {month_prefix} 해당 결정내역 없음 — 스킵")
