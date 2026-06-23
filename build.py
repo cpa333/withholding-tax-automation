@@ -215,6 +215,16 @@ def verify_bundle():
          lambda: in_pyz("src.utils.raw_data_reader")),
         ("src.utils.data_merger (PYZ)",
          lambda: in_pyz("src.utils.data_merger")),
+        # 병렬 자동화 경로 — gui_main --wtax-cli multiplex 가 런타임 import.
+        # 누락 시 .exe 병렬 메뉴가 ModuleNotFoundError 로 실패 → 빌드 시 번들 포함 검증.
+        ("src.ui.workers.parallel_cli_worker (PYZ)",
+         lambda: in_pyz("src.ui.workers.parallel_cli_worker")),
+        ("src.automation.nps.nps_auto_cdp (PYZ)",
+         lambda: in_pyz("src.automation.nps.nps_auto_cdp")),
+        ("src.automation.nhis.nhis_edi_auto_cdp (PYZ)",
+         lambda: in_pyz("src.automation.nhis.nhis_edi_auto_cdp")),
+        ("src.automation.nhis._firm_selector (PYZ)",
+         lambda: in_pyz("src.automation.nhis._firm_selector")),
         # 네이티브 확장/DLL → _internal 실제 파일 검증
         ("PyMuPDF 네이티브(_mupdf.pyd)",
          lambda: os.path.isfile(os.path.join(internal, "pymupdf", "_mupdf.pyd"))),
