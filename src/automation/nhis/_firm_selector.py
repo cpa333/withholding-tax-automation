@@ -29,6 +29,24 @@ async def open_firm_selector(page, context, *, close_popups_fn=None):
     Returns:
         Page or None: 사업장 선택 팝업 탭
     """
+    # 수임사업장선택 버튼은 retrieveMain 메인 페이지에 있음.
+    # 전달된 page 가 다른 탭/전환 중 상태로 드리프트했을 수 있어 context 에서
+    # retrieveMain 탭을 재해석해 그 페이지에서 조작.
+    main = None
+    for pg in context.pages:
+        try:
+            if "retrieveMain" in pg.url:
+                main = pg
+                break
+        except Exception:
+            continue
+    if main:
+        page = main
+        try:
+            await page.bring_to_front()
+        except Exception:
+            pass
+
     # 수임처 선택 상태면 먼저 로그인 사업장으로 복귀
     has_firm = await page.evaluate("""() => {
         var text = document.body.innerText;
@@ -45,13 +63,25 @@ async def open_firm_selector(page, context, *, close_popups_fn=None):
             await close_popups_fn(context)
 
     log("수임사업장선택 버튼 클릭...")
-    clicked = await page.evaluate("""() => {
-        const img = document.querySelector('img[src*="we_btn_suim"]');
-        if (img) { img.click(); return true; }
-        return false;
-    }""")
+    # 버튼이 렌더링될 때까지 폴링 — 로그인 직후 retrieveMain DOM 이 갱신 중이면
+    # 단발 querySelector 로 못 찾는다(최대 ~6초 대기). src 패턴 + alt 텍스트 fallback.
+    clicked = False
+    for _ in range(12):
+        clicked = await page.evaluate("""() => {
+            const img = document.querySelector('img[src*="we_btn_suim"]')
+                     || document.querySelector('img[alt*="수임사업장선택"]');
+            if (img) { img.click(); return true; }
+            return false;
+        }""")
+        if clicked:
+            break
+        await asyncio.sleep(0.5)
     if not clicked:
-        log("  ERROR: 수임사업장선택 버튼을 찾지 못했습니다.")
+        try:
+            cur_url = page.url
+        except Exception:
+            cur_url = "?"
+        log(f"  ERROR: 수임사업장선택 버튼을 찾지 못했습니다. (page={cur_url})")
         return None
 
     # 팝업 탭 대기

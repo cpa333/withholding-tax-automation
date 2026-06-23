@@ -51,7 +51,57 @@ def _create_single_instance_mutex():
         pass
 
 
+def _dispatch_cli_subprocess() -> bool:
+    """병렬 자동화 subprocess 디스패치 (--wtax-cli).
+
+    빌드된 exe(frozen)에서는 `python -m <module>` 모듈 실행이 불가하므로,
+    GUI 진입점이 `--wtax-cli <module>` 인자를 받아 해당 CLI 모듈을 대신 실행한다.
+    일반 GUI 실행에는 영향 없음(플래그가 없으면 False 반환).
+    각 subprocess 는 WTAX_CDP_PORT env 로 포트가 격리된다(parallel_cli_worker 설정).
+    """
+    argv = sys.argv[1:]
+    if "--wtax-cli" not in argv:
+        return False
+
+    idx = argv.index("--wtax-cli")
+    module = argv[idx + 1] if idx + 1 < len(argv) else ""
+    rest = argv[:idx] + argv[idx + 2:]
+
+    # GUI main() 과 동일 환경 보장 (CWD, sys.path) — CLI 가 config/DB/import 를 정상 해석.
+    if getattr(sys, "frozen", False):
+        os.chdir(os.path.dirname(sys.executable))
+    sys.path.insert(0, resource_path("."))
+
+    if not module:
+        return False
+
+    import argparse
+    import asyncio
+    import importlib
+
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--auto", action="store_true")
+    parser.add_argument("--year", type=int, default=None)
+    parser.add_argument("--month", type=int, default=None)
+    parser.add_argument("--firms", type=str, default=None)
+    parser.add_argument("--mgmts", type=str, default=None,
+                        help="콤마로 구분된 사업장관리번호 (--firms 와 같은 순서)")
+    args = parser.parse_args(rest)
+
+    try:
+        mod = importlib.import_module(module)
+        asyncio.run(mod.main(args))
+    except Exception as e:
+        print(f"[wtax-cli] FATAL: {e}", file=sys.stderr)
+    return True
+
+
 def main():
+    # 병렬 자동화 subprocess 디스패치 (frozen exe --wtax-cli) — GUI 없이 CLI 실행 후 종료.
+    # 빌드된 exe 에서는 python -m 이 불가해 parallel_cli_worker 가 이 진입점을 경유해 CLI 모듈을 실행.
+    if _dispatch_cli_subprocess():
+        return
+
     # PyInstaller onefile/onedir 모두: exe 위치를 CWD로
     if getattr(sys, 'frozen', False):
         os.chdir(os.path.dirname(sys.executable))

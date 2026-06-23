@@ -44,6 +44,7 @@ class MainWindow(QMainWindow):
         from src.ui.workers.parallel_cli_worker import ParallelCliRunner
         self.parallel_runner = ParallelCliRunner(self)
         self.parallel_runner.log_message.connect(self._on_log)
+        self.parallel_runner.finished_one.connect(self._on_parallel_finished_one)
         self.parallel_runner.all_finished.connect(self._on_parallel_finished)
 
         self._selected_phase = 1
@@ -399,6 +400,10 @@ class MainWindow(QMainWindow):
         self.company_table.set_selected_run_mode(True)
         self._on_log("[병렬] 모든 subprocess 완료")
 
+    def _on_parallel_finished_one(self, which: str, success: bool):
+        label = "국민연금(NPS)" if which == "nps" else "건강보험(NHIS)"
+        self._on_log(f"[병렬] {label} {'완료' if success else '실패(로그 확인)'}")
+
     def _on_runner_finished(self):
         self.company_table.set_run_active(False)
         if self._is_list_phase(self._selected_phase):
@@ -457,6 +462,7 @@ class MainWindow(QMainWindow):
             year = self.year_spin.value()
             month = self.month_spin.value()
             self.company_table.set_run_active(True)
+            self.company_table.set_buttons_enabled(False)
             self.parallel_runner.start(nps_port=9223, nhis_port=9224,
                                        firms=None, year=year, month=month)
             self._on_log("[병렬] NPS(9223)/NHIS(9224) 백그라운드 시작 (전체 수임처)")
@@ -608,17 +614,21 @@ class MainWindow(QMainWindow):
 
         # ── Phase 9: 공단 EDI 병렬 (선택 수임처) ──
         if self._is_parallel():
-            firms = [c.get("name") for c in clients if c.get("name")] or None
+            sel = [c for c in clients if c.get("name")]
+            firms = [c.get("name") for c in sel] or None
             if not firms:
                 self.statusBar().showMessage("수임처를 선택하세요")
                 return
+            # 사업장관리번호(override 우선) — CLI 가 관리번호 검색으로 수임처 선택.
+            # 비었으면 CLI가 이름 fallback.
+            mgmts = [c.get("management_number", "") for c in sel]
             year = self.year_spin.value()
             month = self.month_spin.value()
             self.company_table.set_run_active(True)
             self.company_table.set_buttons_enabled(False)
             self.company_table.set_selected_run_mode(False)
             self.parallel_runner.start(nps_port=9223, nhis_port=9224,
-                                       firms=firms, year=year, month=month)
+                                       firms=firms, mgmts=mgmts, year=year, month=month)
             self._on_log(f"[병렬] 선택 수임처 {len(firms)}건 병렬 실행: {', '.join(firms)}")
             return
 

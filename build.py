@@ -139,8 +139,10 @@ def build_pyinstaller(driver_dir):
         "--hidden-import=src.batch.db",
         "--hidden-import=src.automation.nps",
         "--hidden-import=src.automation.nps._common",
+        "--hidden-import=src.automation.nps.nps_auto_cdp",
         "--hidden-import=src.automation.nhis",
         "--hidden-import=src.automation.nhis._common_edi",
+        "--hidden-import=src.automation.nhis.nhis_edi_auto_cdp",
 
         # Playwright Node.js 드라이버 (핵심)
         "--add-data", f"{driver_dir};playwright/driver",

@@ -243,11 +243,14 @@ async def run_full_auto(page, context):
             traceback.print_exc()
 
 
-async def run_auto_batch(page, context, *, firms):
+async def run_auto_batch(page, context, *, firms, mgmts=None):
     """비대화형 일괄 실행 (--auto 모드). firms=None → 전체.
 
     run_full_auto 의 input 루프를 비대화형으로 재작성. 사업장 선택/실행은
     기존 함수(open_firm_selector/select_firm/close_firm_popup/run_single_firm_workflow) 재사용.
+
+    mgmts: firms 와 같은 순서의 사업장관리번호. 제공되면 관리번호 검색으로 선택
+    (원래 동작). 비었거나 없으면 이름 fallback.
     """
     if firms is None:
         popup = await open_firm_selector(page, context)
@@ -277,15 +280,17 @@ async def run_auto_batch(page, context, *, firms):
     log(f"비대화형 일괄 실행: {len(targets)}개 수임처")
     completed = 0
     for i, firm_name in enumerate(targets, 1):
+        # 사업장관리번호(있으면 관리번호 검색, 없으면 이름 fallback)
+        mgmt = mgmts[i - 1] if mgmts and (i - 1) < len(mgmts) else ""
         log(f"\n{'='*55}")
-        log(f"  [{i}/{len(targets)}] {firm_name}")
+        log(f"  [{i}/{len(targets)}] {firm_name}" + (f" (관리번호 {mgmt})" if mgmt else ""))
         try:
             popup = await open_firm_selector(page, context)
             if not popup:
                 log(f"  ERROR: 팝업 오픈 실패 - {firm_name} 스킵")
                 continue
             await asyncio.sleep(2)
-            ok = await select_firm(popup, firm_name)
+            ok = await select_firm(popup, firm_name, management_number=mgmt)
             await close_firm_popup(context, popup)
             if not ok:
                 log(f"  스킵: '{firm_name}' 사업장 미발견")
@@ -351,7 +356,9 @@ async def main(args=None):
         if args is not None and getattr(args, "auto", False):
             firms = ([s.strip() for s in args.firms.split(",") if s.strip()]
                      if args.firms else None)
-            await run_auto_batch(page, context, firms=firms)
+            mgmts = ([s.strip() for s in args.mgmts.split(",")]
+                     if getattr(args, "mgmts", None) else None)
+            await run_auto_batch(page, context, firms=firms, mgmts=mgmts)
             return
 
         # Phase 2: 모드 선택
@@ -419,6 +426,8 @@ if __name__ == "__main__":
                         help="비대화형 일괄 모드 (GUI 병렬 subprocess 용)")
     parser.add_argument("--firms", type=str, default=None,
                         help="콤마로 구분된 사업장명 (미지정 시 전체)")
+    parser.add_argument("--mgmts", type=str, default=None,
+                        help="콤마로 구분된 사업장관리번호 (--firms 와 같은 순서)")
     args = parser.parse_args()
     try:
         asyncio.run(main(args))

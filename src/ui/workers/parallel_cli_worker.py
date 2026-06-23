@@ -28,29 +28,46 @@ class ParallelCliRunner(QThread):
         self._nhis_port = 9224
 
     def start(self, *, nps_port=9223, nhis_port=9224,
-              firms=None, year=None, month=None):
-        """두 CLI 백그라운드 시작. firms=None → 전체 수임처(--auto 만)."""
+              firms=None, mgmts=None, year=None, month=None):
+        """두 CLI 백그라운드 시작. firms=None → 전체 수임처(--auto 만).
+
+        mgmts: firms 와 같은 순서의 사업장관리번호 리스트. 제공되면 CLI 가
+        이름 대신 관리번호로 수임처를 선택(원래 동작). 비었으면 이름 fallback.
+        """
         self._nps_port = nps_port
         self._nhis_port = nhis_port
+        # 본 파일(src/ui/workers/) 기준 3단계 위 = repo root (src 패키지 부모).
+        # 주의: 2단계는 src/ 까지라 python -m src... 가 src 를 못 찾음(ModuleNotFoundError).
         repo_root = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..")
+            os.path.join(os.path.dirname(__file__), "..", "..", "..")
         )
-        env_nps = {**os.environ, "WTAX_CDP_PORT": str(nps_port), "PYTHONUTF8": "1"}
-        env_nhis = {**os.environ, "WTAX_CDP_PORT": str(nhis_port), "PYTHONUTF8": "1"}
+        # src 패키지 해석 이중 보장: cwd(repo root) + PYTHONPATH(안전망)
+        pypath = repo_root + os.pathsep + os.environ.get("PYTHONPATH", "")
+        env_nps = {**os.environ, "WTAX_CDP_PORT": str(nps_port),
+                   "PYTHONUTF8": "1", "PYTHONPATH": pypath}
+        env_nhis = {**os.environ, "WTAX_CDP_PORT": str(nhis_port),
+                    "PYTHONUTF8": "1", "PYTHONPATH": pypath}
         self._spawn("nps", "src.automation.nps.nps_auto_cdp", env_nps,
-                    repo_root, firms, year, month)
+                    repo_root, firms, mgmts, year, month)
         self._spawn("nhis", "src.automation.nhis.nhis_edi_auto_cdp", env_nhis,
-                    repo_root, firms, None, None)
+                    repo_root, firms, mgmts, None, None)
         super().start()  # QThread.run — 완료 대기
 
-    def _spawn(self, which, module, env, cwd, firms, year, month):
-        args = [sys.executable, "-u", "-m", module, "--auto"]
+    def _spawn(self, which, module, env, cwd, firms, mgmts, year, month):
+        # frozen(PyInstaller exe)에서는 python -m 이 불가 → 진입점(gui_main)의
+        # --wtax-cli 디스패치로 CLI 모듈 실행. dev(python)은 기존 -m 방식 유지.
+        if getattr(sys, "frozen", False):
+            args = [sys.executable, "--wtax-cli", module, "--auto"]
+        else:
+            args = [sys.executable, "-u", "-m", module, "--auto"]
         if year is not None:
             args += ["--year", str(year)]
         if month is not None:
             args += ["--month", str(month)]
         if firms:
             args += ["--firms", ",".join(firms)]
+        if mgmts:
+            args += ["--mgmts", ",".join(str(m) for m in mgmts)]
         kwargs = dict(
             args=args, env=env, cwd=cwd,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

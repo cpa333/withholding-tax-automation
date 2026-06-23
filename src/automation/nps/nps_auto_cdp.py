@@ -102,11 +102,14 @@ async def handle_select_workplace(page):
     return choice
 
 
-async def run_auto_batch(page, context, *, firms, year, month):
+async def run_auto_batch(page, context, *, firms, year, month, mgmts=None):
     """비대화형 일괄 실행 (--auto 모드). firms=None → 전체(--all).
 
     run_full_auto 의 input 루프를 비대화형으로 재작성. 사업장 전환/선택/실행은
     기존 함수(switch_workplace_open/select_workplace/run_single_workplace/list_workplaces) 재사용.
+
+    mgmts: firms 와 같은 순서의 사업장관리번호. 제공되면 관리번호 검색으로 선택
+    (원래 동작). 비었거나 없으면 이름 fallback.
     """
     if firms is None:
         # --all: 사업장 전체 이름 수집
@@ -125,14 +128,16 @@ async def run_auto_batch(page, context, *, firms, year, month):
     log(f"비대화형 일괄 실행: {len(targets)}개 수임처 (year={year}, month={month})")
     completed = 0
     for i, wp_name in enumerate(targets, 1):
+        # 사업장관리번호(있으면 관리번호 검색, 없으면 이름 fallback)
+        mgmt = mgmts[i - 1] if mgmts and (i - 1) < len(mgmts) else ""
         log(f"\n{'='*55}")
-        log(f"  [{i}/{len(targets)}] {wp_name}")
+        log(f"  [{i}/{len(targets)}] {wp_name}" + (f" (관리번호 {mgmt})" if mgmt else ""))
         try:
             if not await switch_workplace_open(page):
                 log(f"  ERROR: 사업장전환 실패 - {wp_name} 스킵")
                 continue
             await human_delay(2)
-            ok = await select_workplace(page, wp_name)
+            ok = await select_workplace(page, wp_name, management_number=mgmt)
             if not ok:
                 log(f"  스킵: '{wp_name}' 사업장 미발견")
                 continue
@@ -182,8 +187,10 @@ async def main(args=None):
         if args is not None and getattr(args, "auto", False):
             firms = ([s.strip() for s in args.firms.split(",") if s.strip()]
                      if args.firms else None)
+            mgmts = ([s.strip() for s in args.mgmts.split(",")]
+                     if getattr(args, "mgmts", None) else None)
             await run_auto_batch(page, context, firms=firms,
-                                 year=args.year, month=args.month)
+                                 year=args.year, month=args.month, mgmts=mgmts)
             return
 
         # ═══ Phase 2: 날짜 입력 ═══
@@ -549,6 +556,8 @@ if __name__ == "__main__":
     parser.add_argument("--month", type=int, default=None)
     parser.add_argument("--firms", type=str, default=None,
                         help="콤마로 구분된 사업장명 (미지정 시 전체)")
+    parser.add_argument("--mgmts", type=str, default=None,
+                        help="콤마로 구분된 사업장관리번호 (--firms 와 같은 순서)")
     args = parser.parse_args()
     try:
         asyncio.run(main(args))
