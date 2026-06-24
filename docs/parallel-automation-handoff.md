@@ -159,6 +159,56 @@ GUI 다중 러너보다 **CLI 2-프로세스**가 훨씬 가벼움:
 - `feedback_chrome-cdp-setup` — CDP 재사용-우선·force-kill 금지·포트9223/junction. `kill_chrome` 정밀화 시 **필수 준수**.
 - `feedback_browser-launch` — subprocess.Popen Chrome 실행.
 - `project_parallel-nps-nhis-feasibility` — 본 문서의 memory 요약.
+- `project_parallel-notfound-report` / `feedback_nhis-firm-mgmt-verify` — 아래 §9 구현의 memory 요약.
+
+---
+
+## 9. 수임처 탐색 실패(not-found) 처리 + 종합 리포트 (병렬 안정화)
+
+병렬(2번) NPS+NHIS 자동화의 **선택 신뢰성·탐색실패 처리·종합 리포트**를 안정화한
+운영 개선. 모두 `run_auto_batch`(`--auto`) 경로에 한정 — 단일 워크플로/대화형 경로는
+회귀 0.
+
+### 9.1 관리번호 정확일치 행만 선택 (blind first-row 클릭 제거)
+- NHIS `_firm_selector.select_firm` / NPS `_workplace.select_workplace` 모두
+  관리번호 검색 후 **첫 행을 무조건 클릭**하던 버그(→ 항상 첫 수임처 것만 수집)를
+  수정. 관리번호(숫자 정규화)가 정확히 일치하는 행만 클릭, 일치 없으면 **이름 fallback**.
+- NPS 헬퍼 `_workplace._find_workplace_row_by_mgmt`(`nexacro_get_grid_data` 재사용).
+- 회귀: `tests/test_nhis_firm_selector_mgmt_match.py`, `tests/test_nps_workplace_mgmt_match.py`.
+
+### 9.2 stale page 방지 + 전환 검증
+- NHIS `run_auto_batch`: 매 iteration `close_popups(context)`로 메인(retrieveMain) 페이지
+  재확보 (이전 수임처 워크플로우가 탭을 바꿔 page 가 stale 되는 것 방지).
+- NPS는 Nexacro SPA(단일 page)라 `close_popups` 불필요; 대신 `_wait_workplace_closed`
+  로 상태 settle. (Nexacro 페이지 읽기 검증은 신뢰 불가 — `_current_firm_name` 실측 전부
+  None. 선택 로직 자체가 정합성 보장.)
+
+### 9.3 탐색실패(not-found) 스킵 + 종합 리포트
+- 양쪽 `run_auto_batch`가 `skipped` 리스트(사유: `오픈실패`/`미발견`/`오류`) 수집 후
+  **공용 `src/automation/_parallel_report.py::emit_summary`** 호출 →
+  (a) 사람용 요약 블록(`log` → 패널), (b) `__WTAX_RESULT__ {json}` 마커(stdout).
+- `ParallelCliRunner._pump`가 마커 라인을 가로채 `result_summary(which,json)` 시그널로
+  변환(로그 패널엔 raw JSON 미출력). `main_window._show_parallel_report`가 양쪽 합쳐
+  **not-found 1건 이상이면 QMessageBox로 통합 안내**(없으면 조용히 종료).
+- **★Qt 순서 보장**: `ParallelCliRunner.run()`이 `_readers` 스레드를 `join` 한 뒤
+  `all_finished` emit → 마커(result_summary)가 항상 all_finished 핸들러보다 먼저 처리.
+- (참고) CLI 진입점은 import 시 `sys.stdout.detach()` 재래핑을 해 pytest capture 를
+  깨트리므로, 요약 로직은 stdout 재래핑 없는 `_parallel_report.py`로 분리해 테스트.
+
+### 9.4 NPS not-found 시 페이지 리셋 (멈춤 방지) ★
+- NPS는 수임처 미발견 시 사업장전환 모달(`ChangeBusi`) + "조회결과 없음" Nexacro alert
+  이 **백그라운드(occluded) 창에서 닫히지 않아** 다음 수임처 진행이 막히고 멈추던 버그.
+  (NHIS는 HTML 팝업이라 `close_firm_popup`으로 매번 닫아 정상.)
+- 시도했던 `close_workplace_modal`(Escape/`BTN_MODAL_CANCEL` 클릭)은 no-op:
+  `BTN_MODAL_CANCEL`은 **출력모달**(UHJE0002P1) 버튼이라 ChangeBusi에 안 닿고,
+  `page.mouse.click`은 occluded 창에서 no-op인데 `{ok:True}` 반환, 키보드 press는
+  Nexacro 내부 messageBox에 도달 못 함, `_wait_workplace_closed` timeout 거짓성공.
+- **해결: `_workplace.reset_workplace_page(page)` = `page.goto(NPS_URL)` +
+  `wait_for_nexacro_ready`**. 네비게이션은 입력이벤트가 아니라 모달/alert/occlusion
+  무관하게 강제 종료, 세션(쿠키) 유지로 재로그인 불필요(`ensure_login_page`/`main()` 패턴).
+  `run_auto_batch`의 모든 실패 경로(오픈실패/미발견/오류)에서 `continue` 전 호출.
+- 교훈: Nexacro 모달의 **명시적 닫기는 신뢰 어려움 → 리로드 리셋이 가장 확실**.
+  정상 선택은 그리드 행 dblclick의 사이드이펙트로 모달이 자동 닫히는 것에 의존.
 
 ---
 

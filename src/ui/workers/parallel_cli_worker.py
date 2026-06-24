@@ -12,6 +12,11 @@ import threading
 
 from PySide6.QtCore import QThread, Signal
 
+# CLI(_emit_summary)가 stdout 으로 찍는 구조화 결과 마커. 이 라인은 log_message 가
+# 아니라 result_summary 로 변환되어 로그 패널에 raw JSON 이 노출되지 않는다.
+# src/automation/nps/nps_auto_cdp.py / nhis/nhis_edi_auto_cdp.py 의 _RESULT_MARKER 와 동일.
+_RESULT_MARKER = "__WTAX_RESULT__"
+
 
 class ParallelCliRunner(QThread):
     """NPS+NHIS CLI 를 병렬 subprocess 로 실행·모니터링."""
@@ -19,6 +24,7 @@ class ParallelCliRunner(QThread):
     log_message = Signal(str)            # "[NPS] ..." / "[NHIS] ..." 라인
     finished_one = Signal(str, bool)     # (which, success)
     all_finished = Signal()
+    result_summary = Signal(str, str)    # (which, json) — _emit_summary 마커 파싱 결과
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -87,7 +93,12 @@ class ParallelCliRunner(QThread):
             return
         try:
             for line in proc.stdout:
-                self.log_message.emit(f"{prefix} {line.rstrip()}")
+                line = line.rstrip()
+                # 구조화 결과 마커 라인은 result_summary 로 분리(로그 패널엔 미출력).
+                if line.startswith(_RESULT_MARKER):
+                    self.result_summary.emit(which, line[len(_RESULT_MARKER):].strip())
+                    continue
+                self.log_message.emit(f"{prefix} {line}")
         except Exception:
             pass
 
@@ -95,6 +106,11 @@ class ParallelCliRunner(QThread):
         for which, proc in list(self._procs.items()):
             proc.wait()
             self.finished_one.emit(which, proc.returncode == 0)
+        # _pump 스레드가 마지막 마커(result_summary) emit 을 끝내고 종료한 뒤에
+        # all_finished 를 emit 하도록 join. 같은 GUI 이벤트 큐에 FIFO 로 적재되어
+        # result_summary 가 항상 all_finished 핸들러보다 먼저 처리된다(순서 보장).
+        for t in list(self._readers.values()):
+            t.join(timeout=5.0)
         self.all_finished.emit()
 
     def stop(self):

@@ -19,7 +19,7 @@ from src.utils.nexacro import (
     nexacro_find_row,
     nexacro_get_grid_data,
 )
-from src.automation.nps._constants import GRID_WORKPLACE, BTN_CHANGE_WORKPLACE
+from src.automation.nps._constants import GRID_WORKPLACE, BTN_CHANGE_WORKPLACE, NPS_URL
 
 # 로컬 별칭
 nexacro_dblclick_cell = nexacro_dblclick_cell_viewport
@@ -73,6 +73,32 @@ async def _wait_workplace_closed(page, timeout=10, interval=0.5):
     # Nexacro 프레임워크 재준비 대기 (BTN_CHANGE_WORKPLACE 출현)
     from src.automation.nps._common import wait_for_nexacro_ready
     await wait_for_nexacro_ready(page, max_wait=10)
+
+
+async def reset_workplace_page(page):
+    """사업장전환 모달 + "조회결과 없음" alert 이 백그라운드 창에서 닫히지 않아
+    다음 수임처 진행이 막히는 것(병렬 NPS 멈춤)을 막기 위해 NPS 페이지를 재로드해
+    모두 강제 종료한다. run_auto_batch 가 미발견/실패 시 스킵 전에 호출.
+
+    이전 close_workplace_modal(Escape/BTN_MODAL_CANCEL)이 신뢰 불가했던 이유:
+    (1) BTN_MODAL_CANCEL 은 출력모달(UHJE0002P1)의 버튼이라 ChangeBusi 모달에
+        안 닿음(ChangeBusi 닫기 버튼 상수 자체 없음),
+    (2) nexacro_click_button(page.mouse.click)이 occluded 백그라운드 창에서
+        no-op 인데 {ok:True} 를 반환해 dispatchEvent 폴백이 안 돌아감,
+    (3) page.keyboard.press 는 Nexacro 내부 messageBox(브라우저 alert 아님)에
+        도달 못 함,
+    (4) _wait_workplace_closed 가 timeout 후 거짓성공.
+    page.goto(네비게이션)은 입력이벤트가 아니라 모달/alert/occlusion 무관하게
+    동작하고 세션(쿠키)이 유지돼 재로그인이 불필요하다. ensure_login_page/main()
+    이 쓰는 검증 패턴(page.goto(NPS_URL) + wait_for_nexacro_ready) 재사용.
+    """
+    from src.automation.nps._common import wait_for_nexacro_ready
+    try:
+        await page.goto(NPS_URL, wait_until="domcontentloaded", timeout=60000)
+        log("  NPS 페이지 리셋(재로드) — 모달/alert 강제 종료")
+    except Exception as e:
+        log(f"  WARN: NPS 페이지 리셋(goto) 실패 - {e}")
+    await wait_for_nexacro_ready(page)
 
 
 async def switch_workplace(page, workplace_name, management_number=""):
@@ -200,6 +226,7 @@ async def select_workplace(page, workplace_name, management_number=""):
     if management_number:
         log(f"  사업장 검색: 관리번호 '{management_number}'")
         await _search_workplace_in_modal(page, management_number, search_by_mgmt_no=True)
+        await _wait_workplace_grid(page, timeout=3)  # 검색 후 그리드 갱신 대기(빈 목록 읽기 방지)
         await human_delay(2)
         found = await _find_workplace_row_by_mgmt(page, management_number)
         if found is not None:
@@ -222,6 +249,7 @@ async def select_workplace(page, workplace_name, management_number=""):
     if row is None:
         log(f"  표시 목록에 없음 — 모달 검색으로 찾는 중...")
         await _search_workplace_in_modal(page, workplace_name)
+        await _wait_workplace_grid(page, timeout=3)  # 검색 후 그리드 갱신 대기(빈 목록 읽기 방지)
         await human_delay(2)
         row = await nexacro_find_row(page, GRID_WORKPLACE, col=2, text=workplace_name)
 

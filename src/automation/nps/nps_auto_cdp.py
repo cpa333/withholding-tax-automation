@@ -37,6 +37,7 @@ from src.automation.nps._common import (
     click_detail_tab, output_with_full_ssn, download_pdf_from_preview,
     save_excel, save_integrated, download_final_integrated,
     process_tab_download, switch_workplace, switch_workplace_open,
+    reset_workplace_page,
     nexacro_click_button,
     BTN_CHANGE_WORKPLACE, BTN_MODAL_CONFIRM, BTN_MODAL_CANCEL,
     TAB_MEMBER, TAB_RETRO, TAB_GOVT,
@@ -62,6 +63,9 @@ def _trace(msg: str):
             f.write(msg + "\n")
     except Exception:
         pass
+
+
+from src.automation._parallel_report import emit_summary as _emit_summary
 
 
 def print_header():
@@ -147,6 +151,7 @@ async def run_auto_batch(page, context, *, firms, year, month, mgmts=None):
 
     log(f"비대화형 일괄 실행: {len(targets)}개 수임처 (year={year}, month={month})")
     completed = 0
+    skipped = []  # {"name","reason"[,"detail"]} — 종료 후 종합 리포트용
     for i, wp_name in enumerate(targets, 1):
         # 사업장관리번호(있으면 관리번호 검색, 없으면 이름 fallback)
         mgmt = mgmts[i - 1] if mgmts and (i - 1) < len(mgmts) else ""
@@ -155,6 +160,8 @@ async def run_auto_batch(page, context, *, firms, year, month, mgmts=None):
         try:
             if not await switch_workplace_open(page):
                 log(f"  ERROR: 사업장전환 실패 - {wp_name} 스킵")
+                skipped.append({"name": wp_name, "reason": "오픈실패"})
+                await reset_workplace_page(page)  # 잔여 모달/alert 리셋 후 다음으로
                 continue
             await human_delay(2)
             ok = await select_workplace(page, wp_name, management_number=mgmt)
@@ -162,6 +169,8 @@ async def run_auto_batch(page, context, *, firms, year, month, mgmts=None):
                    f"-> select_ok={bool(ok)}")
             if not ok:
                 log(f"  스킵: '{wp_name}' 사업장 미발견")
+                skipped.append({"name": wp_name, "reason": "미발견"})
+                await reset_workplace_page(page)  # ★ 미발견 시 페이지 리셋(모달+결과없음 alert 강제 종료, 멈춤 방지)
                 continue
             await run_single_workplace(page, context, wp_name,
                                        is_first=(completed == 0),
@@ -172,7 +181,10 @@ async def run_auto_batch(page, context, *, firms, year, month, mgmts=None):
             log(f"  ERROR: {wp_name} 처리 실패 - {e}")
             import traceback
             traceback.print_exc()
-    log(f"\n총 {completed}개 수임처 자동화 완료.")
+            skipped.append({"name": wp_name, "reason": "오류", "detail": str(e)})
+            await reset_workplace_page(page)  # 예외 시에도 리셋
+            continue
+    _emit_summary(len(targets), completed, skipped)
 
 
 async def main(args=None):

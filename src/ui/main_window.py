@@ -46,6 +46,8 @@ class MainWindow(QMainWindow):
         self.parallel_runner.log_message.connect(self._on_log)
         self.parallel_runner.finished_one.connect(self._on_parallel_finished_one)
         self.parallel_runner.all_finished.connect(self._on_parallel_finished)
+        self.parallel_runner.result_summary.connect(self._on_parallel_result_summary)
+        self._parallel_results = {}  # {which: {"total","completed","not_found":[...]}}
 
         self._selected_phase = 1
         self._selected_job_id = 0
@@ -399,10 +401,43 @@ class MainWindow(QMainWindow):
         self.company_table.set_buttons_enabled(True)
         self.company_table.set_selected_run_mode(True)
         self._on_log("[병렬] 모든 subprocess 완료")
+        self._show_parallel_report()
 
     def _on_parallel_finished_one(self, which: str, success: bool):
         label = "국민연금(NPS)" if which == "nps" else "건강보험(NHIS)"
         self._on_log(f"[병렬] {label} {'완료' if success else '실패(로그 확인)'}")
+
+    def _on_parallel_result_summary(self, which: str, payload_json: str):
+        """CLI 가 stdout 마커로 보낸 구조화 결과를 누적 (queued 로 GUI 스레드에서만 실행)."""
+        import json
+        try:
+            self._parallel_results[which] = json.loads(payload_json)
+        except Exception:
+            self._parallel_results[which] = {"not_found": []}
+
+    def _show_parallel_report(self):
+        """병렬 종료 후 탐색실패(not-found) 수임처를 통합 다이얼로그로 안내.
+
+        두 CLI의 result_summary(마커) 결과를 합쳐, 한 건이라도 not-found 가 있으면
+        QMessageBox 로 정리해 보여준다. 없으면 조용히 종료(로그 패널 요약으로 충분).
+        """
+        nps_nf = self._parallel_results.get("nps", {}).get("not_found", [])
+        nhis_nf = self._parallel_results.get("nhis", {}).get("not_found", [])
+        self._on_log(f"[병렬] 리포트 수신: 국민연금 미탐색 {len(nps_nf)}건, 건강보험 미탐색 {len(nhis_nf)}건")
+        self._parallel_results = {}  # 다음 실행을 위해 초기화
+        if not nps_nf and not nhis_nf:
+            return
+        lines = ["탐색 실패(스킵) 수임처 요약", ""]
+        if nps_nf:
+            lines.append(f"■ 국민연금: {len(nps_nf)}건")
+            for s in nps_nf:
+                lines.append(f"   - {s.get('name', '?')} [{s.get('reason', '?')}]")
+            lines.append("")
+        if nhis_nf:
+            lines.append(f"■ 건강보험: {len(nhis_nf)}건")
+            for s in nhis_nf:
+                lines.append(f"   - {s.get('name', '?')} [{s.get('reason', '?')}]")
+        QMessageBox.information(self, "병렬 자동화 결과", "\n".join(lines))
 
     def _on_runner_finished(self):
         self.company_table.set_run_active(False)

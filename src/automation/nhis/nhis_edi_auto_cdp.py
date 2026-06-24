@@ -287,6 +287,9 @@ async def _current_firm_name(page):
         return None
 
 
+from src.automation._parallel_report import emit_summary as _emit_summary
+
+
 async def run_auto_batch(page, context, *, firms, mgmts=None):
     """비대화형 일괄 실행 (--auto 모드). firms=None → 전체.
 
@@ -328,6 +331,7 @@ async def run_auto_batch(page, context, *, firms, mgmts=None):
 
     log(f"비대화형 일괄 실행: {len(targets)}개 수임처")
     completed = 0
+    skipped = []  # {"name","reason"[,"detail"]} — 종료 후 종합 리포트용
     for i, firm_name in enumerate(targets, 1):
         # 사업장관리번호(있으면 관리번호 검색, 없으면 이름 fallback)
         mgmt = mgmts[i - 1] if mgmts and (i - 1) < len(mgmts) else ""
@@ -344,12 +348,14 @@ async def run_auto_batch(page, context, *, firms, mgmts=None):
             popup = await open_firm_selector(main_page, context)
             if not popup:
                 log(f"  ERROR: 팝업 오픈 실패 - {firm_name} 스킵")
+                skipped.append({"name": firm_name, "reason": "오픈실패"})
                 continue
             await asyncio.sleep(2)
             ok = await select_firm(popup, firm_name, management_number=mgmt)
             await close_firm_popup(context, popup)
             if not ok:
                 log(f"  스킵: '{firm_name}' 사업장 미발견")
+                skipped.append({"name": firm_name, "reason": "미발견"})
                 continue
 
             # 사업장 전환 검증 — select_firm 이 클릭했더라도 9224 백그라운드 Chrome
@@ -372,11 +378,15 @@ async def run_auto_batch(page, context, *, firms, mgmts=None):
                 log(f"  {firm_name} 처리 완료. ({completed}개 완료)")
             else:
                 log(f"  {firm_name} 처리 실패.")
+                skipped.append({"name": firm_name, "reason": "오류",
+                                "detail": "워크플로우 실패"})
         except Exception as e:
             log(f"  ERROR: {firm_name} 처리 실패 - {e}")
             import traceback
             traceback.print_exc()
-    log(f"\n총 {completed}개 수임처 자동화 완료.")
+            skipped.append({"name": firm_name, "reason": "오류", "detail": str(e)})
+            continue
+    _emit_summary(len(targets), completed, skipped)
 
 
 async def main(args=None):
