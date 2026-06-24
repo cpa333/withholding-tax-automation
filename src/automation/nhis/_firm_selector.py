@@ -15,6 +15,39 @@ from src.utils.human import human_delay
 from src.automation.nhis._constants import FIRM_LIST_URL
 
 
+async def wait_firm_selector_ready(page, context, timeout_s=40):
+    """로그인 직후 retrieveMain 이 리다이렉트·렌더를 끝내고 수임사업장선택
+    버튼이 나타날 때까지 대기.
+
+    로그인 직후 첫 수임처에서 (a) 버튼이 아직 안 떠 '못 찾음' (b) 폴링 중
+    네비게이션으로 'context destroyed' 가 났다(첫 1~2건만 실패하고 안정된
+    뒤 건은 성공한 원인). 첫 건 처리 전에 페이지를 한 번 안정화시킨다.
+    네비게이션 중 evaluate 예외는 무시하고 재시도하며, retrieveMain 탭을
+    매번 재해석한다.
+    """
+    for _ in range(timeout_s * 2):
+        target = page
+        for pg in context.pages:
+            try:
+                if "retrieveMain" in pg.url:
+                    target = pg
+                    break
+            except Exception:
+                continue
+        try:
+            found = await target.evaluate("""() => {
+                const img = document.querySelector('img[src*="we_btn_suim"]')
+                         || document.querySelector('img[alt*="수임사업장선택"]');
+                return !!img;
+            }""")
+            if found:
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+    return False
+
+
 async def open_firm_selector(page, context, *, close_popups_fn=None):
     """수임사업장선택 버튼 클릭 → 팝업 탭 반환
 
@@ -63,18 +96,31 @@ async def open_firm_selector(page, context, *, close_popups_fn=None):
             await close_popups_fn(context)
 
     log("수임사업장선택 버튼 클릭...")
-    # 버튼이 렌더링될 때까지 폴링 — 로그인 직후 retrieveMain DOM 이 갱신 중이면
-    # 단발 querySelector 로 못 찾는다(최대 ~6초 대기). src 패턴 + alt 텍스트 fallback.
+    # 버튼이 렌더링될 때까지 폴링 — retrieveMain 메인프레임 콘텐츠는 로드 후
+    # 비동기로 채워지고, 병렬에서 가려진 창은 렌더·타이머가 throttle 되어
+    # 단발/단기 querySelector 로는 못 잡는다(라이브 점검 시 버튼은 분명 존재).
+    # 최대 ~25초로 늘리고, 주기적으로 탭을 전면화해 렌더를 촉진한다.
     clicked = False
-    for _ in range(12):
-        clicked = await page.evaluate("""() => {
-            const img = document.querySelector('img[src*="we_btn_suim"]')
-                     || document.querySelector('img[alt*="수임사업장선택"]');
-            if (img) { img.click(); return true; }
-            return false;
-        }""")
+    for i in range(50):
+        # evaluate 가 페이지 네비게이션과 겹치면 'Execution context was destroyed'
+        # 예외가 난다(로그인 직후 retrieveMain 리다이렉트 중 발생). 폴링 전체가
+        # 죽지 않게 예외를 삼키고 다음 반복에서 재시도한다.
+        try:
+            clicked = await page.evaluate("""() => {
+                const img = document.querySelector('img[src*="we_btn_suim"]')
+                         || document.querySelector('img[alt*="수임사업장선택"]');
+                if (img) { img.click(); return true; }
+                return false;
+            }""")
+        except Exception:
+            clicked = False
         if clicked:
             break
+        if i % 10 == 9:
+            try:
+                await page.bring_to_front()
+            except Exception:
+                pass
         await asyncio.sleep(0.5)
     if not clicked:
         try:

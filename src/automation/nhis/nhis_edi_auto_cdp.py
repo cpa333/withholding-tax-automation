@@ -29,7 +29,7 @@ from src.utils.chrome_cdp import launch_chrome, connect_page as cdp_connect
 from src.automation.nhis._common_edi import (
     log, NHIS_EDI_URL, NHIS_EDI_MAIN,
     connect_page, wait_for_login, close_popups,
-    open_firm_selector, list_all_firms, select_firm,
+    open_firm_selector, wait_firm_selector_ready, list_all_firms, select_firm,
     select_firm_by_index, close_firm_popup,
     run_single_firm_workflow,
 )
@@ -349,6 +349,23 @@ async def main(args=None):
         if not await wait_for_login(page):
             log("로그인 실패")
             return
+
+        # 로그인이 새 탭에서 완료됐을 수 있어 메인(retrieveMain) 탭으로 재해석
+        # + 잔여 팝업/공지 정리. 이후 워크플로우가 올바른 페이지에서 동작.
+        page = await close_popups(context)
+        try:
+            await page.bring_to_front()
+        except Exception:
+            pass
+
+        # 로그인 직후 retrieveMain 리다이렉트/렌더가 끝나 수임사업장선택 버튼이
+        # 뜰 때까지 한 번 안정화. (안 하면 첫 1~2 수임처가 'context destroyed'/
+        # 버튼 미발견으로 실패하고 안정된 뒤 건만 성공.)
+        log("  메인 페이지 준비 대기...")
+        if await wait_firm_selector_ready(page, context):
+            log("  메인 페이지 준비 완료")
+        else:
+            log("  WARN: 수임사업장선택 버튼 대기 시간 초과 — 계속 진행")
 
         log("로그인 확인됨. 자동화 시작.\n")
 

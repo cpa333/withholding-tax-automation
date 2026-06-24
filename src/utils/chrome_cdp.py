@@ -230,6 +230,12 @@ def _attempt_launch(chrome_path, junc, profile, url, *, port=CDP_PORT, kill_wait
             f"--user-data-dir={junc}",
             f"--profile-directory={profile}",
             "--start-maximized",
+            # 병렬(창 2개)에서 뒤에 가려지는 창은 Chrome이 렌더·타이머를
+            # throttle 해 Nexacro 화면 구성이 지연된다(탭 전환·로그인 감지 실패
+            # 원인). 가려진/백그라운드 창도 전경처럼 풀스피드로 유지.
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--disable-background-timer-throttling",
             url,
         ],
         stdout=subprocess.DEVNULL,

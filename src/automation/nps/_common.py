@@ -25,6 +25,7 @@ from src.utils.log import log
 from src.utils.human import human_delay
 from src.utils.nexacro import (
     nexacro_dblclick_cell_viewport,
+    nexacro_dblclick,
     nexacro_click_button_viewport,
     nexacro_wait_and_click,
     nexacro_find_row,
@@ -234,10 +235,35 @@ async def open_decision_detail(page, year=None, month=None):
     else:
         log(f"  {month_prefix} 결정내역 발견 (row {row})")
 
-    log(f"  결정내역 row {row} 더블클릭...")
-    result = await nexacro_dblclick_cell(page, GRID_DECISION_LIST, row=row, col=1)
-    await human_delay(3)
-    return result
+    # 2차 상세 진입 — 좌표 기반 page.mouse.dblclick 은 Nexacro CSS transform 으로
+    # 좌표가 어긋나 행을 못 눌러 상세가 안 열린다(병렬에서 'tab 0 버튼 미렌더'의
+    # 진짜 원인 — 라이브 검증됨). 좌표 무관한 합성 dispatchEvent 더블클릭을 쓰고,
+    # 상세 탭바(최종결정내역 tab0 버튼) 출현으로 성공을 검증·재시도한다.
+    cell_id = f"{GRID_DECISION_LIST}.body.gridrow_{row}.cell_{row}_1"
+    tab0_id = f"{TAB_BTN_PREFIX}{TAB_FINAL}"
+    for attempt in range(3):
+        log(f"  결정내역 row {row} 더블클릭... (시도 {attempt + 1}/3)")
+        try:
+            await nexacro_dblclick(page, cell_id)
+        except Exception:
+            pass
+        # 상세 탭바 출현 폴링 (최대 ~8초)
+        for _ in range(16):
+            await asyncio.sleep(0.5)
+            rendered = await page.evaluate(
+                '(id) => { const e = document.getElementById(id); if (!e) return false; '
+                'const r = e.getBoundingClientRect(); return r.width > 0; }',
+                tab0_id,
+            )
+            if rendered:
+                log("  2차 상세 진입 확인 (탭바 출현)")
+                await human_delay(1)
+                return {"ok": True}
+        log(f"  2차 상세 미오픈 — 재시도 ({attempt + 1}/3)")
+        await human_delay(1)
+
+    log("  ERROR: 2차 상세가 열리지 않음 (탭바 미출현)")
+    return None
 
 
 async def _find_row_with_round(page, grid_id, month_prefix, round_text):

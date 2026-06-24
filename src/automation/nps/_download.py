@@ -45,6 +45,30 @@ async def _is_tab_active(page, tab_index):
     )
 
 
+async def _wait_tab_present(page, tab_id, timeout_s=12):
+    """탭 버튼 DOM이 나타날 때까지 폴링. 보이는 크기(w>0)까지 확인.
+
+    2차 상세 진입 직후 Nexacro 탭바 렌더가 끝나기 전(특히 병렬·빈 프로필·
+    백그라운드 창에서 느림)에 클릭하면 getElementById 가 null 이라 모든
+    클릭 전략이 무동작 → 'aria-selected 미전환' 으로 실패한다. 클릭 전에
+    탭 요소가 실제로 렌더될 때까지 기다려 타이밍 의존을 제거한다.
+    """
+    for _ in range(timeout_s * 2):
+        try:
+            ready = await page.evaluate(
+                '(id) => { const e = document.getElementById(id); '
+                'if (!e) return false; '
+                'const r = e.getBoundingClientRect(); return r.width > 0; }',
+                tab_id,
+            )
+            if ready:
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+    return False
+
+
 async def click_detail_tab(page, tab_index):
     """결정내역 상세의 탭 전환 — 합성 이벤트 + aria-selected 검증.
 
@@ -53,51 +77,71 @@ async def click_detail_tab(page, tab_index):
     누르지 못함 — 줄곧 최종결정내역 탭에 머무는 원인). 합성 dispatchEvent
     로 클릭하고 aria-selected 로 실제 전환을 반드시 검증한다. 실패 시
     mouse.click / DOM .click() 을 순차 폴백.
+
+    클릭 전 탭바 렌더 완료를 기다리고(병렬 throttling 대응), 3전략을 여러
+    라운드 재시도해 타이밍 흔들림에 둔감하게 만든다.
     """
     tab_id = f"{TAB_BTN_PREFIX}{tab_index}"
 
-    # 전략 1: 합성 dispatchEvent (Nexacro 탭 전환에 유효)
-    try:
-        await nexacro_click(page, tab_id)
-    except Exception:
-        pass
-    await asyncio.sleep(1.0)
+    # 탭바 렌더 대기 — 없으면 모든 전략이 무동작이라 의미 없음.
+    if not await _wait_tab_present(page, tab_id, timeout_s=12):
+        log(f"  tab {tab_index} 버튼 미렌더 (2차 상세 로딩 지연) — 전환 실패")
+        return False
+
+    # 이미 활성이면 바로 성공 (기본 활성 탭일 수 있음).
     if await _is_tab_active(page, tab_index):
-        log(f"  tab {tab_index} switched (synthetic)")
+        log(f"  tab {tab_index} already active")
         await human_delay(1)
         return True
 
-    # 전략 2: page.mouse.click (좌표 기반 폴백)
-    try:
-        rect = await page.evaluate(
-            '(id) => { const e = document.getElementById(id); if (!e) return null; '
-            'const r = e.getBoundingClientRect(); '
-            'return {x: r.x, y: r.y, w: r.width, h: r.height}; }',
-            tab_id,
-        )
-        if rect and rect.get("w", 0) > 0:
-            await page.mouse.click(rect["x"] + rect["w"] / 2, rect["y"] + rect["h"] / 2)
-            await asyncio.sleep(1.0)
-            if await _is_tab_active(page, tab_index):
-                log(f"  tab {tab_index} switched (mouse.click)")
-                await human_delay(1)
-                return True
-    except Exception:
-        pass
-
-    # 전략 3: DOM element.click()
-    try:
-        await page.evaluate(
-            '(id) => { const e = document.getElementById(id); if (e) e.click(); }',
-            tab_id,
-        )
+    # 3전략 × 다중 라운드 — 렌더가 막 끝나 핸들러 바인딩이 늦는 경우 대비.
+    for attempt in range(3):
+        # 전략 1: 합성 dispatchEvent (Nexacro 탭 전환에 유효)
+        try:
+            await nexacro_click(page, tab_id)
+        except Exception:
+            pass
         await asyncio.sleep(1.0)
         if await _is_tab_active(page, tab_index):
-            log(f"  tab {tab_index} switched (dom click)")
+            log(f"  tab {tab_index} switched (synthetic)")
             await human_delay(1)
             return True
-    except Exception:
-        pass
+
+        # 전략 2: page.mouse.click (좌표 기반 폴백)
+        try:
+            rect = await page.evaluate(
+                '(id) => { const e = document.getElementById(id); if (!e) return null; '
+                'const r = e.getBoundingClientRect(); '
+                'return {x: r.x, y: r.y, w: r.width, h: r.height}; }',
+                tab_id,
+            )
+            if rect and rect.get("w", 0) > 0:
+                await page.mouse.click(rect["x"] + rect["w"] / 2, rect["y"] + rect["h"] / 2)
+                await asyncio.sleep(1.0)
+                if await _is_tab_active(page, tab_index):
+                    log(f"  tab {tab_index} switched (mouse.click)")
+                    await human_delay(1)
+                    return True
+        except Exception:
+            pass
+
+        # 전략 3: DOM element.click()
+        try:
+            await page.evaluate(
+                '(id) => { const e = document.getElementById(id); if (e) e.click(); }',
+                tab_id,
+            )
+            await asyncio.sleep(1.0)
+            if await _is_tab_active(page, tab_index):
+                log(f"  tab {tab_index} switched (dom click)")
+                await human_delay(1)
+                return True
+        except Exception:
+            pass
+
+        if attempt < 2:
+            log(f"  tab {tab_index} 전환 재시도... ({attempt + 1}/3)")
+            await human_delay(1)
 
     log(f"  tab {tab_index} switch FAILED (aria-selected 미전환)")
     return False

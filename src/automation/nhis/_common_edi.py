@@ -55,6 +55,7 @@ from src.utils.polling import wait_for_element, wait_for_new_tab
 # ─── 수임사업장 선택 재export ────────────────────────────────────────────────
 from src.automation.nhis._firm_selector import (
     open_firm_selector,
+    wait_firm_selector_ready,
     _parse_current_page_firms,
     list_all_firms,
     search_firm,
@@ -102,14 +103,32 @@ async def connect_page(playwright, *, url: str = CDP_URL):
     return browser, context, page
 
 
+def _logged_in_page(context):
+    """context 의 어느 탭이든 메인(retrieveMain/homeapp)에 도달했으면 그 page 반환.
+
+    NHIS EDI 는 인증서 로그인 후 메인을 새 탭/창으로 띄우거나 보안 안내
+    페이지를 거치는 경우가 있어, 처음 잡아둔 단일 탭의 url 만 보면 영원히
+    감지 못 해 '로그인 상태로 멈춤' 이 된다. 전체 탭을 훑어 감지한다.
+    """
+    for pg in context.pages:
+        try:
+            if "retrieveMain" in pg.url or "homeapp" in pg.url:
+                return pg
+        except Exception:
+            continue
+    return None
+
+
 async def wait_for_login(page):
     """NHIS EDI 로그인 완료 대기 (수동 로그인)
 
     공동인증서 로그인은 사용자가 직접 수행.
-    메인 페이지로 리디렉트되면 로그인 완료로 판단.
+    메인 페이지로 리디렉트되면 로그인 완료로 판단(전체 탭 스캔).
     """
-    # 이미 메인 페이지면 로그인된 상태
-    if "retrieveMain" in page.url or "homeapp" in page.url:
+    context = page.context
+
+    # 이미 메인 페이지면 로그인된 상태 (어느 탭이든)
+    if _logged_in_page(context):
         log("이미 로그인되어 있습니다.")
         return True
 
@@ -119,7 +138,7 @@ async def wait_for_login(page):
     for i in range(LOGIN_TIMEOUT_S // 5):
         await asyncio.sleep(5)
         try:
-            if "retrieveMain" in page.url or "homeapp" in page.url:
+            if _logged_in_page(context):
                 log("로그인 확인됨.")
                 return True
         except Exception:
