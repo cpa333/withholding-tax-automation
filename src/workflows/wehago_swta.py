@@ -19,7 +19,6 @@ from src.batch.state import StateManager
     portal="wehago",
     display_name="WEHAGO 원천이행상황신고서",
     enabled=True,
-    ui_locked=True,
 )
 class WehagoSwtaWorkflow(BaseWorkflow):
     steps = [

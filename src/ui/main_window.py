@@ -241,13 +241,6 @@ class MainWindow(QMainWindow):
         register_parallel_phase(2, "공단 EDI 병렬 자동화")
         phases = get_all_phases()
 
-        # UI 잠금: registry 의 ui_locked 플래그(phase 4~8)가 True면 버튼 비활성.
-        # 기능(워크플로우/레지스트리)은 건드리지 않고 사이드바 버튼만 비활성화.
-        # (PhaseButton.enabled=False → 회색 표시 + 클릭 시그널 미연결)
-        for phase in phases:
-            if phase.get("ui_locked"):
-                phase["enabled"] = False
-
         self.sidebar.set_phases(phases)
 
     # ── Slot ──

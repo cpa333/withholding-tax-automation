@@ -57,9 +57,8 @@ def test_real_eight_phases_registered_in_order():
     # capability 메타데이터 검증 — phase 2(병렬)은 테스트 미등록
     assert get_phase_info(1)["is_list_phase"] is True
     assert get_phase_info(3)["is_list_phase"] is False
-    for pid in (5, 6, 7, 8, 9):
-        assert get_phase_info(pid)["ui_locked"] is True, f"phase {pid} 잠금 기대"
-    for pid in (1, 3, 4):
+    # 병렬 EDI 안정화 후 모든 phase 재활성화 — ui_locked=False
+    for pid in (1, 3, 4, 5, 6, 7, 8, 9):
         assert get_phase_info(pid)["ui_locked"] is False, f"phase {pid} 활성 기대"
     assert get_phase_info(8)["needs_password"] is True
     assert get_phase_info(9)["needs_password"] is True

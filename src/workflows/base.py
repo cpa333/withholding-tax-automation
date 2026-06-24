@@ -21,7 +21,7 @@ class BaseWorkflow(ABC):
         steps: 단계 정의 [{"name": "...", "index": 0}, ...]
         needs_password: UI 비밀번호 필드 필요 여부 (Phase 7, 8)
         is_list_phase: 수임처 리스트 모드 Phase (Phase 1)
-        ui_locked: UI 버튼 잠금 여부 (현재 Phase 4~8 임시 비활성)
+        ui_locked: UI 버튼 잠금 여부 (필요 시 registry/main_window 에서 사이드바 버튼 비활성용 메타데이터; 현재는 모든 phase 활성)
     """
 
     phase_id: int = 0
