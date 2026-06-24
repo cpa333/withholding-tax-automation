@@ -285,38 +285,53 @@ async def search_firm(popup, keyword, search_type="name"):
 async def select_firm(popup, firm_name, management_number=""):
     """사업장 선택 팝업에서 특정 사업장 선택
 
-    management_number가 제공되면 사업장관리번호로 검색.
-    그렇지 않으면 사업장명으로 기존 목록에서 찾은 후 검색.
+    management_number가 제공되면 사업장관리번호로 검색한 뒤, 현재 표에 있는
+    행 중 '관리번호가 정확히 일치하는 행'을 클릭한다. management_number가
+    없거나 일치 행이 없으면 이름으로 fallback.
+
+    중요: 관리번호 검색 후 표의 '첫 번째' 행을 무조건 클릭하지 않는다.
+    병렬(백그라운드) 창에서는 검색 필터가 실제로 좁혀지지 않는 경우가 있어,
+    그럴 때 첫 행을 클릭하면 의도치 않게 항상 같은 수임처(예: 서율회계법인)가
+    잘못 선택된다. 일치하는 행만 골라 클릭함으로써 이를 막는다.
     """
     log(f"  select_firm: name='{firm_name}' mgmt_no='{management_number}'")
+
+    # ── 관리번호 우선 경로 ──────────────────────────────────────────────
     if management_number:
         log(f"  사업장 검색: 관리번호 '{management_number}'")
-        results = await search_firm(popup, management_number, search_type="number")
-        if not results:
-            log(f"  관리번호 '{management_number}' 사업장을 찾지 못했습니다.")
-            return False
-        found = await popup.evaluate("""() => {
-            const links = document.querySelectorAll('table.list a');
-            for (const a of links) {
-                const onclick = a.getAttribute('onclick') || '';
-                if (onclick.includes('fn_firmChang')) {
-                    a.click();
-                    return a.textContent.trim();
+        await search_firm(popup, management_number, search_type="number")
+        # 검색 결과(현재 표)에서 관리번호가 정확히 일치하는 행만 클릭.
+        # search_firm 이 필터를 좁히지 못해 표가 전체 목록이더라도, 일치 행만
+        # 골라 클릭하므로 잘못된 첫 행이 선택되지 않는다. 하이픈/공백은 무시하고
+        # 숫자만 비교(DB override 와 표 셀 포맷 차이 흡수).
+        match = await popup.evaluate(r"""(mgmt) => {
+            const want = (mgmt || '').replace(/\D/g, '');
+            const rows = document.querySelectorAll('table.list tbody tr');
+            const seen = [];
+            for (const tr of rows) {
+                const tds = tr.querySelectorAll('td');
+                if (tds.length < 5) continue;
+                const rowMgmt = (tds[3].textContent || '').replace(/\D/g, '');
+                const rowName = (tds[2].textContent || '').trim();
+                seen.push(rowName + '(' + rowMgmt + ')');
+                if (want && rowMgmt === want) {
+                    const link = Array.from(tr.querySelectorAll('a'))
+                        .find(a => (a.getAttribute('onclick') || '').includes('fn_firmChang'))
+                        || tds[2].querySelector('a');
+                    if (link) { link.click(); return { ok: true, name: rowName }; }
                 }
             }
-            return null;
-        }""")
-        if found:
-            log(f"  '{found}' 선택 완료")
+            return { ok: false, seen: seen };
+        }""", management_number)
+        if match and match.get("ok"):
+            log(f"  '{match['name']}' 선택 완료 (관리번호 {management_number} 일치)")
             return True
-        log(f"  검색 결과에서 사업장을 찾지 못했습니다.")
-        return False
+        log(f"  관리번호 '{management_number}' 일치 행 없음. "
+            f"현재 표: {match.get('seen') if match else '?'} — 이름으로 재시도")
 
+    # ── 이름 fallback (관리번호 미제공 또는 매칭 실패) ──────────────────
     log(f"  사업장 검색: '{firm_name}'")
-
-    await popup.evaluate('() => { fn_next("1"); }')
-    await human_delay(2)
-
+    await search_firm(popup, firm_name, search_type="name")
     found = await popup.evaluate("""(name) => {
         const links = document.querySelectorAll('table.list a');
         for (const a of links) {
@@ -327,31 +342,8 @@ async def select_firm(popup, firm_name, management_number=""):
         }
         return null;
     }""", firm_name)
-
     if found:
-        log(f"  '{found}' 선택 완료")
-        return True
-
-    log(f"  현재 페이지에 없음 — 검색으로 찾는 중...")
-    results = await search_firm(popup, firm_name, search_type="name")
-
-    if not results:
-        log(f"  '{firm_name}' 사업장을 찾지 못했습니다.")
-        return False
-
-    found = await popup.evaluate("""(name) => {
-        const links = document.querySelectorAll('table.list a');
-        for (const a of links) {
-            if (a.textContent.trim().includes(name)) {
-                a.click();
-                return a.textContent.trim();
-            }
-        }
-        return null;
-    }""", firm_name)
-
-    if found:
-        log(f"  '{found}' 선택 완료")
+        log(f"  '{found}' 선택 완료 (이름)")
         return True
 
     log(f"  '{firm_name}' 사업장을 찾지 못했습니다.")

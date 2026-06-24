@@ -44,6 +44,26 @@ from src.automation.nps._common import (
 )
 
 
+_TRACE_PATH = os.path.join("debug", "nps_parallel_trace.log")
+
+
+def _trace(msg: str):
+    """병렬 NPS 사업장 선택 진단용 파일 로그 (debug/nps_parallel_trace.log).
+
+    NHIS 의 _trace 와 대칭. select_workplace 가 '어떤 행을 클릭했는지'(관리번호
+    정확일치 행 / 이름 fallback / 발견 row)는 내부 log() 로 GUI 패널에 나간다.
+    여기서는 수임처별 시도(target/mgmt)와 성공 여부를 한 줄로 남겨 스킵·중복 선택을
+    한눈에 볼 수 있게 한다. (NHIS 실증 교훈: Nexacro 페이지 읽기 검증은 신뢰할 수
+    없어 클릭 결정 자체만 기록한다.)
+    """
+    try:
+        os.makedirs("debug", exist_ok=True)
+        with open(_TRACE_PATH, "a", encoding="utf-8") as f:
+            f.write(msg + "\n")
+    except Exception:
+        pass
+
+
 def print_header():
     print("\n" + "=" * 55)
     print("  국민연금 EDI 자동화")
@@ -138,6 +158,8 @@ async def run_auto_batch(page, context, *, firms, year, month, mgmts=None):
                 continue
             await human_delay(2)
             ok = await select_workplace(page, wp_name, management_number=mgmt)
+            _trace(f"[{i}/{len(targets)}] target='{wp_name}' mgmt='{mgmt}' "
+                   f"-> select_ok={bool(ok)}")
             if not ok:
                 log(f"  스킵: '{wp_name}' 사업장 미발견")
                 continue

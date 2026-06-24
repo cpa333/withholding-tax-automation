@@ -33,6 +33,7 @@ from src.automation.nhis._common_edi import (
     select_firm_by_index, close_firm_popup,
     run_single_firm_workflow,
 )
+from src.utils.human import human_delay
 
 
 def print_header():
@@ -243,11 +244,59 @@ async def run_full_auto(page, context):
             traceback.print_exc()
 
 
+_TRACE_PATH = os.path.join("debug", "nhis_parallel_trace.log")
+
+
+def _trace(msg: str):
+    """병렬 NHIS 수임처 선택/전환 진단용 파일 로그 (debug/nhis_parallel_trace.log).
+
+    select_firm 은 '어떤 행을 클릭했는지'만 알 뿐, 그 클릭이 실제로 사업장 전환을
+    일으켰는지는 모른다. 9224 백그라운드 Chrome 에서 fn_firmChang click 가 no-op
+    이면 페이지가 기본 사업장에 머물러(서율회계법인 반복) select_firm 은 '성공'으로
+    돌아온다. 전환 검증 결과를 파일로 남겨 원인을 확정한다.
+    """
+    try:
+        os.makedirs("debug", exist_ok=True)
+        with open(_TRACE_PATH, "a", encoding="utf-8") as f:
+            f.write(msg + "\n")
+    except Exception:
+        pass
+
+
+def _name_match(a: str, b: str) -> bool:
+    """수임처명 비교 — 괄호/공백/(주)/주식회사 표기 차이 흡수한 포함비교."""
+    import re
+
+    def norm(s):
+        s = (s or "").replace("(주)", "").replace("주식회사", "")
+        return re.sub(r"\s+", "", re.sub(r"[()\[\]]", "", s))
+
+    na, nb = norm(a), norm(b)
+    return na == nb or nb in na or na in nb
+
+
+async def _current_firm_name(page):
+    """메인 페이지에 현재 표시된 수임 사업자명 반환 (사업장 전환 검증용)."""
+    try:
+        return await page.evaluate(r"""() => {
+            var t = document.body.innerText || "";
+            var m = t.match(/수임\s*사업자명\s*:?\s*([^\n]+)/);
+            return m ? m[1].trim() : null;
+        }""")
+    except Exception:
+        return None
+
+
 async def run_auto_batch(page, context, *, firms, mgmts=None):
     """비대화형 일괄 실행 (--auto 모드). firms=None → 전체.
 
     run_full_auto 의 input 루프를 비대화형으로 재작성. 사업장 선택/실행은
     기존 함수(open_firm_selector/select_firm/close_firm_popup/run_single_firm_workflow) 재사용.
+
+    매 수임처마다 phase 3 의 NhisEdiWorkflow.run_single 과 동일하게 close_popups 로
+    메인(retrieveMain) 페이지를 재확보한다. 이전 수임처 워크플로우가 탭/네비게이션을
+    바꿔 page 가 stale 되면 select_firm 의 사업장 전환이 메인에 반영되지 않아 기본
+    로그인 사업장(서율회계법인 등) 자료만 반복해서 나오게 된다.
 
     mgmts: firms 와 같은 순서의 사업장관리번호. 제공되면 관리번호 검색으로 선택
     (원래 동작). 비었거나 없으면 이름 fallback.
@@ -285,7 +334,14 @@ async def run_auto_batch(page, context, *, firms, mgmts=None):
         log(f"\n{'='*55}")
         log(f"  [{i}/{len(targets)}] {firm_name}" + (f" (관리번호 {mgmt})" if mgmt else ""))
         try:
-            popup = await open_firm_selector(page, context)
+            # 매 수임처마다 메인 페이지 재확보 (phase 3 run_single 과 동일) —
+            # page 가 stale 되어 사업장 전환이 메인에 반영되지 않는 것을 방지.
+            main_page = await close_popups(context)
+            if not main_page:
+                main_page = page
+            await human_delay(3)
+
+            popup = await open_firm_selector(main_page, context)
             if not popup:
                 log(f"  ERROR: 팝업 오픈 실패 - {firm_name} 스킵")
                 continue
@@ -295,7 +351,22 @@ async def run_auto_batch(page, context, *, firms, mgmts=None):
             if not ok:
                 log(f"  스킵: '{firm_name}' 사업장 미발견")
                 continue
-            ok = await run_single_firm_workflow(page, context, firm_name)
+
+            # 사업장 전환 검증 — select_firm 이 클릭했더라도 9224 백그라운드 Chrome
+            # 에서 click 이 실제 전환을 일으키지 않으면 페이지가 기본 사업장에 머문다.
+            # 이 경우 run_single_firm_workflow 가 의도한 수임처가 아닌 자료를 가져온다.
+            cur = await _current_firm_name(main_page)
+            matched = bool(cur and _name_match(cur, firm_name))
+            log(f"  전환 검증: 페이지='{cur}' / 기대='{firm_name}' "
+                f"{'OK' if matched else 'MISMATCH'}")
+            _trace(f"[{i}/{len(targets)}] target='{firm_name}' mgmt='{mgmt}' "
+                   f"-> page='{cur}' {'OK' if matched else 'MISMATCH'}")
+            if not matched:
+                log(f"  WARN: '{firm_name}' 전환 미반영 — 페이지='{cur}'. "
+                    f"워크플로우 진행하지만 자료가 다를 수 있음.")
+
+            await human_delay(3)
+            ok = await run_single_firm_workflow(main_page, context, firm_name)
             if ok:
                 completed += 1
                 log(f"  {firm_name} 처리 완료. ({completed}개 완료)")

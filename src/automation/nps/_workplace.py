@@ -6,6 +6,7 @@
 import sys
 import os
 import asyncio
+import re
 import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
@@ -164,20 +165,56 @@ async def open_workplace_selector(page):
     await human_delay(2)
 
 
+async def _find_workplace_row_by_mgmt(page, management_number):
+    """현재 사업장 그리드에서 사업장관리번호가 정확히 일치하는 행을 찾는다.
+
+    NHIS select_firm 의 정확일치 로직과 대칭. 관리번호 검색이 모달 필터를
+    좁히지 못해(백그라운드 Chrome / biz+"0" 불일치 등) 표가 전체 목록이더라도,
+    일치 행만 골라 클릭하므로 blind row=0 으로 잘못된(첫) 사업장이 선택되지 않는다.
+
+    Returns:
+        (row_index, workplace_name) or None
+    """
+    want = re.sub(r"\D", "", management_number or "")
+    if not want:
+        return None
+    data = await nexacro_get_grid_data(page, GRID_WORKPLACE)
+    for i, row in enumerate(data):
+        # col=1 = 사업장관리번호, col=2 = 사업장명 (list_workplaces 가 입증).
+        row_mgmt = re.sub(r"\D", "", row[1]) if len(row) > 1 else ""
+        if row_mgmt and row_mgmt == want:
+            name = row[2] if len(row) > 2 else ""
+            return (i, name)
+    return None
+
+
 async def select_workplace(page, workplace_name, management_number=""):
-    """사업장 선택 모달에서 특정 사업장을 더블클릭으로 선택"""
+    """사업장 선택 모달에서 특정 사업장을 더블클릭으로 선택.
+
+    management_number 가 제공되면 사업장관리번호가 정확히 일치(숫자 정규화)하는
+    행만 더블클릭 — blind row=0 클릭 금지(잘못된 첫 사업장 반복 선택 방지).
+    일치 행이 없거나 management_number 가 없으면 이름(workplace_name)으로 fallback.
+    양쪽 성공 경로 모두 _wait_workplace_closed 로 모달 닫힘 + Nexacro 안정화 대기
+    (select_workplace_by_index 와 평행).
+    """
     if management_number:
         log(f"  사업장 검색: 관리번호 '{management_number}'")
         await _search_workplace_in_modal(page, management_number, search_by_mgmt_no=True)
         await human_delay(2)
-        result = await nexacro_dblclick_cell(page, GRID_WORKPLACE, row=0, col=2)
-        if result.get("ok"):
-            log(f"  사업장 선택 완료: {result.get('text', '')}")
-            await human_delay(3)
-            return True
-        log(f"  사업장 선택 실패: {result}")
-        return False
+        found = await _find_workplace_row_by_mgmt(page, management_number)
+        if found is not None:
+            row, name = found
+            log(f"  관리번호 '{management_number}' 일치 행 (row={row}, '{name}'). 더블클릭 선택 중...")
+            result = await nexacro_dblclick_cell(page, GRID_WORKPLACE, row=row, col=2)
+            if result.get("ok"):
+                log(f"  사업장 선택 완료: {result.get('text', '') or name}")
+                await _wait_workplace_closed(page)
+                return True
+            log(f"  사업장 선택 실패: {result}")
+            return False
+        log(f"  관리번호 '{management_number}' 일치 행 없음 — 이름으로 재시도")
 
+    # 이름 fallback (management_number 미제공 또는 관리번호 매칭 실패)
     log(f"  사업장 검색: '{workplace_name}'")
 
     row = await nexacro_find_row(page, GRID_WORKPLACE, col=2, text=workplace_name)
@@ -197,7 +234,7 @@ async def select_workplace(page, workplace_name, management_number=""):
 
     if result.get("ok"):
         log(f"  사업장 선택 완료: {result.get('text', '')}")
-        await human_delay(3)
+        await _wait_workplace_closed(page)
         return True
 
     log(f"  사업장 선택 실패: {result}")
