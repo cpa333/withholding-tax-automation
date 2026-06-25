@@ -314,6 +314,50 @@ NPS 와 동일하게 미러링해 5곳 보수:
 
 ---
 
+## 12. NHIS 단독 모듈 — not-found 다음 수임처 스킵(N+1 lag) 수정 (라이브 검증 완료, 2026-06-25)
+
+건강보험 **단독(개별) 모듈** 실행 시, 못 찾는 수임처(예: 근린건축) **바로 다음** 회사의
+데이터를 받지 않고 **다다음** 회사는 정상 다운로드하던 "1-펌 래그" state-bleed 버그 수정.
+
+### 12.1 근원 원인
+`src/workflows/nhis_edi.py::NhisEdiWorkflow.run_single` 가 `select_firm` 실패(not-found) 시
+`nhis_edi.py:57-60`에서 조기 `return False` → `run_single_firm_workflow` 를 건너뜀. 그 함수
+끝의 `we_btn_relogin` 클릭(`_doc_download.py:468-471`)이 **retrieveMain 페이지를 리셋하는
+유일한 지점**이라, not-found 시 리셋이 안 일어나 페이지가 stale → 다음 수임처(N+1)의
+`select_firm` 클릭이 전환을 일으키지 못해 잘못된/없는 자료로 진행. N+1 의 run_single_firm_workflow
+가 끝에 relogin 을 눌러 페이지를 리프레시 → N+2 정상(자가치유 = "1-펌 래그"의 정체).
+(`open_firm_selector` 의 relogin 리셋은 `has_firm` 게이트 탓에 not-found 직후엔 동작 안 함.)
+**2차 버그**: `run_single` 이 `run_single_firm_workflow` 의 False 결과를 무시하고 `True` 반환 →
+다운로드 실패가 "완료"로 위장(masking) → N+1 이 스킵으로 인지됨.
+
+### 12.2 수정 — 매 run_single 시작 시 페이지 리셋 (Part 1) ★
+`reset_main_page(page)` 헬퍼(`_doc_download.py`) — `page.goto(NHIS_EDI_MAIN)` +
+`wait_for_nexacro_ready`. NPS `reset_workplace_page` 와 동일 패턴(세션 유지, 재로그인 불필요).
+`run_single` 이 `close_popups` 직후·`open_firm_selector` 직전에 매번 호출 → 이전 수임처
+(성공/not-found/예외 무관)가 남긴 stale 상태를 지우고 **항상 로그인 사업장에서 시작**.
+state-bleed 클래스 전체를 근본 차단(not-found 경로만 고치면 다른 조기 exit 에 재발).
+`_common_edi.py` 에서 재수출.
+
+### 12.3 다운로드 실패 masking 해소 (Part 3)
+`run_single` 이 `run_single_firm_workflow` 결과를 검사해 False 면 `state.fail_step` +
+`return False`(`workflow_ok` 플래그). cleanup(`_close_edi_tabs`)은 성공/실패 무관 항상 실행.
+→ not-found 다음 수임처가 잘못된/없는 자료로 끝나도 이제 "실패"로 정상 보고.
+
+### 12.4 전환 검증+retry (Part 2) — 후순위 미뤄둠
+`select_firm` 후 스위치 반영 검증(`current_firm_name`/`name_match`) + 불일치 시 리셋·재시도는
+주로 **병렬/백그라운드 Chrome 의 click-no-op** 방어용. 보고된 **단독(포어그라운드) 버그는
+패턴이 분명해 stale-page(Part 1) 가 원인** → Part 1+3 로 해결. 추후 무작위 실패 시 추가
+(헬퍼를 `_firm_selector.py` 로 이동해 공유).
+
+### 12.5 라이브 검증 결과 (2026-06-25)
+단독 NHIS 메뉴 선택건 `[오성아구뽈찜 → 근린건축(not-found) → 주식회사 더브라이트]` 실행:
+- 오성아구뽈찜 ✓ 다운로드(관리번호 14543005760 일치).
+- 근린건축 ✗ not-found(폴더 없음, 정상 실패).
+- **주식회사 더브라이트 ✓ 정상 다운로드(관리번호 69588014640·사업장명 일치)** ← 예전엔 스킵.
+→ N+1 lag 해소 + 데이터 정합성 확인. 회귀: 기존 `pytest` 71건 통과, 병렬 경로(`run_auto_batch`) 영향 없음.
+
+---
+
 ## 부록: 관련 파일 빠른 참조
 
 - **CDP 핵심**: `src/utils/chrome_cdp.py`(`CDP_PORT`:12, `kill_chrome`:143, `connect_page`:267, `launch_chrome`:198)
@@ -336,3 +380,7 @@ NPS 와 동일하게 미러링해 5곳 보수:
   - `src/automation/nhis/nhis_edi_auto_cdp.py` — `--year/--month` argparse·main·`run_auto_batch(*,firms,year,month,mgmts=None)`·`run_single_firm_workflow` 호출
   - `src/automation/nhis/_doc_download.py` — `_find_target_row` 숫자정규화 매칭, `_resolve_period` 헬퍼
   - 회귀: `tests/test_nhis_period_matching.py`
+- **§12 (NHIS 단독 not-found N+1 lag)**:
+  - `src/automation/nhis/_doc_download.py` — `reset_main_page(page)` 헬퍼(goto NHIS_EDI_MAIN + wait_for_nexacro_ready)
+  - `src/automation/nhis/_common_edi.py` — `reset_main_page` 재수출
+  - `src/workflows/nhis_edi.py` — `run_single` 시작 시 리셋(Part 1) + 다운로드 실패 시 `return False`(Part 3, workflow_ok)

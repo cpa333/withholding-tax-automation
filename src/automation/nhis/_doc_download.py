@@ -23,6 +23,7 @@ from src.utils.log import log
 from src.utils.save_path import make_save_dir
 from src.utils.human import human_delay
 from src.automation.nhis._constants import (
+    NHIS_EDI_MAIN,
     BTN_PRINT,
     GRID_BODY_ID,
     PRINT_CLICK_RETRIES,
@@ -30,6 +31,7 @@ from src.automation.nhis._constants import (
     PDF_DOWNLOAD_TIMEOUT_S,
     PAGE_STABLE_TIMEOUT_S,
 )
+from src.automation.nhis._nexacro import wait_for_nexacro_ready
 from src.automation.nhis._doc_access import (
     open_received_docs,
     select_doc_type,
@@ -412,6 +414,26 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
 # ═══════════════════════════════════════════════════════════════════════════════
 # 워크플로우 오케스트레이터
 # ═══════════════════════════════════════════════════════════════════════════════
+
+async def reset_main_page(page):
+    """retrieveMain 페이지를 재로드해 로그인 사업장(기본 사업장) 상태로 리셋.
+
+    not-found/예외 등으로 run_single_firm_workflow 의 we_btn_relogin 복귀가
+    생략된 뒤, 다음 수임처의 select_firm 클릭이 stale 페이지에서 no-op 가 되는
+    것(N+1 lag/state-bleed)을 막기 위해 매 run_single 시작에 호출한다.
+
+    page.goto(네비게이션)은 입력이벤트가 아니라 모달/alert/occlusion/선택된
+    수임처 상태 무관하게 동작하며 세션(공동인증서 쿠키)이 유지돼 재로그인이
+    불필요하다. NPS reset_workplace_page(page.goto(NPS_URL)+wait_for_nexacro_ready)
+    와 동일한 패턴.
+    """
+    try:
+        await page.goto(NHIS_EDI_MAIN, wait_until="domcontentloaded", timeout=60000)
+        log("  retrieveMain 리셋(재로드) — 로그인 사업장 복귀")
+    except Exception as e:
+        log(f"  WARN: retrieveMain 리셋(goto) 실패 - {e}")
+    await wait_for_nexacro_ready(page)
+
 
 async def run_single_firm_workflow(page, context, firm_name,
                                     year: int | None = None,

@@ -76,6 +76,7 @@ from src.automation.nhis._doc_access import (
 from src.automation.nhis._doc_download import (
     download_first_doc_pdf,
     run_single_firm_workflow,
+    reset_main_page,
     _close_edi_tabs,
 )
 
