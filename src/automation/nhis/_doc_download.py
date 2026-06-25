@@ -123,7 +123,12 @@ async def _click_print_button(edi_page, context, pages_before):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def _find_target_row(edi_page, target_yyyymm):
-    """그리드에서 YYYYMM 매칭 행 찾기 + 서식명 셀(col=3) 더블클릭"""
+    """그리드에서 YYYYMM 매칭 행 찾기 + 서식명 셀(col=3) 더블클릭
+
+    매칭은 행 전체 textContent 에서 숫자만 추출(구분자 - . 년 월 일 제거)한 뒤
+    6자리 target_yyyymm(예: 202605) 가 부분문자열로 들어있는지 본다. 포털 날짜가
+    2026-05-15 / 2026.05 / 2026년05월 등 어떤 형태여도 YYYYMM 으로 정규화 매칭.
+    """
     log(f"  문서 검색 (고지년월: {target_yyyymm})...")
     result = await edi_page.evaluate("""(args) => {
         var body = document.getElementById(args.gridBodyId);
@@ -135,13 +140,15 @@ async def _find_target_row(edi_page, target_yyyymm):
             var row = allRows[i];
             if (row.id.includes('gridrow_-1')) continue;
             if (row.id.includes('G')) continue;
-            if (row.textContent.includes(args.target)) {
+            var digits = (row.textContent || '').replace(/\\D+/g, '');
+            if (digits.indexOf(args.target) !== -1) {
                 var m = row.id.match(/gridrow_(\\d+)$/);
                 if (m) { matchedIdx = m[1]; break; }
             }
         }
         if (matchedIdx === null)
-            return {ok: false, msg: 'no matching row for ' + args.target};
+            return {ok: false, msg: 'no matching row for ' + args.target
+                    + ' (rows seen: ' + allRows.length + ')'};
 
         var cellId = args.gridBodyId
             + '_gridrow_' + matchedIdx + '_cell_' + matchedIdx + '_3';
@@ -296,6 +303,18 @@ async def _wait_and_rename_pdf(save_dir, before, year, month):
     return None
 
 
+def _resolve_period(year: int | None, month: int | None) -> tuple[int, int, str]:
+    """year/month 의 None 폴백(당월) + 정규화. (year, month, target_yyyymm) 반환.
+
+    target_yyyymm 은 6자리(예: 202605). None 이면 datetime.now() 의 년/월 사용.
+    받은문서 그리드 행의 숫자정규화 text 와 부분문자열 매칭(_find_target_row)의 기준.
+    """
+    now = datetime.now()
+    _y = year if year is not None else now.year
+    _m = month if month is not None else now.month
+    return _y, _m, f"{_y}{_m:02d}"
+
+
 async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
                                   year: int | None = None, month: int | None = None):
     """웹EDI 받은문서 목록에서 YYYYMM 매칭 행 더블클릭 → 인쇄 → PDF 다운로드
@@ -306,11 +325,8 @@ async def download_first_doc_pdf(edi_page, context, save_dir, firm_name,
     Nexacro 그리드 셀 ID 패턴: gridrow_{idx}_cell_{idx}_{col}
     중간 번호도 행 인덱스이므로 _cell_0_ 고정 금지.
     """
-    # YYYYMM 타겟 계산
-    now = datetime.now()
-    _y = year if year is not None else now.year
-    _m = month if month is not None else now.month
-    target_yyyymm = f"{_y}{_m:02d}"
+    # YYYYMM 타겟 계산 (None → 당월 폴백)
+    _y, _m, target_yyyymm = _resolve_period(year, month)
 
     # 그리드에서 YYYYMM 매칭 행 찾기 + 더블클릭
     result = await _find_target_row(edi_page, target_yyyymm)

@@ -277,6 +277,43 @@ GUI 다중 러너보다 **CLI 2-프로세스**가 훨씬 가벼움:
 
 ---
 
+## 11. NHIS 월 선택 무시("항상 당월") 수정 (라이브 검증 완료, 2026-06-25)
+
+다른 월 선택 시 NPS 는 해당 월을, NHIS 는 **항상 6월(당월)** 만 가져오던 버그.
+병렬(2번) 메뉴에서 발생. 원인 2종(코드 교차검증 + 라이브 검증 완료).
+
+### 11.1 병렬 NHIS year/month 풀러밍 5곳 누락 (확정)
+병렬 경로는 애초에 year/month 가 연결된 적이 없었다(NPS 는 전 단계 풀러밍).
+NPS 와 동일하게 미러링해 5곳 보수:
+- `src/ui/workers/parallel_cli_worker.py:58-59` — NHIS `_spawn` 에 `None,None` 대신
+  실제 `year, month` 전달.
+- `nhis_edi_auto_cdp.py` argparse — `--year`/`--month`(int) 추가.
+- `main()` --auto 분기 — `run_auto_batch(..., year=args.year, month=args.month, ...)`.
+- `run_auto_batch` 시그니처 — `*, firms, year, month, mgmts=None` (+로그).
+- run_auto_batch 내 `run_single_firm_workflow(..., year=year, month=month)`.
+- 단독 NHIS(`nhis_edi.py`)·`automation_runner`·`gui_main.py`(이미 --year/--month 파싱)는 변경 불필요.
+
+### 11.2 받은문서 월 매칭 정규화 (`_find_target_row`) ★
+`_doc_download.py::_find_target_row` 가 `row.textContent.includes("202605")` raw 매칭이라
+포털 날짜(`2026-05-15`/`2026.05`/`2026년05월`)와 안 맞아 조용히 실패. 숫자 정규화 매칭으로 교체:
+`(row.textContent||'').replace(/\D+/g,'').indexOf(target) !== -1` → 구분자 무관하게 YYYYMM 매칭.
+실패 메시지에 `rows seen: N` 추가. 당월 회귀 없음(기존 매칭의 상위집합).
+월 계산은 `_resolve_period(year, month) -> (y, m, yyyymm)` 헬퍼로 추출(None→당월 폴백)해 테스트 가능.
+
+### 11.3 Part 3(조회기간 선택) — 불필요 판정 (Case A)
+과거월 문서가 받은문서 그리드에 없을 가능성을 라이브 dump 로 확인하려 했으나, **5월 실행에서
+문서가 정상 매칭·다운로드됨** → 받은문서는 다월치를 표시하고 있었고 Part 2 정규화로 충분.
+조회기간 선택 코드는 추가하지 않음.
+
+### 11.4 라이브 검증 결과 (2026-05 병렬 실행)
+- 폴더명 `국민건강보험_202605` / `국민연금_202605` (year/month 가 save_dir 도달).
+- 파일명 `가입자고지내역서_건강_202605.pdf` / `결정내역통보서_202605.xlsx`.
+- NHIS PDF 내용 `통 보 년 월 2026년 05월` / NPS 엑셀 고지년월(A4) `2026-05` → 실제 5월 데이터.
+- 관리번호 전건 일치(엉뚱 회사 0건) → 10.1 수정과 함께 정합성 유지.
+- 회귀: `tests/test_nhis_period_matching.py`(`_resolve_period` YYYYMM 생성·폴백 + 숫자정규화 매칭 계약).
+
+---
+
 ## 부록: 관련 파일 빠른 참조
 
 - **CDP 핵심**: `src/utils/chrome_cdp.py`(`CDP_PORT`:12, `kill_chrome`:143, `connect_page`:267, `launch_chrome`:198)
@@ -294,3 +331,8 @@ GUI 다중 러너보다 **CLI 2-프로세스**가 훨씬 가벼움:
   - `src/ui/workers/parallel_cli_worker.py` — `ParallelCliRunner.stop`(`kill_chrome_by_port` 호출)
   - `src/utils/chrome_cdp.py` — `kill_chrome_by_port`(netstat → 포트 LISTEN PID → taskkill /T /F)
   - 회귀: `tests/test_company_table_get_all_clients.py`, `tests/test_company_table_set_running.py`
+- **§11 (NHIS 월 선택)**:
+  - `src/ui/workers/parallel_cli_worker.py` — NHIS `_spawn` 에 year/month 전달(58-59)
+  - `src/automation/nhis/nhis_edi_auto_cdp.py` — `--year/--month` argparse·main·`run_auto_batch(*,firms,year,month,mgmts=None)`·`run_single_firm_workflow` 호출
+  - `src/automation/nhis/_doc_download.py` — `_find_target_row` 숫자정규화 매칭, `_resolve_period` 헬퍼
+  - 회귀: `tests/test_nhis_period_matching.py`

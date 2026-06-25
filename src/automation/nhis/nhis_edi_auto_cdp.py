@@ -290,7 +290,7 @@ async def _current_firm_name(page):
 from src.automation._parallel_report import emit_summary as _emit_summary
 
 
-async def run_auto_batch(page, context, *, firms, mgmts=None):
+async def run_auto_batch(page, context, *, firms, year, month, mgmts=None):
     """비대화형 일괄 실행 (--auto 모드). firms=None → 전체.
 
     run_full_auto 의 input 루프를 비대화형으로 재작성. 사업장 선택/실행은
@@ -329,7 +329,7 @@ async def run_auto_batch(page, context, *, firms, mgmts=None):
     else:
         targets = list(firms)
 
-    log(f"비대화형 일괄 실행: {len(targets)}개 수임처")
+    log(f"비대화형 일괄 실행: {len(targets)}개 수임처 (year={year}, month={month})")
     completed = 0
     skipped = []  # {"name","reason"[,"detail"]} — 종료 후 종합 리포트용
     for i, firm_name in enumerate(targets, 1):
@@ -372,7 +372,8 @@ async def run_auto_batch(page, context, *, firms, mgmts=None):
                     f"워크플로우 진행하지만 자료가 다를 수 있음.")
 
             await human_delay(3)
-            ok = await run_single_firm_workflow(main_page, context, firm_name)
+            ok = await run_single_firm_workflow(main_page, context, firm_name,
+                                                year=year, month=month)
             if ok:
                 completed += 1
                 log(f"  {firm_name} 처리 완료. ({completed}개 완료)")
@@ -456,7 +457,8 @@ async def main(args=None):
                      if args.firms else None)
             mgmts = ([s.strip() for s in args.mgmts.split(",")]
                      if getattr(args, "mgmts", None) else None)
-            await run_auto_batch(page, context, firms=firms, mgmts=mgmts)
+            await run_auto_batch(page, context, firms=firms,
+                                 year=args.year, month=args.month, mgmts=mgmts)
             return
 
         # Phase 2: 모드 선택
@@ -522,6 +524,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="국민건강보험 EDI 자동화")
     parser.add_argument("--auto", action="store_true",
                         help="비대화형 일괄 모드 (GUI 병렬 subprocess 용)")
+    parser.add_argument("--year", type=int, default=None)
+    parser.add_argument("--month", type=int, default=None)
     parser.add_argument("--firms", type=str, default=None,
                         help="콤마로 구분된 사업장명 (미지정 시 전체)")
     parser.add_argument("--mgmts", type=str, default=None,

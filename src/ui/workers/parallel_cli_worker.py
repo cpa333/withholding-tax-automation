@@ -56,7 +56,7 @@ class ParallelCliRunner(QThread):
         self._spawn("nps", "src.automation.nps.nps_auto_cdp", env_nps,
                     repo_root, firms, mgmts, year, month)
         self._spawn("nhis", "src.automation.nhis.nhis_edi_auto_cdp", env_nhis,
-                    repo_root, firms, mgmts, None, None)
+                    repo_root, firms, mgmts, year, month)
         super().start()  # QThread.run — 완료 대기
 
     def _spawn(self, which, module, env, cwd, firms, mgmts, year, month):
