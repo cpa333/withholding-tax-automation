@@ -212,6 +212,71 @@ GUI 다중 러너보다 **CLI 2-프로세스**가 훨씬 가벼움:
 
 ---
 
+## 10. 병렬 "전체 실행"·정지 버튼·정지 시 Chrome 종료 안정화 (라이브 검증 완료, 2026-06-25)
+
+병렬(2번) 메뉴의 "전체 실행" 버그 2종 + 정지 버튼 비활성화 + 정지 시 Chrome 잔존를
+고치고 **라이브(실제 22개 수임처 NPS+NHIS 동시 실행)** 로 검증했다. 모두 `--auto`
+병렬 경로에 한정 — 단일 워크플로/대화형/선택건 회귀 0.
+
+### 10.1 "전체 실행"이 firms=None 전달 → NPS 엉뚱한 회사 / NHIS 미실행 ★
+- **원인**: `_on_start` 병렬 ALL 분기가 `parallel_runner.start(firms=None)` 호출.
+  `firms=None` 이면 각 CLI가 포털에서 직접 수임처를 스크랩(레거시 단일-CLI 동작).
+  - NPS: `nps_auto_cdp.py::run_auto_batch` 의 `firms is None` 분기가 `list_workplaces()`
+    결과에서 **이름만 취합(관리번호 `wp["number"]` 폐기)** → `select_workplace` 가
+    이름 부분일치(`nexacro_find_row` 의 `includes()`, 첫 매칭) 폴백 → 다른 회사 선택.
+  - NHIS: `nhis_edi_auto_cdp.py::run_auto_batch` 의 `firms is None` 분기가 팝업 열고
+    2초 대기 후 DOM 스크랩 → 새 Chrome(9224)에서 미렌더 → 빈 목록 → `return`(0건).
+  - 선택건(SELECTED)은 GUI 테이블에서 `firms`+`mgmts` 명시 전달해 두 경로 우회 → 정상.
+- **해결**: ALL 도 테이블 전체 행에서 `firms`+`mgmts` 조립(선택건과 동일 downstream).
+  - `CompanyTableModel.get_all_clients()` / `CompanyTable.get_all_clients()` 추가
+    (`_update_selected_clients` 와 동일 dict 형태: name/business_number/management_number/enabled).
+  - `_on_start` ALL 분기: `get_all_clients()` → 비활성(`enabled=False`) 제외 →
+    `firms`/`mgmts` 조립 → 빈 목록 가드 → `parallel_runner.start(firms=, mgmts=)`.
+  - 관리번호가 CLI까지 전달되어 NPS `_find_workplace_row_by_mgmt` 정확일치 경로 사용.
+- 회귀: `tests/test_company_table_get_all_clients.py`.
+
+### 10.2 정지 버튼이 비활성/숨김 → 클릭 불가 ★
+- **원인**: 병렬 시작 시 `set_run_active(True)` + `set_buttons_enabled(False)` +
+  `set_selected_run_mode(False)` 연달아 호출이 `full_run_btn`(=정지 버튼)을
+  `setEnabled(False)` + `setVisible(False)` 로 만듦. `set_selected_run_mode` 가
+  `full_run_btn`/`selected_run_btn` 가시성을 **같이 묶어** 처리하는 게 근본 원인.
+  정지 시그널(`stop_requested`→`_on_stop`→`parallel_runner.stop()`) 자체는 정상이었으나
+  버튼이 안 눌렸다. 비-병렬은 `pause_btn` 을 써 이 시퀀스를 안 거쳐 정상.
+- **해결**: `CompanyTable.set_running(active)` 추가 — 정지 버튼(`full_run_btn`)을
+  실행 중 항상 보이고 활성화('정지'/빨강)하도록 위젯별 직접 제어로 결합 우회.
+  `_on_start` ALL·`_on_selected_run` SELECTED·`_on_parallel_finished` 의 3-호출
+  시퀀스를 `set_running(True/False)` 로 교체. `active=False` 는 기존 idle 복원과 동등.
+- **회귀 방어**: `_on_phase_selected` 맨 앞에 `parallel_runner.is_running()` 가드 추가 —
+  실행 중 사이드바 클릭으로 phase 가 바뀌어 정지 버튼이 다시 숨겨지는 것 방지.
+- 회귀: `tests/test_company_table_set_running.py`.
+
+### 10.3 정지 시 Chrome 이 닫히지 않음 → 포트 기반 정밀 종료 ★
+- **원인**: `ParallelCliRunner.stop()` 은 `taskkill /PID <cli> /T` 로 CLI 트리 종료.
+  그러나 **재사용(reuse)되거나 분리(detached) 실행된 Chrome 은 CLI 자식 트리에 없어**
+  죽지 않음(버튼은 복원되나 Chrome 창이 남음). `_launched_pids`(자식 CLI 메모리)를
+  GUI 가 못 봐 `kill_chrome(port=)` 도 무력.
+- **해결**: `chrome_cdp.kill_chrome_by_port(port)` 추가 — `netstat -ano` 에서 해당 포트
+  LISTENING 소켓의 PID(=Chrome 브라우저 프로세스)를 찾아 `taskkill /PID /T /F`.
+  `stop()` 에서 nps_port/nhis_port 각각 호출. **정지=완전중단일 때만 kill**;
+  자연 완료(`_on_parallel_finished`) 시엔 Chrome 유지해 다음 실행이 세션 재사용.
+- memory `feedback_chrome-cdp-setup`(재사용-우선·force-kill 금지)은 **런치 경로**에
+  한정 — 정지(명시 중단) 시 kill 은 별개이며, 기존 의도(taskkill /T 로 죽이려 했던)와 일치.
+- memory `feedback_chrome-kill-by-port`.
+
+### 10.4 라이브 검증 결과 (실제 22개 수임처 NPS+NHIS 동시 실행)
+- 산출물: `Desktop/국민연금_YYYYMM/<수임처>/{결정내역통보서_*.xlsx, *_출력.pdf}`,
+  `Desktop/국민건강보험_YYYYMM/<수임처>/가입자고지내역서_건강_*.pdf`.
+- **수임처 정합성 전수 감사**(`debug/audit_firm_match.py`, gitignore 됨): 폴더명 ↔
+  DB 수임처 ↔ 파일 내 사업장관리번호+사업장명 교차검증.
+  - **사업장관리번호(고유 식별자) 44/44 전부 일치** → 엉뚱한 회사 자료 0건.
+    원래 NPS 엉뚱한 회사 버그(§10.1) 완전 해소 확인.
+  - 사업장명(이름)은 4개 회사(8파일)에서 포털 등록명 vs DB명 표기차이
+    (`주식회사`↔`(주)`, `(고양지점)`/`(박영미)` 생략, 영문 병기) — 관리번호 동일로
+    모두 **같은 회사**(데이터 정확). 정합성과 무관한 라벨링 차이.
+- 정지 버튼: 🔴 "정지" 클릭 → `[병렬] 정지 요청` 로그 + Chrome 2개 종료 + 버튼 복원 확인.
+
+---
+
 ## 부록: 관련 파일 빠른 참조
 
 - **CDP 핵심**: `src/utils/chrome_cdp.py`(`CDP_PORT`:12, `kill_chrome`:143, `connect_page`:267, `launch_chrome`:198)
@@ -223,3 +288,9 @@ GUI 다중 러너보다 **CLI 2-프로세스**가 훨씬 가벼움:
 - **설정**: `src/config.py:27`(DB_PATH), `:34`(PORTAL_URLS)
 - **GUI 진입**: `src/ui/main_window.py:35`(단일 runner), `:419`(`_on_start`)
 - **세션/핸드오프**: `docs/refactoring-handoff.md`(골든 스냅샷 회귀 기법 — 병렬 도입 후 회귀에 재사용)
+- **§10 (전체실행/정지/Chrome종료)**:
+  - `src/ui/widgets/company_table.py` — `CompanyTableModel.get_all_clients`, `CompanyTable.get_all_clients`(forwarder), `CompanyTable.set_running`
+  - `src/ui/main_window.py` — `_on_start` ALL 분기(firms/mgmts 조립), `_on_selected_run`/`_on_parallel_finished`(`set_running` 교체), `_on_phase_selected`(is_running 가드)
+  - `src/ui/workers/parallel_cli_worker.py` — `ParallelCliRunner.stop`(`kill_chrome_by_port` 호출)
+  - `src/utils/chrome_cdp.py` — `kill_chrome_by_port`(netstat → 포트 LISTEN PID → taskkill /T /F)
+  - 회귀: `tests/test_company_table_get_all_clients.py`, `tests/test_company_table_set_running.py`

@@ -129,6 +129,13 @@ class ParallelCliRunner(QThread):
                     )
                 except Exception:
                     pass
+        # 재사용/분리(detached) Chrome 은 CLI 자식 트리에 없어 taskkill /T 가 못 죽임.
+        # CDP 포트를 LISTEN 중인 Chrome 브라우저 프로세스를 포트로 찾아 확실히 종료.
+        # 정지=완전 중단일 때만 kill — 자연 완료(_on_parallel_finished) 시엔 죽이지 않아
+        # 다음 실행이 세션을 재사용(재로그인 생략)할 수 있게 한다.
+        from src.utils.chrome_cdp import kill_chrome_by_port
+        kill_chrome_by_port(self._nps_port)
+        kill_chrome_by_port(self._nhis_port)
         self.requestInterruption()
 
     def is_running(self):

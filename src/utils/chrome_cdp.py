@@ -180,6 +180,44 @@ def kill_chrome(*, pid: int | None = None, port: int | None = None):
     )
 
 
+def kill_chrome_by_port(port: int) -> list[int]:
+    """CDP 포트를 LISTEN 중인 Chrome 브라우저 프로세스를 포트로 찾아 종료.
+
+    CLI 가 재사용(reuse)했거나 분리(detached) 실행한 Chrome 은 CLI 자식 프로세스
+    트리에 없어서 taskkill /PID <cli> /T 로는 죽지 않는다(병렬 stop 시 Chrome 이
+    남는 원인). netstat -ano 에서 해당 포트의 LISTENING 소켓 PID(= Chrome 브라우저
+    프로세스)를 찾아 taskkill /PID /T /F 한다. kill_chrome(port=) 와 달리
+    _launched_pids 레지스트리(자식 CLI 메모리에 있어 GUI 가 못 봄)에 의존하지 않아
+    GUI 측(ParallelCliRunner.stop)에서도 동작한다. 다른 포트의 Chrome 은 건드리지 않는다.
+
+    Returns: taskkill 을 시도한 PID 목록(중복 제거).
+    """
+    try:
+        r = subprocess.run(
+            ["netstat", "-ano"], capture_output=True, text=True,
+            encoding="oem", errors="ignore", timeout=8,
+        )
+    except Exception:
+        return []
+    pids: list[int] = []
+    suffix = f":{port}"
+    for line in r.stdout.splitlines():
+        parts = line.split()
+        # netstat -ano 행: [Proto, LocalAddr, ForeignAddr, State, PID]
+        if len(parts) >= 5 and parts[1].endswith(suffix) and "LISTENING" in line:
+            pid = parts[-1]
+            if pid.isdigit():
+                pids.append(int(pid))
+    killed: list[int] = []
+    for pid in dict.fromkeys(pids):  # 중복 제거(순서 보존)
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        killed.append(pid)
+    return killed
+
+
 def _chrome_process_running() -> bool:
     """chrome.exe 프로세스가 하나라도 실행 중인지 확인 (tasklist 기반, psutil 무의존)."""
     try:

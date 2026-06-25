@@ -291,6 +291,13 @@ class MainWindow(QMainWindow):
         pass  # _poll_step_detail에서 처리
 
     def _on_phase_selected(self, phase_id: int):
+        # 병렬 자동화 실행 중 phase 전환 금지 — 정지 버튼(full_run_btn)이
+        # set_client_mode/set_selected_run_mode 에 의해 다시 숨겨지는 것을 막는다.
+        if self.parallel_runner.is_running():
+            self.statusBar().showMessage(
+                "병렬 실행 중에는 페이즈를 변경할 수 없습니다. 먼저 '정지'하세요."
+            )
+            return
         self._selected_phase = phase_id
         if self._is_list_phase(phase_id):
             self._load_client_list()
@@ -390,9 +397,7 @@ class MainWindow(QMainWindow):
         self._poll_step_detail()
 
     def _on_parallel_finished(self):
-        self.company_table.set_run_active(False)
-        self.company_table.set_buttons_enabled(True)
-        self.company_table.set_selected_run_mode(True)
+        self.company_table.set_running(False)
         self._on_log("[병렬] 모든 subprocess 완료")
         self._show_parallel_report()
 
@@ -489,11 +494,23 @@ class MainWindow(QMainWindow):
         if self._is_parallel():
             year = self.year_spin.value()
             month = self.month_spin.value()
-            self.company_table.set_run_active(True)
-            self.company_table.set_buttons_enabled(False)
+            # 전체 실행: 테이블의 모든 수임처에서 firms/mgmts 조립(선택건 실행과 동일 경로).
+            # firms=None 은 CLI 가 포털에서 직접 목록을 긁어오게 해(2번 ALL 버그 원인)
+            # NPS 는 이름 부분매칭으로 잘못된 첫 사업장을, NHIS 는 팝업 미렌더로 0건 처리함.
+            all_clients = self.company_table.get_all_clients()
+            # 비활성(X) 수임처는 배치에서 제외(models.py:94 / db.list_active enabled=1 과 동일).
+            active = [c for c in all_clients if c.get("enabled", True)]
+            firms = [c["name"] for c in active]
+            if not firms:
+                self.statusBar().showMessage(
+                    "수임처 목록이 비어 있습니다. 먼저 '새로 가져오기'로 로드하세요."
+                )
+                return
+            mgmts = [c.get("management_number", "") for c in active]
+            self.company_table.set_running(True)
             self.parallel_runner.start(nps_port=9223, nhis_port=9224,
-                                       firms=None, year=year, month=month)
-            self._on_log("[병렬] NPS(9223)/NHIS(9224) 백그라운드 시작 (전체 수임처)")
+                                       firms=firms, mgmts=mgmts, year=year, month=month)
+            self._on_log(f"[병렬] 전체 수임처 {len(firms)}건 병렬 실행 (NPS 9223 / NHIS 9224)")
             self._on_log("[병렬] 두 Chrome이 열리면 각각 공동인증서로 로그인하세요 (첫 1회, 이후 세션 재사용)")
             return
 
@@ -652,9 +669,7 @@ class MainWindow(QMainWindow):
             mgmts = [c.get("management_number", "") for c in sel]
             year = self.year_spin.value()
             month = self.month_spin.value()
-            self.company_table.set_run_active(True)
-            self.company_table.set_buttons_enabled(False)
-            self.company_table.set_selected_run_mode(False)
+            self.company_table.set_running(True)
             self.parallel_runner.start(nps_port=9223, nhis_port=9224,
                                        firms=firms, mgmts=mgmts, year=year, month=month)
             self._on_log(f"[병렬] 선택 수임처 {len(firms)}건 병렬 실행: {', '.join(firms)}")

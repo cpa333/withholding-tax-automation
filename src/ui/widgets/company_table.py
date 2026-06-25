@@ -126,6 +126,27 @@ class CompanyTableModel(QAbstractTableModel):
             return self._jobs[row]
         return None
 
+    def get_all_clients(self) -> list[dict]:
+        """현재 테이블에 표시된 전체 수임처(clients_mode).
+
+        선택건 실행(CompanyTable._update_selected_clients)과 동일한 dict 형태를
+        반환 → 전체 실행(ALL) 병렬 경로에서 firms/mgmts 조립 시 선택건(SELECTED)
+        과 완전히 같은 downstream 계약을 갖는다. clients_mode 가 아니면 빈 리스트.
+        enabled 필드를 포함해 호출측에서 비활성(X) 수임처를 필터링할 수 있게 한다.
+        """
+        clients: list[dict] = []
+        if not self._clients_mode:
+            return clients
+        for job in self._jobs:
+            if job and job.get("name"):
+                clients.append({
+                    "name": job.get("name", ""),
+                    "business_number": job.get("business_number", ""),
+                    "management_number": job.get("management_number", ""),
+                    "enabled": job.get("enabled", True),
+                })
+        return clients
+
 
 class CompanyTable(QWidget):
     """수임처 목록 테이블 + 에러 요약"""
@@ -228,6 +249,10 @@ class CompanyTable(QWidget):
         self.error_summary.setText(f"등록된 수임처: {len(clients)}건")
         self._btn_row_widget.setVisible(True)
 
+    def get_all_clients(self) -> list[dict]:
+        """현재 표시된 전체 수임처(위임). CompanyTableModel.get_all_clients 참조."""
+        return self.model.get_all_clients()
+
     def update_jobs(self, jobs: list[dict], failed_info: list[dict] | None = None):
         """수임처 Job 목록 업데이트 (Phase 2+ 모드)"""
         self.model.set_jobs(jobs)
@@ -314,3 +339,44 @@ class CompanyTable(QWidget):
             self.full_run_btn.setText("전체실행")
             self.full_run_btn.setStyleSheet(BTN_GREEN)
             self.full_run_btn.setEnabled(True)
+
+    def set_running(self, active: bool):
+        """병렬 실행 상태 통합 전환. full_run_btn 은 항상 정지 버튼으로 동작.
+
+        기존엔 set_run_active(True) + set_buttons_enabled(False) +
+        set_selected_run_mode(False) 를 연달아 호출했으나, 뒤 두 메서드가
+        full_run_btn(=정지 버튼)까지 같이 비활성화/숨김 처리해 실행 중 정지 버튼이
+        사라지는 버그가 있었다. 정지 버튼은 실행 중 반드시 보이고 활성화되어야 하므로
+        이 메서드에서 위젯별로 직접 제어한다(set_selected_run_mode 의 두 버튼 가시성
+        결합을 우회).
+
+        - active=True(실행 중): full_run_btn='정지'(빨강)+visible+enabled.
+          refresh/delete_all 비활성, selected_run_btn 숨김, selection_hint 숨김.
+        - active=False(완료): set_run_active(False)+set_buttons_enabled(True)+
+          set_selected_run_mode(True) 의 정확한 동등 복원(hint 텍스트 포함).
+        """
+        self._is_running = active
+        if active:
+            self.full_run_btn.setText("정지")
+            self.full_run_btn.setStyleSheet(BTN_RED)
+            self.full_run_btn.setEnabled(True)
+            self.full_run_btn.setVisible(True)
+            self.refresh_btn.setEnabled(False)
+            self.delete_all_btn.setEnabled(False)
+            self.selected_run_btn.setVisible(False)
+            self.selection_hint.setVisible(False)
+        else:
+            self.full_run_btn.setText("전체실행")
+            self.full_run_btn.setStyleSheet(BTN_GREEN)
+            self.full_run_btn.setEnabled(True)
+            self.full_run_btn.setVisible(True)
+            self.refresh_btn.setEnabled(True)
+            self.delete_all_btn.setEnabled(True)
+            self.selected_run_btn.setVisible(True)
+            self.selected_run_btn.setEnabled(False)
+            self._selected_clients = []
+            self.selection_hint.setVisible(True)
+            self.selection_hint.setText(
+                "수임처를 선택하세요: 개별 선택은 Ctrl + 클릭, "
+                "연속 범위 선택은 Shift + 클릭"
+            )
