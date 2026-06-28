@@ -212,7 +212,15 @@ class MainWindow(QMainWindow):
         self.pw_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.pw_input.setFixedWidth(150)
         self.pw_input.setVisible(False)
+        # 입력 시 빨간 에러 강조 자동 해제
+        self.pw_input.textChanged.connect(self._on_pw_input_changed)
         layout.addWidget(self.pw_input)
+
+        # 비밀번호 미입력 시 빨간 글씨 강조(login_dialog.error_label 패턴). 평소 숨김.
+        self.pw_error_label = QLabel("")
+        self.pw_error_label.setStyleSheet("color: #f44336; font-size: 12px;")
+        self.pw_error_label.setVisible(False)
+        layout.addWidget(self.pw_error_label)
 
         layout.addStretch()
 
@@ -325,6 +333,8 @@ class MainWindow(QMainWindow):
             self.pw_input.setFocus()
         else:
             self.pw_input.clear()
+        # phase 전환 시 비밀번호 에러 강조 해제
+        self.pw_error_label.setVisible(False)
 
     def _get_portal_for_phase(self, phase_id: int) -> str | None:
         """페이즈 ID에 해당하는 포털 반환"""
@@ -347,6 +357,39 @@ class MainWindow(QMainWindow):
     def _needs_password(self, phase_id: int) -> bool:
         """UI 비밀번호 필드가 필요한 phase(Phase 7, 8) 여부."""
         return bool(self._phase_info(phase_id).get("needs_password"))
+
+    def _require_password(self) -> str | None:
+        """needs_password phase 의 비밀번호 반환. 미입력 시 강력 알림 후 None.
+
+        비밀번호 불필요 phase -> ''(빈 문자열). needs_password phase 에서
+        비밀번호가 있으면 그 값을, 없으면 popup+빨간 글씨 알림을 띄우고 None.
+        """
+        if not self._needs_password(self._selected_phase):
+            return ""
+        pw = self.pw_input.text().strip()
+        if pw:
+            return pw
+        self._warn_password_required()
+        return None
+
+    def _warn_password_required(self):
+        """비밀번호 미입력 강력 알림 — 모달 popup + 빨간 글씨 + 입력창 포커스.
+
+        statusBar 메시지는 놓치기 쉬워(화면 최하단 작은 글씨) 실행 실패의 원인이
+        되므로, 모달 popup(QMessageBox.warning)과 필드 옆 빨간 글씨로 강제 알림.
+        """
+        self.pw_error_label.setText("전자신고 비밀번호를 입력하세요 (8~15자리)")
+        self.pw_error_label.setVisible(True)
+        QMessageBox.warning(
+            self, "비밀번호 필요",
+            "전자신고 비밀번호를 입력하세요.\n비밀번호 없이 실행할 수 없습니다.",
+        )
+        self.pw_input.setFocus()
+
+    def _on_pw_input_changed(self, text: str):
+        """비밀번호 입력 시 빨간 에러 강조 해제"""
+        if text.strip():
+            self.pw_error_label.setVisible(False)
 
     def _load_client_list(self, portal_override: str | None = None):
         """DB에서 수임처 목록을 조회하여 테이블에 표시
@@ -514,13 +557,10 @@ class MainWindow(QMainWindow):
             self._on_log("[병렬] 두 Chrome이 열리면 각각 공동인증서로 로그인하세요 (첫 1회, 이후 세션 재사용)")
             return
 
-        # 비밀번호 필요 phase: 툴바 비밀번호 필드에서 읽기
-        password = ""
-        if self._needs_password(self._selected_phase):
-            password = self.pw_input.text().strip()
-            if not password:
-                self.statusBar().showMessage("전자신고 비밀번호를 입력하세요")
-                return
+        # 비밀번호 필요 phase: 툴바 비밀번호 필드에서 읽기 (미입력 시 강력 알림 후 차단)
+        password = self._require_password()
+        if password is None:
+            return
 
         self.company_table.set_run_active(True)
         self.pause_btn.setEnabled(True)
@@ -696,14 +736,13 @@ class MainWindow(QMainWindow):
         # dry-run 체크박스 값 전달 (선택건 실행도 일반 실행과 동일하게 반영)
         extra_kwargs = {"dry_run": self.dry_run_check.isChecked()}
 
-        # 비밀번호 필요 phase: 비밀번호 전달
-        if self._needs_password(self._selected_phase):
-            pw = self.pw_input.text().strip()
-            if not pw:
-                self.statusBar().showMessage("전자신고 비밀번호를 입력하세요")
-                self.company_table.set_run_active(False)
-                self.company_table.set_buttons_enabled(True)
-                return
+        # 비밀번호 필요 phase: 비밀번호 전달 (미입력 시 강력 알림 후 차단)
+        pw = self._require_password()
+        if pw is None:
+            self.company_table.set_run_active(False)
+            self.company_table.set_buttons_enabled(True)
+            return
+        if pw:
             extra_kwargs["password"] = pw
 
         self.runner.start_selected_clients(
