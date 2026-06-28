@@ -31,7 +31,6 @@ from src.automation.nhis._constants import (
     PDF_DOWNLOAD_TIMEOUT_S,
     PAGE_STABLE_TIMEOUT_S,
 )
-from src.automation.nhis._nexacro import wait_for_nexacro_ready
 from src.automation.nhis._doc_access import (
     open_received_docs,
     select_doc_type,
@@ -424,15 +423,19 @@ async def reset_main_page(page):
 
     page.goto(네비게이션)은 입력이벤트가 아니라 모달/alert/occlusion/선택된
     수임처 상태 무관하게 동작하며 세션(공동인증서 쿠키)이 유지돼 재로그인이
-    불필요하다. NPS reset_workplace_page(page.goto(NPS_URL)+wait_for_nexacro_ready)
-    와 동일한 패턴.
+    불필요하다.
+
+    주의: retrieveMain 은 일반 HTML 페이지라 Nexacro 가 없음에도 예전에
+    wait_for_nexacro_ready 를 호출해 매번 30초 타임아웃(속도 저하 + 시간초과
+    에러 로그)을 유발했다. NPS 와 달리 NHIS 의 Nexacro 는 '받은문서' 웹EDI
+    탭에서만 로드되므로 여기서는 goto(domcontentloaded) 만으로 충분하다.
+    이후 open_firm_selector 가 수임사업장선택 버튼을 직접 폴링(최대 25s)한다.
     """
     try:
         await page.goto(NHIS_EDI_MAIN, wait_until="domcontentloaded", timeout=60000)
         log("  retrieveMain 리셋(재로드) — 로그인 사업장 복귀")
     except Exception as e:
         log(f"  WARN: retrieveMain 리셋(goto) 실패 - {e}")
-    await wait_for_nexacro_ready(page)
 
 
 async def run_single_firm_workflow(page, context, firm_name,
