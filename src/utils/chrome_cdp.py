@@ -268,6 +268,11 @@ def _attempt_launch(chrome_path, junc, profile, url, *, port=CDP_PORT, kill_wait
             f"--user-data-dir={junc}",
             f"--profile-directory={profile}",
             "--start-maximized",
+            # webdriver=true 원천 차단 — a2f9c11이 --test-type(탐지신호라 제거 맞음)과
+            # 함께 묶어 삭제한 플래그 복원. NHIS EDI 보안프로그램이 navigator.webdriver
+            # 를 감지해 페이지를 무한 리로드(로그인 루프)하는 것을 막는다. blink 레벨에서
+            # 꺼지므로 첫 페이지 로드부터 적용(stealth add_init_script 타이밍 갭 해소).
+            "--disable-blink-features=AutomationControlled",
             # 병렬(창 2개)에서 뒤에 가려지는 창은 Chrome이 렌더·타이머를
             # throttle 해 Nexacro 화면 구성이 지연된다(탭 전환·로그인 감지 실패
             # 원인). 가려진/백그라운드 창도 전경처럼 풀스피드로 유지.

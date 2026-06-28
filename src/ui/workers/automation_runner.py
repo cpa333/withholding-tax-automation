@@ -12,6 +12,7 @@ import traceback
 
 from src.config import DB_PATH, PORTAL_URLS
 from src.ui.workers.async_bridge import AsyncWorker
+from src.utils.stealth import stealth_all_pages
 
 # 브라우저가 확실히 종료된 패턴 (즉시 disconnect 처리)
 _BROWSER_DISCONNECT_PATTERNS = (
@@ -456,6 +457,7 @@ class AutomationRunner(AsyncWorker):
             try:
                 browser = await self._playwright.chromium.connect_over_cdp(CDP_URL)
                 context = browser.contexts[0]
+                await stealth_all_pages(context)
                 page = context.pages[0] if context.pages else await context.new_page()
                 # 재연결된 페이지가 실제로 응답하는지 확인
                 await asyncio.wait_for(page.evaluate("1"), timeout=5)
@@ -752,6 +754,9 @@ class AutomationRunner(AsyncWorker):
             try:
                 browser = await self._playwright.chromium.connect_over_cdp(CDP_URL)
                 context = browser.contexts[0]
+                # 자동화 아티팩트 은닉 — GUI 경로는 CLI(connect_page)와 달리 stealth 가
+                # 빠져 있어 webdriver 등이 노출됨. blink 플래그와 함께 이중 방어.
+                await stealth_all_pages(context)
                 # 포털 호스트 매칭 탭 우선, 없으면 첫 탭, 그것도 없으면 새 탭
                 target_page = None
                 for pg in context.pages:
@@ -791,6 +796,7 @@ class AutomationRunner(AsyncWorker):
         try:
             browser = await self._playwright.chromium.connect_over_cdp(CDP_URL)
             context = browser.contexts[0]
+            await stealth_all_pages(context)
             page = context.pages[0] if context.pages else await context.new_page()
             self._browser = browser
             self._context = context
