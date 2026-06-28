@@ -304,7 +304,9 @@ class CompanyTable(QWidget):
         self._update_selected_clients()
 
     def _update_selected_clients(self):
-        indexes = self.table.selectionModel().selectedRows()
+        # selectedRows()는 선택 순서를 반환(오름차순 보장 아님) → 항상 화면 상단(row 0)부터
+        # 처리되도록 row 기준 정렬. 개별(Ctrl+클릭) 하단-우선 선택이 하단부터 도는 것 방지.
+        indexes = sorted(self.table.selectionModel().selectedRows(), key=lambda idx: idx.row())
         self._selected_clients = []
         for idx in indexes:
             job = self.model.get_job_at(idx.row())
