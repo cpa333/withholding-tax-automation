@@ -13,7 +13,7 @@ from src.batch.state import StateManager
     phase_id=9,
     portal="hometax",
     display_name="홈택스 원천세 신고",
-    enabled=True,
+    enabled=False,  # GUI 사이드바 접근 차단(회색 비활성). 워크플로우 자체 동작은 변경 없음.
     needs_password=True,
 )
 class HometaxWorkflow(BaseWorkflow):
