@@ -114,8 +114,21 @@ class ParallelCliRunner(QThread):
         self.all_finished.emit()
 
     def stop(self):
-        """두 subprocess + 자식 Chrome 트리 종료."""
+        """두 subprocess + 자식 Chrome 트리 종료.
+
+        강제 종료 전 짧은 grace 창을 둬서, 마무리 단계의 CLI가 스스로
+        browser.close()로 영속 프로필(보안 확장 포함)을 flush 할 기회를 준다.
+        단 Windows의 proc.terminate()/taskkill /F 는 비동기 강제종료라 완전한
+        graceful 은 보장 못 함 — 신뢰 가능한 flush 는 자연완료 경로가 담당한다.
+        """
         for which, proc in list(self._procs.items()):
+            # grace 창: 자연 종료 중이면 스스로 flush 하고 끝나도록 잠시 대기.
+            # _pump reader 스레드가 stdout 파이프를 계속 drain 하므로 wait 가
+            # pipe-buffer 가득 참으로 교착되지 않는다(TimeoutExpired → except).
+            try:
+                proc.wait(timeout=2.0)
+            except Exception:
+                pass
             try:
                 proc.terminate()
             except Exception:

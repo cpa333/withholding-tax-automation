@@ -45,6 +45,7 @@ installer_output/
 
 # Runtime data
 data/
+chrome-profiles/
 
 # 인증 세션 (Supabase 토큰/이메일 평문 포함 — 절대 커밋 금지)
 auth_session.json

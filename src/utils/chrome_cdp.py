@@ -2,11 +2,14 @@
 
 import asyncio
 import os
+import shutil
 import subprocess
 import json
 import time
 import urllib.request
 import glob
+
+from src.config import APP_DATA_DIR
 
 
 # WTAX_NO_DELAY 선례: env 미설정 → 9223(직렬, 현행). WTAX_CDP_PORT=9224 등으로 병렬 분리.
@@ -298,12 +301,28 @@ def _attempt_launch(chrome_path, junc, profile, url, *, port=CDP_PORT, kill_wait
 
 
 def _prepare_user_data_dir(port: int) -> str:
-    """병렬 모드 전용: 포트별 빈 user-data-dir 생성 (SingletonLock 완전 회피).
-    %TEMP%/chrome-cdp-{port} — WEHAGO run_chrome_cdp.bat 임시 프로필 패턴과 동일.
-    잔존 SingletonLock 파일이 있으면 정리(빈 dir이므로 프로필 데이터 손실 0).
+    """병렬 모드 전용: 포트별 영속 user-data-dir (보안프로그램 재설치 생략 목적).
+
+    APP_DATA_DIR/chrome-profiles/cdp-{port} — 매 실행 동일 경로 재사용.
+    한국 EDI 포털(NPS/NHIS)이 "보안프로그램 설치됨"을 Chrome 확장(프로필 단위
+    저장) 유무로 판단한다. 예전의 %TEMP% 빈 임시 프로필로는 매번 재설치 메뉴가
+    떴기 때문에, 영속 프로필에 한 번 설치하면 이후 실행부터 재설치가 안 뜬다
+    (직렬 junction 경로와 동일 원리). 두 포트(9223/9224)는 각각 별개 디렉토리를
+    쓰므로 SingletonLock 충돌 회피도 그대로 유지된다.
+
+    WTAX_FRESH_PROFILE=1 (1/true/yes/on) 시 디버그용으로 프로필을 완전 초기화
+    (구 %TEMP% 빈-dir 동작과 같은 효과). Chrome이 프로필을 잡고 있으면 rmtree가
+    실패할 수 있으므로 stop 후 적용한다.
+    잔존 SingletonLock 파일이 있으면 정리(확장/세션 데이터는 보존).
     """
-    tmp = os.environ.get("TEMP", "/tmp")
-    path = os.path.join(tmp, f"chrome-cdp-{port}")
+    fresh = (
+        os.environ.get("WTAX_FRESH_PROFILE", "").strip().lower()
+        in ("1", "true", "yes", "on")
+    )
+    base = os.path.join(APP_DATA_DIR, "chrome-profiles")
+    path = os.path.join(base, f"cdp-{port}")
+    if fresh:
+        shutil.rmtree(path, ignore_errors=True)
     os.makedirs(path, exist_ok=True)
     for lockname in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
         try:
