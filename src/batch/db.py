@@ -30,7 +30,7 @@ from src.batch.models import (
 # 스키마 버전
 # ═══════════════════════════════════════════════════════════════════════
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 -- ═══════════════════════════════════════════════════════════════════════
@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS clients (
     created_at      TEXT    DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
     updated_at      TEXT    DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
     management_number TEXT  DEFAULT '',   -- 사업장관리번호 override (빈=biz_to_mgmt_no 자동계산)
+    report_cycle      TEXT  DEFAULT '',   -- 원천징수 신고주기 태그 (매월/반기, 빈=미지정). WEHAGO 카드 태그에서 스크랩
 
     CONSTRAINT uq_client_portal UNIQUE (name, portal)
 );
@@ -253,6 +254,17 @@ class BatchDB:
                     self.conn.execute(
                         "UPDATE schema_version SET version = 2"
                     )
+                if current_version < 3:
+                    # v2 → v3: clients.report_cycle (원천징수 신고주기: 매월/반기) 컬럼 추가
+                    # WEHAGO 수임처 카드 태그("...,원천,매월|반기")에서 스크랩.
+                    # management_number 와 달리 새로가져오기가 DELETE+INSERT 하므로
+                    # 스크랩값이 매번 재기입됨 (수동 override 도 update_report_cycle 로 보존).
+                    self.conn.execute(
+                        "ALTER TABLE clients ADD COLUMN report_cycle TEXT DEFAULT ''"
+                    )
+                    self.conn.execute(
+                        "UPDATE schema_version SET version = 3"
+                    )
 
                 self.conn.execute("COMMIT")
             except Exception:
@@ -315,11 +327,12 @@ class ClientRepository:
             else:
                 cur = self.db.conn.execute(
                     """INSERT INTO clients (name, portal, business_number,
-                       enabled, priority, notes, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                       enabled, priority, notes, report_cycle,
+                       created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (client.name, client.portal, client.business_number,
                      int(client.enabled), client.priority, client.notes,
-                     now, now),
+                     client.report_cycle, now, now),
                 )
                 client_id = cur.lastrowid
 
@@ -393,6 +406,32 @@ class ClientRepository:
             self.db.rollback()
             raise
 
+    def update_report_cycle(self, client_id: int, value: str) -> bool:
+        """수임처의 원천징수 신고주기(매월/반기) 갱신 (GUI 드롭다운 편집용).
+
+        빈 문자열/알 수 없는 값은 빈값(미지정)으로 정규화.
+        upsert(INSERT) 와 달리 id 기반 단일 UPDATE라 안전·가벼움.
+        새로가져오기(DELETE+INSERT) 시 스크랩값으로 덮어씌워짐에 주의.
+
+        Returns:
+            갱신된 행 존재 여부
+        """
+        normalized = (value or "").strip()
+        if normalized not in ("", "매월", "반기"):
+            normalized = ""  # 알 수 없는 값은 미지정 처리
+        now = now_iso()
+        self.db.begin()
+        try:
+            cur = self.db.conn.execute(
+                "UPDATE clients SET report_cycle = ?, updated_at = ? WHERE id = ?",
+                (normalized, now, client_id),
+            )
+            self.db.commit()
+            return cur.rowcount > 0
+        except Exception:
+            self.db.rollback()
+            raise
+
     @staticmethod
     def _row_to_client(row: tuple) -> Client:
         return Client(
@@ -406,6 +445,7 @@ class ClientRepository:
             created_at=row[7],
             updated_at=row[8],
             management_number=row[9] if len(row) > 9 and row[9] else "",
+            report_cycle=row[10] if len(row) > 10 and row[10] else "",
         )
 
 

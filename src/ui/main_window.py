@@ -70,6 +70,7 @@ class MainWindow(QMainWindow):
         self.company_table.full_run_requested.connect(self._on_start)
         self.company_table.stop_requested.connect(self._on_stop)
         self.company_table.management_number_changed.connect(self._on_management_number_changed)
+        self.company_table.report_cycle_changed.connect(self._on_report_cycle_changed)
 
         # 시작 시 DB에서 수임처 목록 로드
         self._load_client_list()
@@ -279,6 +280,11 @@ class MainWindow(QMainWindow):
         if self._is_list_phase(phase_id) and status == "completed":
             self._load_client_list()
 
+        # SWTA(7번·원천이행상황신고서) 완료/실패 시 — 라디오 ground truth 로 역충전된
+        # report_cycle(매월/반기) 값을 수임처 테이블 주기 컬럼에 즉시 반영.
+        if phase_id == 7 and status in ("completed", "failed"):
+            self._load_client_list()
+
     def _on_batch_progress(self, progress: dict):
         phase_id = progress.get("phase_id", 0)
         jobs = progress.get("jobs", [])
@@ -425,6 +431,7 @@ class MainWindow(QMainWindow):
                         "business_number": c.business_number,
                         "management_number": get_management_number(c),
                         "management_number_override": c.management_number or "",
+                        "report_cycle": c.report_cycle or "",
                         "portal": c.portal,
                         "enabled": c.enabled,
                     }
@@ -726,6 +733,8 @@ class MainWindow(QMainWindow):
                 "name": c["name"],
                 "management_number": mgmt_no,
                 "business_number": c.get("business_number", ""),
+                "id": c.get("id"),
+                "report_cycle": c.get("report_cycle", ""),
             })
 
         self.company_table.set_run_active(True)
@@ -771,6 +780,19 @@ class MainWindow(QMainWindow):
                 ClientRepository(db).update_management_number(client_id, value)
         except Exception as e:
             self._on_log(f"관리번호 저장 실패 (client_id={client_id}): {e}")
+
+    def _on_report_cycle_changed(self, client_id: int, value: str):
+        """표에서 주기(매월/반기) 드롭다운 편집 → DB 저장.
+
+        WEHAGO 카드 태그에서 스크랩된 값의 수동 보정용. 새로가져오기
+        (DELETE+INSERT) 시 스크랩값으로 다시 덮어씌워짐에 주의.
+        """
+        from src.batch.db import BatchDB, ClientRepository
+        try:
+            with BatchDB(DB_PATH) as db:
+                ClientRepository(db).update_report_cycle(client_id, value)
+        except Exception as e:
+            self._on_log(f"주기 저장 실패 (client_id={client_id}): {e}")
 
     def _on_delete_all_clients(self):
         """DB에서 수임처 모두 삭제"""

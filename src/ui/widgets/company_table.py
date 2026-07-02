@@ -2,7 +2,7 @@
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTableView, QLabel, QHBoxLayout,
-    QPushButton,
+    QPushButton, QStyledItemDelegate, QComboBox,
 )
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal
 from PySide6.QtGui import QColor
@@ -11,16 +11,48 @@ from src.ui.styles import STATUS_DISPLAY, BTN_BLUE, BTN_RED, BTN_ORANGE, BTN_GRE
 from src.batch.models import biz_to_mgmt_no
 
 _HEADERS_JOBS = ["수임처명", "상태", "현재 단계", "소요시간", "에러"]
-_HEADERS_CLIENTS = ["수임처명", "사업자등록번호", "관리번호", "포털", "활성"]
+_HEADERS_CLIENTS = ["수임처명", "사업자등록번호", "관리번호", "주기", "포털", "활성"]
+
+# 원천징수 신고주기 드롭다운 선택지 (빈=미지정)
+_REPORT_CYCLE_OPTIONS = ["", "매월", "반기"]
+
+
+class ReportCycleDelegate(QStyledItemDelegate):
+    """주기(매월/반기) 컬럼용 드롭다운 편집기.
+
+    관리번호 컬럼은 자유 key-in 이지만, 주기는 정해진 값만 허용하므로
+    QComboBox 델리게이트로 제한한다. 빈 값(미지정) 포함 3개 항목.
+    """
+
+    def createEditor(self, parent, option, index):
+        cb = QComboBox(parent)
+        cb.addItems(_REPORT_CYCLE_OPTIONS)
+        return cb
+
+    def setEditorData(self, editor, index):
+        val = index.data(Qt.ItemDataRole.EditRole) or ""
+        cb = editor
+        i = cb.findText(val)
+        cb.setCurrentIndex(i if i >= 0 else 0)
+
+    def setModelData(self, editor, model, index):
+        val = editor.currentText()
+        model.setData(index, val, Qt.ItemDataRole.EditRole)
+
+    def displayText(self, value, locale):
+        # 편집 중이 아닐 때 표시되는 텍스트 (빈값은 그대로 빈칸)
+        return value if value else ""
 
 
 class CompanyTableModel(QAbstractTableModel):
     """수임처 Job 목록을 테이블로 표시하는 모델"""
 
-    # clients_mode 관리번호 컬럼 인덱스 (직접 key-in 편집 대상)
-    _MGMT_COL = 2
+    # clients_mode 편집 가능 컬럼 인덱스
+    _MGMT_COL = 2          # 관리번호 (자유 key-in)
+    _REPORT_CYCLE_COL = 3  # 주기 (드롭다운: 매월/반기/빈)
 
     management_number_changed = Signal(int, str)  # (client_id, override_value)
+    report_cycle_changed = Signal(int, str)       # (client_id, 매월|반기|"")
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -36,7 +68,7 @@ class CompanyTableModel(QAbstractTableModel):
 
     def set_clients(self, clients: list[dict]):
         """clients: [{"id","name","business_number","management_number",
-                     "management_number_override","portal","enabled"}, ...]"""
+                     "management_number_override","report_cycle","portal","enabled"}, ...]"""
         self.beginResetModel()
         self._jobs = clients
         self._clients_mode = True
@@ -62,14 +94,15 @@ class CompanyTableModel(QAbstractTableModel):
         col = index.column()
 
         if self._clients_mode:
-            # EditRole 도 DisplayRole 과 동일값 반환 → 관리번호 셀 편집 시
-            # 현재 값이 빈칸이 아니라 기존 관리번호로 미리 채워진 채로 수정 가능
+            # EditRole 도 DisplayRole 과 동일값 반환 → 관리번호/주기 셀 편집 시
+            # 현재 값이 빈칸이 아니라 기존 값으로 미리 채워진 채로 수정 가능
             if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
                 if col == 0: return row_data.get("name", "")
                 elif col == 1: return row_data.get("business_number", "")
                 elif col == 2: return row_data.get("management_number", "")
-                elif col == 3: return row_data.get("portal", "")
-                elif col == 4: return "O" if row_data.get("enabled", True) else "X"
+                elif col == 3: return row_data.get("report_cycle", "")
+                elif col == 4: return row_data.get("portal", "")
+                elif col == 5: return "O" if row_data.get("enabled", True) else "X"
             return None
 
         if role == Qt.ItemDataRole.DisplayRole:
@@ -95,15 +128,18 @@ class CompanyTableModel(QAbstractTableModel):
         if not index.isValid():
             return Qt.ItemFlag.NoItemFlags
         base = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-        # clients_mode 의 관리번호 컬럼만 직접 key-in 편집 허용
-        if self._clients_mode and index.column() == self._MGMT_COL:
+        # clients_mode 의 관리번호(key-in)·주기(드롭다운) 컬럼만 편집 허용
+        if self._clients_mode and index.column() in (self._MGMT_COL, self._REPORT_CYCLE_COL):
             base |= Qt.ItemFlag.ItemIsEditable
         return base
 
     def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
         if role != Qt.ItemDataRole.EditRole:
             return False
-        if not (self._clients_mode and index.column() == self._MGMT_COL):
+        if not self._clients_mode:
+            return False
+        col = index.column()
+        if col not in (self._MGMT_COL, self._REPORT_CYCLE_COL):
             return False
         row_data = self._jobs[index.row()]
         client_id = row_data.get("id")
@@ -111,14 +147,21 @@ class CompanyTableModel(QAbstractTableModel):
             return False
 
         normalized = (value or "").strip()
-        # 빈 값은 override 해제(원복) → biz_to_mgmt_no 자동계산 표시
-        derived = biz_to_mgmt_no(row_data.get("business_number", ""))
-        row_data["management_number_override"] = normalized
-        row_data["management_number"] = normalized if normalized else derived
 
-        tl = self.index(index.row(), self._MGMT_COL)
+        if col == self._MGMT_COL:
+            # 빈 값은 override 해제(원복) → biz_to_mgmt_no 자동계산 표시
+            derived = biz_to_mgmt_no(row_data.get("business_number", ""))
+            row_data["management_number_override"] = normalized
+            row_data["management_number"] = normalized if normalized else derived
+            self.management_number_changed.emit(client_id, normalized)
+        else:  # _REPORT_CYCLE_COL — 드롭다운(매월/반기/빈)
+            if normalized not in ("매월", "반기"):
+                normalized = ""  # 알 수 없는 값은 미지정
+            row_data["report_cycle"] = normalized
+            self.report_cycle_changed.emit(client_id, normalized)
+
+        tl = self.index(index.row(), col)
         self.dataChanged.emit(tl, tl, [Qt.ItemDataRole.DisplayRole])
-        self.management_number_changed.emit(client_id, normalized)
         return True
 
     def get_job_at(self, row: int) -> dict | None:
@@ -143,6 +186,8 @@ class CompanyTableModel(QAbstractTableModel):
                     "name": job.get("name", ""),
                     "business_number": job.get("business_number", ""),
                     "management_number": job.get("management_number", ""),
+                    "id": job.get("id"),
+                    "report_cycle": job.get("report_cycle", ""),
                     "enabled": job.get("enabled", True),
                 })
         return clients
@@ -158,6 +203,7 @@ class CompanyTable(QWidget):
     full_run_requested = Signal()
     stop_requested = Signal()
     management_number_changed = Signal(int, str)  # (client_id, override_value) — DB 저장용 릴레이
+    report_cycle_changed = Signal(int, str)       # (client_id, 매월|반기|"") — DB 저장용 릴레이
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -223,8 +269,9 @@ class CompanyTable(QWidget):
         self.table = QTableView()
         self.model = CompanyTableModel()
         self.table.setModel(self.model)
-        # 모델의 관리번호 편집 → CompanyTable 릴레이 → main_window DB 저장
+        # 모델의 관리번호/주기 편집 → CompanyTable 릴레이 → main_window DB 저장
         self.model.management_number_changed.connect(self.management_number_changed)
+        self.model.report_cycle_changed.connect(self.report_cycle_changed)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableView.SelectRows)
         self.table.setSelectionMode(QTableView.ExtendedSelection)
@@ -233,12 +280,17 @@ class CompanyTable(QWidget):
             QTableView.DoubleClicked | QTableView.EditKeyPressed | QTableView.AnyKeyPressed
         )
 
-        # 컬럼 너비 (Job 모드 기준)
+        # 주기(매월/반기) 컬럼 드롭다운 편집기 위임
+        self._cycle_delegate = ReportCycleDelegate(self.table)
+        self.table.setItemDelegateForColumn(CompanyTableModel._REPORT_CYCLE_COL, self._cycle_delegate)
+
+        # 컬럼 너비 (clients_mode 6컬럼 / jobs_mode 5컬럼 공유 — stretchLastSection)
         self.table.setColumnWidth(0, 200)  # 수임처명
         self.table.setColumnWidth(1, 130)  # 사업자등록번호 / 상태
         self.table.setColumnWidth(2, 120)  # 관리번호(편집) / 현재 단계
-        self.table.setColumnWidth(3, 70)   # 포털 / 소요시간
-        self.table.setColumnWidth(4, 70)   # 활성 / 에러
+        self.table.setColumnWidth(3, 70)   # 주기(드롭다운) / 소요시간
+        self.table.setColumnWidth(4, 70)   # 포털 / 에러
+        self.table.setColumnWidth(5, 60)   # 활성 (clients_mode 전용)
         self.table.horizontalHeader().setStretchLastSection(True)
 
         layout.addWidget(self.table)
@@ -315,6 +367,8 @@ class CompanyTable(QWidget):
                     "name": job.get("name", ""),
                     "business_number": job.get("business_number", ""),
                     "management_number": job.get("management_number", ""),
+                    "id": job.get("id"),
+                    "report_cycle": job.get("report_cycle", ""),
                 })
         self.selected_run_btn.setEnabled(len(self._selected_clients) > 0)
 

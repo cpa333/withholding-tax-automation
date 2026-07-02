@@ -248,14 +248,16 @@ class BatchEngine:
         """단일 잡 실행"""
         self.job_repo.mark_running(job.id)
 
-        # 사업장관리번호(override 우선) + 사업자등록번호 조회
+        # 사업장관리번호(override 우선) + 사업자등록번호 + 신고주기 조회
         mgmt_no = ""
         biz_no = ""
+        report_cycle = ""
         if job.client_id:
             client = self.client_repo.get(job.client_id)
             if client:
                 mgmt_no = get_management_number(client)
                 biz_no = client.business_number or ""
+                report_cycle = client.report_cycle or ""
 
         print(f"\n{'─'*55}")
         print(f"  [{job.client_name}] 처리 시작")
@@ -275,6 +277,8 @@ class BatchEngine:
                 page, context, job, self.state,
                 management_number=mgmt_no,
                 business_number=biz_no,
+                report_cycle=report_cycle,
+                client_id=job.client_id,
             )
 
             if success:

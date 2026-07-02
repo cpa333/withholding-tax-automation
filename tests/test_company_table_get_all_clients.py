@@ -35,7 +35,8 @@ def test_returns_all_named_clients_with_full_dict_shape():
     out = m.get_all_clients()
     assert len(out) == 2
     assert out[0] == {"name": "서율회계법인", "business_number": "123-45-67890",
-                      "management_number": "13781663600", "enabled": True}
+                      "management_number": "13781663600",
+                      "id": 1, "report_cycle": "", "enabled": True}
     # enabled 필드 보존(필터링은 호출측 main_window 책임) — 비활성도 그대로 노출.
     assert out[1]["enabled"] is False
     assert out[1]["management_number"] == ""

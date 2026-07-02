@@ -738,10 +738,26 @@ async def get_clients_with_biz_from_taxagent(page):
                     // 클릭 직전 카드 자체의 이름 읽기 (expected_name)
                     const nameEl = cards[idx].querySelector('span.company_name_text');
                     const cardName = nameEl ? nameEl.textContent.trim() : '';
-                    return {clicked: true, cardName: cardName};
+                    // 카드에 달린 태그(button.btn_tag span) 수집 → 원천 신고주기(매월/반기) 추출.
+                    // 태그 텍스트는 콤마 구분(예: "테스트1,원천,매월")이므로 세그먼트 중
+                    // 매월/반기 인 것을 찾는다.
+                    const tagSpans = cards[idx].querySelectorAll('button.btn_tag span');
+                    const tags = [];
+                    for (const ts of tagSpans) {
+                        const tx = (ts.textContent || '').trim();
+                        if (tx) tags.push(tx);
+                    }
+                    let cycle = '';
+                    for (const t of tags) {
+                        for (const seg of t.split(',')) {
+                            const s = seg.trim();
+                            if (s === '매월' || s === '반기') cycle = s;
+                        }
+                    }
+                    return {clicked: true, cardName: cardName, tags: tags, cycle: cycle};
                 }
             }
-            return {clicked: false, cardName: ''};
+            return {clicked: false, cardName: '', tags: [], cycle: ''};
         }''', i)
         if not click_result or not click_result.get("clicked"):
             continue
@@ -794,9 +810,11 @@ async def get_clients_with_biz_from_taxagent(page):
                 results.append({
                     "name": name,
                     "business_number": info.get("business_number", ""),
+                    "report_cycle": (click_result.get("cycle") or "") if click_result else "",
                 })
 
-    log(f"  taxagent 스크랩: {len(results)}건 (이름+사업자번호)")
+    cycle_cnt = sum(1 for r in results if r.get("report_cycle"))
+    log(f"  taxagent 스크랩: {len(results)}건 (이름+사업자번호), 신고주기 태그 {cycle_cnt}건")
     return results
 
 
@@ -970,26 +988,24 @@ async def click_menu_item(page, item_text):
 # ═══════════════════════════════════════════════════════════════════════
 
 async def get_report_period_type(page):
-    """원천징수이행상황신고서의 매월/반기 라디오 상태 반환"""
-    result = await page.evaluate("""() => {
+    """원천징수이행상황신고서의 매월/반기 신고주기 반환 (읽기 전용, 클릭 금지).
+
+    WEHAGO SWTA 화면의 동작(실사 DOM 확인):
+      - 반기 수임처 → '반기' 라디오가 명시적으로 체크되어 로드됨.
+      - 매월 수임처 → 어느 라디오도 체크되지 않은 채 로드됨(매월 = 기본값).
+    따라서 '반기'가 체크되어 있으면 '반기', 그 외(매월 라디오 존재)면 '매월' 반환.
+    라디오 자체가 없으면 None. 라디오는 시스템 고정이라 클릭으로 변경 불가 → 읽기만 한다.
+    """
+    return await page.evaluate(r"""() => {
         const radios = document.querySelectorAll('input.LSinput[type=radio]');
-        const monthlyRadios = [];
+        let hasMonthly = false;
         for (const r of radios) {
             const label = r.closest('label')?.querySelector('.label_text')?.textContent?.trim();
-            if (label === '매월' || label === '반기') {
-                monthlyRadios.push({radio: r, label, checked: r.checked});
-            }
+            if (label === '반기' && r.checked) return '반기';
+            if (label === '매월') hasMonthly = true;
         }
-        const checked = monthlyRadios.find(r => r.checked);
-        if (checked) return checked.label;
-        const monthly = monthlyRadios.find(r => r.label === '매월');
-        if (monthly) {
-            monthly.radio.click();
-            return '매월';
-        }
-        return null;
+        return hasMonthly ? '매월' : null;
     }""")
-    return result
 
 
 async def set_period_fields(page, year, start_month, end_month):
@@ -1173,12 +1189,20 @@ async def ensure_wehago_main(page):
         await ensure_full_tab(page)
         await dismiss_dialogs(page)
         await dismiss_ai_briefing_popup(page)
+        # 수임처 카드 리스트가 렌더링될 때까지 대기.
+        # SmartA(원천징수이행상황신고서 등)에서 메인으로 복귀 시 카드 로드가 지연되면
+        # 이후 검색/진입이 빈 결과로 실패하므로 카드가 나타날 때까지 기다린다.
+        try:
+            await page.wait_for_selector('[id^="company_"]', timeout=15000)
+        except Exception:
+            log("  WARNING: 메인 수임처 카드가 로드되지 않음 (이후 진입 실패 가능)")
 
 
 async def search_company_by_biz(page, biz_number: str) -> str | None:
     """WEHAGO 메인 검색: 사업자등록번호 → 수임처명 반환
 
-    locator.fill 시도 → 실패 시 keyboard.type fallback.
+    검색창에 keyboard.type + Enter 로 검색(fill()/버튼클릭은 React onChange 미발생으로
+    필터링 안 됨). 결과는 사업자번호 자릿수가 일치하는 카드로 정확히 매칭해 반환.
     """
     if not biz_number:
         log("  사업자등록번호가 비어있음")
@@ -1189,47 +1213,43 @@ async def search_company_by_biz(page, biz_number: str) -> str | None:
 
     try:
         input_loc = page.locator(f"xpath={_SEARCH_XPATH_INPUT}")
-        await input_loc.fill(biz_number, timeout=5000, force=True)
-        log("  검색어 입력 완료")
+        await input_loc.click(timeout=5000, force=True)
+        # 잔류 검색어 제거
+        await page.keyboard.press("Control+A")
+        await page.keyboard.press("Delete")
+        # 타이핑 + Enter 로 검색 트리거.
+        # fill()/조회버튼클릭은 React 제어 입력의 onChange 가 타지 않아 카드가 필터링되지
+        # 않고 항상 첫 카드만 반환하는 버그가 있었다. 실사 확인: keyboard.type + Enter 만이
+        # 메인 카드를 해당 사업자번호로 필터링한다 (가상스크롤 20개 밖 수임처도 노출).
+        await page.keyboard.type(biz_number, delay=50)
         await asyncio.sleep(0.5)
-
-        btn_loc = page.locator(f"xpath={_SEARCH_XPATH_BTN}")
-        await btn_loc.click(timeout=5000, force=True)
-        log("  검색 버튼 클릭 → 결과 대기...")
+        await page.keyboard.press("Enter")
+        log("  사업자번호 입력 + Enter 검색")
         await asyncio.sleep(3)
-
     except Exception as e:
-        log(f"  locator 조작 실패, keyboard.type으로 재시도: {e}")
-        try:
-            await dismiss_ai_briefing_popup(page)
-            input_loc = page.locator(f"xpath={_SEARCH_XPATH_INPUT}")
-            await input_loc.click(timeout=5000, force=True)
-            await input_loc.fill("", force=True)
-            await page.keyboard.type(biz_number, delay=50)
-            await asyncio.sleep(0.5)
-            btn_loc = page.locator(f"xpath={_SEARCH_XPATH_BTN}")
-            await btn_loc.click(timeout=5000, force=True)
-            log("  keyboard.type + force click으로 검색 완료")
-            await asyncio.sleep(3)
-        except Exception as e2:
-            log(f"  keyboard.type 재시도도 실패: {e2}")
-            return None
+        log(f"  검색 입력 실패: {e}")
+        return None
 
-    # 결과 리스트에서 수임처명 찾기
-    found_name = await _safe_evaluate(page, """() => {
+    # 결과 리스트에서 수임처명 찾기 — 사업자번호가 일치하는 카드를 정확히 매칭.
+    # 검색 필터링이 자동완성 오버레이 등으로 동작하지 않을 수 있어, 단순히 첫 카드를
+    # 잡으면 항상 같은(첫) 수임처로 잘못 진입하게 됨. 메인 카드 textContent 에 사업자번호가
+    # 포함되므로, 조회한 사업자번호 자릿수가 포함된 카드를 찾아 반환한다.
+    found_name = await _safe_evaluate(page, r"""(biz) => {
         try {
+            const bizDigits = (biz || '').replace(/\D/g, '');
+            if (!bizDigits) return null;
             const cards = document.querySelectorAll('[id^="company_"]');
             for (const card of cards) {
                 if (card.offsetWidth < 10) continue;
-                const nameEl = card.querySelector('a');
-                if (nameEl) {
-                    const name = nameEl.textContent.trim();
-                    if (name) return name;
+                const cardDigits = card.textContent.replace(/\D/g, '');
+                if (cardDigits.includes(bizDigits)) {
+                    const nameEl = card.querySelector('a');
+                    return nameEl ? nameEl.textContent.trim() : null;
                 }
             }
             return null;
         } catch(e) { return null; }
-    }""")
+    }""", biz_number)
 
     if found_name:
         log(f"  사업자번호 '{biz_number}' → '{found_name}' 검색 완료")

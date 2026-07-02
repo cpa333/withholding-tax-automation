@@ -262,20 +262,27 @@ class AutomationRunner(AsyncWorker):
                     # 직접 잡 실행 — 브라우저 종료 에러는 _run_job이 잡아주지만,
                     # 에러 메시지가 무서운 traceback으로 표시되지 않도록 여기서 선제 감지
                     engine.job_repo.mark_running(job.id)
+                    self.log_message.emit(
+                        f"[{display_name}] ({clients_done + 1}) job#{job.id} {job.client_name} 처리 중..."
+                    )
 
                     mgmt_no = ""
                     biz_no = ""
+                    report_cycle = ""
                     if job.client_id:
                         client = engine.client_repo.get(job.client_id)
                         if client:
                             mgmt_no = get_management_number(client)
                             biz_no = client.business_number or ""
+                            report_cycle = client.report_cycle or ""
 
                     try:
                         success = await workflow_func(
                             self._page, self._context, job, engine.state,
                             management_number=mgmt_no,
                             business_number=biz_no,
+                            report_cycle=report_cycle,
+                            client_id=job.client_id,
                         )
                         if success:
                             engine.job_repo.mark_completed(job.id)
@@ -426,6 +433,7 @@ class AutomationRunner(AsyncWorker):
                         name=c["name"],
                         portal="wehago",
                         business_number=c["business_number"],
+                        report_cycle=c.get("report_cycle", ""),
                         enabled=True,
                     ))
 
@@ -614,6 +622,8 @@ class AutomationRunner(AsyncWorker):
                     state=state,
                     management_number=management_number,
                     business_number=client_info.get("business_number", ""),
+                    report_cycle=client_info.get("report_cycle", ""),
+                    client_id=client_info.get("id"),
                     year=year,
                     month=month,
                     **extra_kwargs,

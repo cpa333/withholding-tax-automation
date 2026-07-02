@@ -104,6 +104,7 @@ class Client:
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     management_number: str = ""     # 사업장관리번호 override (빈=biz_to_mgmt_no 자동계산)
+    report_cycle: str = ""          # 원천징수 신고주기 태그 (매월/반기, 빈=미지정). WEHAGO 카드 태그 스크랩
 
 
 @dataclass
