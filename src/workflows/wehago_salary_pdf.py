@@ -42,7 +42,8 @@ class WehagoSalaryPdfWorkflow(BaseWorkflow):
             ensure_wehago_main, goto_salary_page_with_fallback,
             navigate_to_swsa0101, log,
         )
-        from src.automation.wehago.run_swsa0101 import download_pdf
+        from src.automation.wehago._swsa_pdf import download_multi_pdf
+        from src.automation.wehago._swsa_constants import SALARY_PDF_FORMATS
 
         year = kwargs.get("year")
         month = kwargs.get("month")
@@ -80,10 +81,10 @@ class WehagoSalaryPdfWorkflow(BaseWorkflow):
                 return False
             state.after_step(job_id, "navigate_to_swsa0101")
 
-        # ── Step 3: PDF 발급 ───────────────────────────────────────────
+        # ── Step 3: PDF 발급 (급여명세(사원당 한장) + 급여대장) ──────────
         if not state.should_skip_step(job_id, "download_pdf"):
             state.before_step(job_id, "download_pdf", 3)
-            await download_pdf(page, save_dir)
+            await download_multi_pdf(page, save_dir, SALARY_PDF_FORMATS)
             state.after_step(job_id, "download_pdf")
 
         # ── Step 4: 모달 정리 ─────────────────────────────────────────

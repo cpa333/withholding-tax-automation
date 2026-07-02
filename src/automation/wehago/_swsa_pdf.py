@@ -97,7 +97,15 @@ def _close_existing_print_dialog():
 
 
 def _select_print_format(target_text):
-    """PrintDialog 인쇄형태 드롭다운에서 항목 선택"""
+    """PrintDialog 인쇄형태(cbContents) 콤보박스에서 항목 선택.
+
+    드롭다운을 열고 이름이 일치하는 항목을 click_input 으로 선택한다. 항목 클릭은
+    드롭다운 스크롤 위치의 영향을 받으므로, 호출측은 인쇄형태를 "드롭다운 상단부터
+    하단으로" 순서대로 요청해야 한다 — 역순(하단→상단) 선택 시 스크롤 업이 꼬여
+    잘못된 항목이 클릭된다(급여명세[하단] 선택 후 급여대장[상단]을 선택하면 다시
+    급여명세가 선택되는 버그). 상단→하단 순서면 스크롤이 아래로만 가 안전하다.
+    SALARY_PDF_FORMATS 의 순서 참고.
+    """
     dlg = _find_print_dialog()
     dlg.set_focus()
     time.sleep(0.5)
@@ -108,9 +116,18 @@ def _select_print_format(target_text):
     time.sleep(1.5)
 
     items = cb.descendants(control_type='ListItem')
+    # 정확 일치 우선 ('급여대장' 이 '급여대장(부서별)' 에 묻히지 않게)
     for item in items:
-        name = item.element_info.element.CurrentName
-        if name and target_text in name:
+        name = (item.element_info.element.CurrentName or "").strip()
+        if name == target_text:
+            item.click_input()
+            log(f"  인쇄형태 선택: {name}")
+            time.sleep(2)
+            return True
+    # 부분 일치 차선
+    for item in items:
+        name = (item.element_info.element.CurrentName or "").strip()
+        if target_text in name:
             item.click_input()
             log(f"  인쇄형태 선택: {name}")
             time.sleep(2)
@@ -193,3 +210,52 @@ async def download_pdf(page, save_dir, print_format=DEFAULT_PRINT_FORMAT):
     await loop.run_in_executor(None, _close_print_dialog)
 
     return os.path.abspath(save_path)
+
+
+async def download_multi_pdf(page, save_dir, print_formats):
+    """PrintDialog를 한 번 열고 여러 인쇄형태 PDF를 같은 save_dir 에 저장.
+
+    각 형태마다 cbContents 콤보박스 선택 → btnSavePDF 클릭 → Windows 저장 대화상자로
+    저장을 반복한다. PrintDialog는 한 번만 열고 마지막에 닫는다(오류 시에도 닫기).
+    파일명은 "{timestamp}_{형태(괄호 앞)}.pdf".
+
+    Args:
+        print_formats: 인쇄형태 문자열 리스트(예: ["급여명세(사원당 한장)", "급여대장"]).
+
+    Returns:
+        저장에 성공한 파일 절대경로 리스트(실패한 형태는 제외).
+    """
+    if sys.platform != "win32":
+        log("  PDF 다운로드는 Windows 전용 기능입니다.")
+        return []
+    if isinstance(print_formats, str):
+        print_formats = [print_formats]
+
+    loop = asyncio.get_event_loop()
+
+    # 기존 PrintDialog 정리
+    await loop.run_in_executor(None, _close_existing_print_dialog)
+
+    # PrintDialog 실행 (한 번)
+    if not await open_print_dialog(page):
+        return []
+
+    os.makedirs(save_dir, exist_ok=True)
+    saved = []
+    try:
+        for fmt in print_formats:
+            selected = await loop.run_in_executor(None, _select_print_format, fmt)
+            if not selected:
+                continue
+            await loop.run_in_executor(None, _click_save_pdf)
+            filename = f"{time.strftime('%Y%m%d_%H%M%S')}_{fmt.split('(')[0]}.pdf"
+            save_path = os.path.join(save_dir, filename)
+            ok = await loop.run_in_executor(None, _handle_save_dialog, save_path)
+            if ok:
+                saved.append(os.path.abspath(save_path))
+    finally:
+        # 오류/중단 시에도 PrintDialog는 반드시 닫기(남으면 다음 수임처 차단)
+        await loop.run_in_executor(None, _close_print_dialog)
+
+    log(f"  PDF {len(saved)}/{len(print_formats)}건 저장: {save_dir}")
+    return saved
