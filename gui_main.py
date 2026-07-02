@@ -86,6 +86,8 @@ def _dispatch_cli_subprocess() -> bool:
     parser.add_argument("--firms", type=str, default=None)
     parser.add_argument("--mgmts", type=str, default=None,
                         help="콤마로 구분된 사업장관리번호 (--firms 와 같은 순서)")
+    parser.add_argument("--save-site", type=str, default=None,
+                        help="저장 최상위 폴더명 오버라이드 (병렬: NHIS/NPS 공통 폴더)")
     args = parser.parse_args(rest)
 
     try:

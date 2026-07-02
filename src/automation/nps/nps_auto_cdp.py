@@ -27,6 +27,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from playwright.async_api import async_playwright
 from src.utils.chrome_cdp import launch_chrome, connect_page as cdp_connect
 from src.utils.save_path import make_save_dir
+
+# 저장 최상위 폴더명(site_name). CLI --save-site 로 오버라이드 — 병렬 실행 시
+# NHIS 와 공통 폴더("공단EDI" 등)로 묶어 같은 수임처 폴더에 건강보험/국민연금 자료를 함께 저장.
+# 미지정 시 "국민연금" (단독 실행 기본값: ~/Desktop/국민연금_{YYYYMM}/{수임처}/).
+_SAVE_SITE = "국민연금"
 from src.utils.human import human_delay
 from datetime import datetime as _dt
 
@@ -189,6 +194,10 @@ async def run_auto_batch(page, context, *, firms, year, month, mgmts=None):
 
 async def main(args=None):
     print_header()
+
+    # 저장 최상위 폴더명 오버라이드 — 병렬(--save-site) 시 NHIS 와 공통 폴더로 묶음.
+    global _SAVE_SITE
+    _SAVE_SITE = getattr(args, "save_site", None) or "국민연금"
 
     # ═══ Phase 1: Chrome 실행 + 연결 ═══
     log("\n[1/3] Chrome 실행...")
@@ -366,7 +375,7 @@ async def run_single_workplace(page, context, workplace_name, is_first=False,
     3. 최종결정내역 탭 통합저장(전체표출) → 통합엑셀 1장
        (구 3탭 가입자/소급/국고 개별 수신을 1장으로 단일화)
     """
-    save_dir = make_save_dir("국민연금", workplace_name, year=year, month=month)
+    save_dir = make_save_dir(_SAVE_SITE,workplace_name, year=year, month=month)
 
     await human_delay(3)
 
@@ -488,7 +497,7 @@ async def run_interactive(page, context, year: int | None = None, month: int | N
                     if not wp:
                         log("  수임처명이 필요합니다.")
                         continue
-                    save_dir = make_save_dir("국민연금", wp, year=year, month=month)
+                    save_dir = make_save_dir(_SAVE_SITE,wp, year=year, month=month)
                     await download_pdf_from_preview(context, save_dir, filename)
                 except Exception as e:
                     log(f"ERROR: {e}")
@@ -504,7 +513,7 @@ async def run_interactive(page, context, year: int | None = None, month: int | N
                     if not wp:
                         log("  수임처명이 필요합니다.")
                         continue
-                    save_dir = make_save_dir("국민연금", wp, year=year, month=month)
+                    save_dir = make_save_dir(_SAVE_SITE,wp, year=year, month=month)
                     filename = f"국민연금보험료_결정내역_{_y}{_m:02d}_엑셀"
                     await save_excel(page, context, save_dir, filename)
                 except Exception as e:
@@ -518,7 +527,7 @@ async def run_interactive(page, context, year: int | None = None, month: int | N
                     if not wp:
                         log("  수임처명이 필요합니다.")
                         continue
-                    save_dir = make_save_dir("국민연금", wp, year=year, month=month)
+                    save_dir = make_save_dir(_SAVE_SITE,wp, year=year, month=month)
                     result = await process_tab_download(
                         page, context, save_dir,
                         tab_index=TAB_RETRO,
@@ -539,7 +548,7 @@ async def run_interactive(page, context, year: int | None = None, month: int | N
                     if not wp:
                         log("  수임처명이 필요합니다.")
                         continue
-                    save_dir = make_save_dir("국민연금", wp, year=year, month=month)
+                    save_dir = make_save_dir(_SAVE_SITE,wp, year=year, month=month)
                     tabs = [
                         (TAB_MEMBER, "가입자내역", "grdList2"),
                         (TAB_RETRO, "소급분내역", "grdList3"),
@@ -592,6 +601,8 @@ if __name__ == "__main__":
                         help="콤마로 구분된 사업장명 (미지정 시 전체)")
     parser.add_argument("--mgmts", type=str, default=None,
                         help="콤마로 구분된 사업장관리번호 (--firms 와 같은 순서)")
+    parser.add_argument("--save-site", type=str, default=None,
+                        help="저장 최상위 폴더명 오버라이드 (병렬: NHIS와 공통 폴더)")
     args = parser.parse_args()
     try:
         asyncio.run(main(args))

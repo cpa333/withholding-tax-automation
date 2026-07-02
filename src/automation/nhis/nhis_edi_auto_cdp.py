@@ -34,6 +34,7 @@ from src.automation.nhis._common_edi import (
     run_single_firm_workflow,
 )
 from src.utils.human import human_delay
+from src.automation.nhis import _doc_download  # _SAVE_SITE 오버라이드용 (병렬 --save-site)
 
 
 def print_header():
@@ -393,6 +394,9 @@ async def run_auto_batch(page, context, *, firms, year, month, mgmts=None):
 async def main(args=None):
     print_header()
 
+    # 저장 최상위 폴더명 오버라이드 — 병렬(--save-site) 시 NPS 와 공통 폴더로 묶음.
+    _doc_download._SAVE_SITE = getattr(args, "save_site", None) or "국민건강보험"
+
     # Phase 1: Chrome 실행 + 연결
     log("\n[1/3] Chrome 실행...")
     result = launch_chrome(url=NHIS_EDI_URL)
@@ -530,6 +534,8 @@ if __name__ == "__main__":
                         help="콤마로 구분된 사업장명 (미지정 시 전체)")
     parser.add_argument("--mgmts", type=str, default=None,
                         help="콤마로 구분된 사업장관리번호 (--firms 와 같은 순서)")
+    parser.add_argument("--save-site", type=str, default=None,
+                        help="저장 최상위 폴더명 오버라이드 (병렬: NPS와 공통 폴더)")
     args = parser.parse_args()
     try:
         asyncio.run(main(args))

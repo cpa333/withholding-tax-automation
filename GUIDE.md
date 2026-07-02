@@ -102,6 +102,8 @@ Nexacro 기반 웹 프레임워크로 일반 DOM click이 동작하지 않음:
 5. 저장 경로: `~/Desktop/국민연금_{YYYYMM}/{수임처명}/`
 6. 파일명: `국민연금보험료_결정내역_{YYYYMM}_{탭명}.pdf` / `.xlsx`
 
+> **공단 EDI 병렬 자동화(2번) 저장 경로:** 병렬 실행 시 건강보험·국민연금이 각각 별도 최상위 폴더를 만들지 않고 **공통 폴더 `~/Desktop/공단EDI_{YYYYMM}/{수임처명}/`** 하나에 두 기관 자료를 함께 저장. 두 CLI 에 `--save-site 공단EDI` 를 전달(`parallel_cli_worker.PARALLEL_SAVE_SITE`)해 `make_save_dir` 의 site_name 을 오버라이드(`nhis/_doc_download._SAVE_SITE`, `nps/nps_auto_cdp._SAVE_SITE`). 단독(NHIS/NPS 개별) 실행은 인자 미전달로 기존대로 각 사이트 폴더 사용.
+
 > **날짜 의존성 (2026-06-12 업데이트):**
 > - GUI에서 선택한 연도/월로 결정내역 그리드의 내용 컬럼(col=3)에서 `{YYYY}.{MM}` 매칭
 > - **2차 우선 탐색**: 해당 월의 `2차` 통보서를 먼저 찾고, 없으면 해당 월의 첫 아이템 선택

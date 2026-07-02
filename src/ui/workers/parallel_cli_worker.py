@@ -17,6 +17,10 @@ from PySide6.QtCore import QThread, Signal
 # src/automation/nps/nps_auto_cdp.py / nhis/nhis_edi_auto_cdp.py 의 _RESULT_MARKER 와 동일.
 _RESULT_MARKER = "__WTAX_RESULT__"
 
+# 병렬 실행 시 NHIS/NPS 가 같은 최상위 폴더에 저장하도록 두 CLI 에 전달할 저장 폴더명.
+# → ~/Desktop/공단EDI_{YYYYMM}/{수임처}/ 안에 건강보험+국민연금 자료가 함께 들어감.
+PARALLEL_SAVE_SITE = "공단EDI"
+
 
 class ParallelCliRunner(QThread):
     """NPS+NHIS CLI 를 병렬 subprocess 로 실행·모니터링."""
@@ -74,6 +78,8 @@ class ParallelCliRunner(QThread):
             args += ["--firms", ",".join(firms)]
         if mgmts:
             args += ["--mgmts", ",".join(str(m) for m in mgmts)]
+        # 병렬: 두 CLI 를 같은 최상위 폴더로 묶어 수임처별로 건강보험+국민연금 자료를 함께 저장.
+        args += ["--save-site", PARALLEL_SAVE_SITE]
         kwargs = dict(
             args=args, env=env, cwd=cwd,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
