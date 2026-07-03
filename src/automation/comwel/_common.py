@@ -212,7 +212,27 @@ async def navigate_to_premium_20209(page):
 
     log("[COMWEL] 부과고지 보험료 조회(20209) 진입...")
 
-    # 퀵메뉴가 나타날 때까지 폴링 대기 (로그인 직후 대시보드 로딩 시간 고려)
+    # 로그인 후 사무대행 팝업이 메뉴 클릭을 방해할 수 있으므로 먼저 닫기
+    await dismiss_dialogs(page)
+
+    # 대시보드가 완전히 로드될 때까지 대기 — 퀵메뉴 또는 GNB 정보조회 메뉴가
+    # DOM 에 나타날 때까지 폴링 (병렬 환경에서는 Chrome 3개 동시 시작으로
+    # 대시보드 로딩이 느려 메뉴가 늦게 나타남).
+    dashboard_ready = False
+    for _ in range(30):  # 최대 30초 대기
+        ready = await page.evaluate(r"""() => {
+            const qm = document.getElementById("mf_wfm_content_gen_firstGenerator_1_quickMenu");
+            const gnb = document.getElementById("mf_wfm_header_gen_firstGenerator_1_menu1_Label");
+            return !!qm || !!gnb;
+        }""")
+        if ready:
+            dashboard_ready = True
+            break
+        await asyncio.sleep(1)
+    if not dashboard_ready:
+        log("  ⚠ 대시보드 메뉴 로딩 대기 시간 초과 (30초)")
+
+    # 퀵메뉴가 나타날 때까지 폴링 대기
     quick_ready = False
     for _ in range(10):
         if await _click_by_id(page, QUICKMENU_20209_ID):
