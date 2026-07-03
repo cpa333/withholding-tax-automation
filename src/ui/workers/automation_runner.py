@@ -1066,6 +1066,11 @@ class AutomationRunner(AsyncWorker):
             return False
 
         await self._reconnect_page("comwel_edi")
+        # viewport 1920x1080 설정 — 근로복지공단 반응형 헤더에서 GNB 메뉴 숨김 방지.
+        try:
+            await self._page.set_viewport_size({"width": 1920, "height": 1080})
+        except Exception:
+            pass
         # 로그인 직후 페이지 안정화 대기 (메인 대시보드 렌더링 완료 후 진행).
         # 로그인 확인 즉시 첫 수임처를 시작하면 대시보드가 덜 로드되어
         # 메뉴/요소 클릭이 빗나가는 것을 방지.

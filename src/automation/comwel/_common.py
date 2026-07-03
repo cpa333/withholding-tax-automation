@@ -76,11 +76,20 @@ async def connect_page(playwright, *, url: str = CDP_URL):
     for pg in context.pages:
         try:
             if "total.comwel.or.kr" in pg.url:
+                # viewport 1920x1080 설정 — 반응형 헤더에서 GNB 메뉴 숨김 방지 (라이브 검증)
+                try:
+                    await pg.set_viewport_size({"width": 1920, "height": 1080})
+                except Exception:
+                    pass
                 return browser, context, pg
         except Exception:
             continue
 
     page = context.pages[0] if context.pages else await context.new_page()
+    try:
+        await page.set_viewport_size({"width": 1920, "height": 1080})
+    except Exception:
+        pass
     return browser, context, page
 
 

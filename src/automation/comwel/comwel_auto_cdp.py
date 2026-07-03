@@ -182,6 +182,14 @@ async def main(args=None):
             log(f"ERROR: Chrome 연결 실패 - {e}")
             return
 
+        # viewport 1920x1080 설정 — 근로복지공단 사이트는 반응형 헤더를 사용하여
+        # viewport가 작으면 GNB 메뉴가 display:none 으로 숨겨짐 (라이브 검증).
+        # 병렬 환경에서 Chrome 창이 최대화되지 않을 수 있어 강제 설정.
+        try:
+            await page.set_viewport_size({"width": 1920, "height": 1080})
+        except Exception:
+            pass
+
         await page.goto(COMWEL_URL, wait_until="domcontentloaded",
                         timeout=PAGE_LOAD_TIMEOUT_MS)
         await page.bring_to_front()
