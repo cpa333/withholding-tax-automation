@@ -1,7 +1,7 @@
-"""건강보험(NHIS) PDF + 국민연금(NPS) Excel raw data 파싱 모듈
+"""건강보험(NHIS) PDF + 국민연금(NPS) Excel + 고용보험 XLS raw data 파싱 모듈
 
-Phase 2/3에서 다운로드한 raw data 파일을 읽어 사원명 기준 dict로 변환.
-Phase 4(WEHAGO 급여자료입력)에서 convert_for_upload로 전달됨.
+Phase 2/3/5에서 다운로드한 raw data 파일을 읽어 사원명 기준 dict로 변환.
+Phase 6(WEHAGO 급여자료입력)에서 convert_for_upload로 전달됨.
 """
 import logging
 from dataclasses import dataclass, field
@@ -366,3 +366,69 @@ def read_nps_integrated_excel(
         len(member), len(retro), len(govt), excel_path,
     )
     return member, retro, govt
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 고용보험(근로복지공단) XLS 파서 — ClipReport 다운로드 파일
+# ═══════════════════════════════════════════════════════════════════════
+
+def read_employment_xls(xls_path: str) -> tuple[dict[str, int], dict[str, int]]:
+    """고용보험료 지원금 정보 .xls 파일 파싱 (ClipReport 다운로드).
+
+    엑셀 v3 규칙: 실업급여지원금(근로자) → 고용보험 (-), 환수금(근로자) → (+).
+    본 함수는 근로자 몫만 추출하여 반환 (사업주 몫 제외).
+
+    .xls 구조 (xlrd, OLE2 형식):
+      - 시트 "Page 1" (지원금): col2=근로자명, col12=실업급여지원금(근로자)
+      - 시트 "Page 2" (환수금): col1=근로자명, col7=실업급여환수금(근로자)
+
+    Args:
+        xls_path: 고용보험료지원금정보_{YYYYMM}.xls 경로
+
+    Returns:
+        (support_data, collect_data):
+          support_data = {근로자명: 실업급여지원금(근로자)}
+          collect_data = {근로자명: 실업급여환수금(근로자)}
+    """
+    import xlrd
+
+    support: dict[str, int] = {}
+    collect: dict[str, int] = {}
+
+    try:
+        wb = xlrd.open_workbook(xls_path)
+    except Exception as e:
+        logger.warning("고용보험 xls 열기 실패 (%s): %s", xls_path, e)
+        return support, collect
+
+    # Page 1 (지원금): col2=근로자명, col12=실업급여지원금(근로자)
+    try:
+        sh1 = wb.sheet_by_name("Page 1")
+        for r in range(7, sh1.nrows):  # 행0-5 메타, 행6 헤더, 행7+ 데이터
+            name = str(sh1.cell_value(r, 2)).strip()
+            if not name:
+                continue
+            amount = _parse_int(sh1.cell_value(r, 12))
+            if amount:
+                support[name] = support.get(name, 0) + amount
+    except Exception as e:
+        logger.warning("고용보험 Page 1(지원금) 파싱 실패: %s", e)
+
+    # Page 2 (환수금): col1=근로자명, col7=실업급여환수금(근로자)
+    try:
+        sh2 = wb.sheet_by_name("Page 2")
+        for r in range(7, sh2.nrows):
+            name = str(sh2.cell_value(r, 1)).strip()
+            if not name:
+                continue
+            amount = _parse_int(sh2.cell_value(r, 7))
+            if amount:
+                collect[name] = collect.get(name, 0) + amount
+    except Exception as e:
+        logger.warning("고용보험 Page 2(환수금) 파싱 실패: %s", e)
+
+    logger.info(
+        "고용보험 xls: 지원금 %d명, 환수금 %d명 (%s)",
+        len(support), len(collect), xls_path,
+    )
+    return support, collect

@@ -33,6 +33,7 @@ COLUMN_ALIASES: dict[str, list[str]] = {
     "퇴직정산_요양": ["퇴직정산(장기요양보험)", "퇴직정산(요양)", "퇴직정산(장기요양)"],
     "국민연금": ["국민연금"],
     "국민연금정산": ["국민연금정산", "국민연금 소급분"],
+    "고용보험": ["고용보험"],
 }
 
 
@@ -44,6 +45,7 @@ class MergeResult:
     employees_unmatched: list[str] = field(default_factory=list)
     nhis_applied: int = 0
     nps_applied: int = 0
+    ei_applied: int = 0
     warnings: list[str] = field(default_factory=list)
 
 
@@ -93,6 +95,8 @@ def apply_raw_data(
     nps_member_data: dict[str, int] | None = None,
     nps_retro_data: dict[str, int] | None = None,
     nps_govt_data: dict[str, int] | None = None,
+    ei_support_data: dict[str, int] | None = None,
+    ei_collect_data: dict[str, int] | None = None,
 ) -> MergeResult:
     """WEHAGO 업로드 엑셀에 raw data 덮어쓰기 (사원명 기준 매칭)
 
@@ -104,13 +108,17 @@ def apply_raw_data(
         nps_govt_data: {성명: 국고지원 본인몫} or None
             (구 3파일 경로=국고지원금액(전액)/2, 통합엑셀 경로=col24 국고지원금액_본인기여금.
              둘 다 국민연금에서 차감할 근로자 본인몫으로 등가 취급.)
+        ei_support_data: {성명: 실업급여지원금(근로자)} or None — 고용보험에서 차감(-)
+        ei_collect_data: {성명: 실업급여환수금(근로자)} or None — 고용보험에 가산(+)
+            (엑셀 v3 규칙: 지원금은 -, 환수금은 +. 기본 0.9%는 위하고 자동 산정이므로 제외.)
 
     Returns:
         MergeResult
     """
     result = MergeResult(path=upload_path)
 
-    if not nhis_data and not nps_member_data and not nps_retro_data and not nps_govt_data:
+    if (not nhis_data and not nps_member_data and not nps_retro_data
+            and not nps_govt_data and not ei_support_data and not ei_collect_data):
         result.warnings.append("반영할 raw data 없음")
         return result
 
@@ -169,12 +177,23 @@ def apply_raw_data(
             _apply_nps_row(ws, r, col_map, nps_amount, nps_retro, nps_govt, result)
             result.nps_applied += 1
 
+        # --- 고용보험 데이터 반영 ---
+        ei_support = ei_support_data.get(emp_name) if ei_support_data else None
+        ei_collect = ei_collect_data.get(emp_name) if ei_collect_data else None
+        if ei_support is not None or ei_collect is not None:
+            _apply_ei_row(ws, r, col_map, ei_support, ei_collect, result)
+            result.ei_applied += 1
+
     # 매칭 통계
     raw_names = set()
     if nhis_data:
         raw_names.update(nhis_data.keys())
     if nps_member_data:
         raw_names.update(nps_member_data.keys())
+    if ei_support_data:
+        raw_names.update(ei_support_data.keys())
+    if ei_collect_data:
+        raw_names.update(ei_collect_data.keys())
 
     result.employees_matched = len(raw_names & wehago_names_seen)
     result.employees_unmatched = sorted(raw_names - wehago_names_seen)
@@ -287,3 +306,29 @@ def _apply_nps_row(ws, row: int, col_map: dict,
 
     if pension_col is not None:
         ws.cell(row, pension_col + 1).value = base
+
+
+def _apply_ei_row(ws, row: int, col_map: dict,
+                  support_amount: int | None,
+                  collect_amount: int | None,
+                  result: MergeResult):
+    """단일 행에 고용보험(실업급여 지원금/환수금) 데이터 덮어쓰기.
+
+    엑셀 v3 규칙 (라이브 검증):
+      - 실업급여지원금(근로자) → 고용보험에서 **차감(-)**
+      - 실업급여환수금(근로자) → 고용보험에 **가산(+)**
+      - 기본 0.9% 보험료는 위하고 자동 산정이므로 이 값에 포함하지 않음.
+      최종값 = -abs(지원금) + abs(환수금)
+    """
+    ei_col = col_map.get("고용보험")
+    if ei_col is None:
+        return
+
+    # 조정분 계산: 지원금은 -, 환수금은 +
+    adjustment = 0
+    if support_amount is not None:
+        adjustment -= abs(support_amount)
+    if collect_amount is not None:
+        adjustment += abs(collect_amount)
+
+    ws.cell(row, ei_col + 1).value = adjustment

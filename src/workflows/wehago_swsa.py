@@ -104,11 +104,13 @@ class WehagoSwsaWorkflow(BaseWorkflow):
         if not state.should_skip_step(job_id, "convert_excel"):
             state.before_step(job_id, "convert_excel", 4)
 
-            # Phase 2/3 raw data 파일 탐색 및 파싱
+            # Phase 2/3/5 raw data 파일 탐색 및 파싱
             nhis_data = None
             nps_member_data = None
             nps_retro_data = None
             nps_govt_data = None
+            ei_support_data = None
+            ei_collect_data = None
 
             try:
                 raw = self._locate_raw_data(client_name, year, month)
@@ -116,7 +118,7 @@ class WehagoSwsaWorkflow(BaseWorkflow):
                     from src.utils.raw_data_reader import (
                         read_nhis_pdf, read_nps_integrated_excel,
                         read_nps_member_excel, read_nps_retro_excel,
-                        read_nps_govt_excel,
+                        read_nps_govt_excel, read_employment_xls,
                     )
                     if raw.get("nhis_pdf"):
                         nhis_data = read_nhis_pdf(raw["nhis_pdf"])
@@ -139,6 +141,11 @@ class WehagoSwsaWorkflow(BaseWorkflow):
                         if raw.get("nps_govt"):
                             nps_govt_data = read_nps_govt_excel(raw["nps_govt"])
                             log(f"  NPS 국고지원내역: {len(nps_govt_data)}명")
+                    # 고용보험(근로복지공단) xls — 실업급여 지원금/환수금(근로자)
+                    if raw.get("ei_xls"):
+                        ei_support_data, ei_collect_data = read_employment_xls(raw["ei_xls"])
+                        log(f"  고용보험: 지원금 {len(ei_support_data)}명, "
+                            f"환수금 {len(ei_collect_data)}명")
             except Exception as e:
                 log(f"  원천데이터 읽기 스킵: {e}")
 
@@ -148,6 +155,8 @@ class WehagoSwsaWorkflow(BaseWorkflow):
                 nps_member_data=nps_member_data,
                 nps_retro_data=nps_retro_data,
                 nps_govt_data=nps_govt_data,
+                ei_support_data=ei_support_data,
+                ei_collect_data=ei_collect_data,
             )
             state.after_step(job_id, "convert_excel", {"path": upload_path})
         else:
@@ -196,6 +205,7 @@ class WehagoSwsaWorkflow(BaseWorkflow):
             "nps_member": None,
             "nps_retro": None,
             "nps_govt": None,
+            "ei_xls": None,
         }
 
         # 건강보험 PDF
@@ -221,6 +231,14 @@ class WehagoSwsaWorkflow(BaseWorkflow):
                         result["nps_retro"] = full
                     elif "국고지원내역_엑셀" in f and f.endswith(".xlsx"):
                         result["nps_govt"] = full
+
+        # 고용보험(근로복지공단) xls — 고용보험료지원금정보_{period}.xls
+        ei_dir = os.path.join(desktop, f"고용보험_{period}", folder)
+        if os.path.isdir(ei_dir):
+            for f in os.listdir(ei_dir):
+                if "고용보험료지원금정보" in f and f.endswith(".xls"):
+                    result["ei_xls"] = os.path.join(ei_dir, f)
+                    break
 
         # 하나라도 있으면 dict 반환, 전부 None이면 None 반환
         if any(result.values()):

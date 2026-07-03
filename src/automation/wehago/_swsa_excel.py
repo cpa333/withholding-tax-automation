@@ -45,7 +45,8 @@ async def download_excel(page, save_dir="."):
 
 
 def convert_for_upload(download_path, *, nhis_data=None, nps_member_data=None,
-                       nps_retro_data=None, nps_govt_data=None):
+                       nps_retro_data=None, nps_govt_data=None,
+                       ei_support_data=None, ei_collect_data=None):
     """다운로드 엑셀을 WEHAGO 업로드 양식으로 변환
 
     2행 헤더 평탄화, 합계 행 제거.
@@ -114,14 +115,20 @@ def convert_for_upload(download_path, *, nhis_data=None, nps_member_data=None,
     log(f"  변환 완료: {upload_path}")
 
     # ── Raw data 병합 (옵셔널) ──────────────────────────────────
-    if nhis_data or nps_member_data:
+    if nhis_data or nps_member_data or ei_support_data:
         try:
             from src.utils.data_merger import apply_raw_data
             merge_result = apply_raw_data(
-                upload_path, nhis_data, nps_member_data,
-                nps_retro_data, nps_govt_data,
+                upload_path,
+                nhis_data=nhis_data,
+                nps_member_data=nps_member_data,
+                nps_retro_data=nps_retro_data,
+                nps_govt_data=nps_govt_data,
+                ei_support_data=ei_support_data,
+                ei_collect_data=ei_collect_data,
             )
-            log(f"  [원천데이터 반영] NHIS {merge_result.nhis_applied}명, NPS {merge_result.nps_applied}명"
+            log(f"  [원천데이터 반영] NHIS {merge_result.nhis_applied}명, "
+                f"NPS {merge_result.nps_applied}명, 고용보험 {merge_result.ei_applied}명"
                 f" ({merge_result.employees_matched}명 매칭)")
             for w in merge_result.warnings:
                 log(f"  WARN: {w}")
