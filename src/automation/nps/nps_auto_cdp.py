@@ -13,15 +13,6 @@ import asyncio
 import sys
 import os
 
-if sys.platform == "win32":
-    import io
-    # GUI(LogCapture)에서는 stdout.detach()가 io.UnsupportedOperation을 내므로 가드.
-    try:
-        sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
-        sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
-    except (io.UnsupportedOperation, AttributeError, ValueError):
-        pass
-
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from playwright.async_api import async_playwright
@@ -32,6 +23,7 @@ from src.utils.save_path import make_save_dir
 # NHIS 와 공통 폴더("공단EDI" 등)로 묶어 같은 수임처 폴더에 건강보험/국민연금 자료를 함께 저장.
 # 미지정 시 "국민연금" (단독 실행 기본값: ~/Desktop/국민연금_{YYYYMM}/{수임처}/).
 _SAVE_SITE = "국민연금"
+_SAVE_SUBDIR = None  # 병렬(--save-site 공단EDI) 시 포털 하위폴더명; 단일 실행 시 None
 from src.utils.human import human_delay
 from datetime import datetime as _dt
 
@@ -42,7 +34,7 @@ from src.automation.nps._common import (
     click_detail_tab, output_with_full_ssn, download_pdf_from_preview,
     save_excel, save_integrated, download_final_integrated,
     process_tab_download, switch_workplace, switch_workplace_open,
-    reset_workplace_page,
+    reset_workplace_page, wait_for_nexacro_ready,
     nexacro_click_button,
     BTN_CHANGE_WORKPLACE, BTN_MODAL_CONFIRM, BTN_MODAL_CANCEL,
     TAB_MEMBER, TAB_RETRO, TAB_GOVT,
@@ -177,11 +169,15 @@ async def run_auto_batch(page, context, *, firms, year, month, mgmts=None):
                 skipped.append({"name": wp_name, "reason": "미발견"})
                 await reset_workplace_page(page)  # ★ 미발견 시 페이지 리셋(모달+결과없음 alert 강제 종료, 멈춤 방지)
                 continue
-            await run_single_workplace(page, context, wp_name,
+            ok = await run_single_workplace(page, context, wp_name,
                                        is_first=(completed == 0),
                                        year=year, month=month)
-            completed += 1
-            log(f"  {wp_name} 처리 완료. ({completed}개 완료)")
+            if ok:
+                completed += 1
+                log(f"  {wp_name} 처리 완료. ({completed}개 완료)")
+            else:
+                log(f"  스킵: '{wp_name}' 원천엑셀 다운로드 실패")
+                skipped.append({"name": wp_name, "reason": "다운로드실패", "detail": "원천엑셀"})
         except Exception as e:
             log(f"  ERROR: {wp_name} 처리 실패 - {e}")
             import traceback
@@ -196,8 +192,11 @@ async def main(args=None):
     print_header()
 
     # 저장 최상위 폴더명 오버라이드 — 병렬(--save-site) 시 NHIS 와 공통 폴더로 묶음.
-    global _SAVE_SITE
+    global _SAVE_SITE, _SAVE_SUBDIR
     _SAVE_SITE = getattr(args, "save_site", None) or "국민연금"
+    # 병렬(--save-site 공단EDI) 시 포털별 하위폴더로 분리 — 두 Chrome 이 같은 수임처
+    # 폴더에 동시 쓰기하며 listdir/cleanup 레이스로 서로의 파일을 잠식·삭제하는 것 방지.
+    _SAVE_SUBDIR = "국민연금" if getattr(args, "save_site", None) else None
 
     # ═══ Phase 1: Chrome 실행 + 연결 ═══
     log("\n[1/3] Chrome 실행...")
@@ -223,6 +222,14 @@ async def main(args=None):
         if not await wait_for_login(page):
             log("로그인 실패")
             return
+
+        # Nexacro 프레임워크 준비 게이트 — wait_for_login 은 URL 에 'nexacro' 만 보고
+        # True 를 반환해 타이밍이 약하다. 로그인 직후 첫 1~2 수임처가 반쯤 로딩된
+        # 프레임워크에 no-op 클릭을 날려 누락되는 것(BUG1) 방지. NHIS wait_firm_selector_ready
+        # 게이트(nhis_edi_auto_cdp.py)와 대칭.
+        log("Nexacro 프레임워크 준비 대기...")
+        if not await wait_for_nexacro_ready(page):
+            log("  WARN: Nexacro 준비 타임아웃 — 계속 진행")
 
         log("로그인 확인됨. 자동화 시작.\n")
 
@@ -352,10 +359,13 @@ async def run_full_auto(page, context, year: int | None = None, month: int | Non
         log(f"{'='*55}")
 
         try:
-            await run_single_workplace(page, context, wp_name, is_first=(completed == 0),
+            ok = await run_single_workplace(page, context, wp_name, is_first=(completed == 0),
                                         year=year, month=month)
-            completed += 1
-            log(f"\n  {wp_name} 처리 완료. ({completed}개 완료)")
+            if ok:
+                completed += 1
+                log(f"\n  {wp_name} 처리 완료. ({completed}개 완료)")
+            else:
+                log(f"\n  {wp_name} 원천엑셀 다운로드 실패 (미완료로 집계)")
         except Exception as e:
             log(f"  ERROR: {wp_name} 처리 실패 - {e}")
             import traceback
@@ -375,7 +385,8 @@ async def run_single_workplace(page, context, workplace_name, is_first=False,
     3. 최종결정내역 탭 통합저장(전체표출) → 통합엑셀 1장
        (구 3탭 가입자/소급/국고 개별 수신을 1장으로 단일화)
     """
-    save_dir = make_save_dir(_SAVE_SITE,workplace_name, year=year, month=month)
+    save_dir = make_save_dir(_SAVE_SITE,workplace_name, year=year, month=month,
+                             subdir=_SAVE_SUBDIR)
 
     await human_delay(3)
 
@@ -384,18 +395,22 @@ async def run_single_workplace(page, context, workplace_name, is_first=False,
     ok = await navigate_to_decision_details(page)
     if not ok:
         log(f"  ERROR: 결정내역 이동 실패 - {workplace_name} 스킵")
-        return
+        return False
 
     # Step 3: 2차 상세 진입
     log("  2차 결정내역 진입...")
     result = await open_decision_detail(page, year=year, month=month)
     if not result or not result.get("ok"):
         log(f"  ERROR: 2차 상세 진입 실패 - {workplace_name} 스킵")
-        return
+        return False
 
     # 최종결정내역 통합엑셀 다운로드 — 3탭(가입자/소급/국고) 개별 수신을 1장으로 대체.
+    # 반환값({excel, pdf})을 검사해 원천엑셀 누락 시 False 반환 — run_auto_batch 가 이를
+    # 다운로드실패로 skipped 에 넣도록(NHIS ok-검사 패턴 이식). 이전엔 반환값을 버려
+    # 누락이 항상 '완료'로 마스킹됐다(BUG2).
+    integ = None
     try:
-        await download_final_integrated(
+        integ = await download_final_integrated(
             page, context, save_dir, year=year, month=month,
         )
     except Exception as e:
@@ -413,7 +428,9 @@ async def run_single_workplace(page, context, workplace_name, is_first=False,
         except Exception:
             pass
 
-    log(f"  저장 경로: {save_dir}")
+    excel_ok = bool(integ and integ.get("excel"))
+    log(f"  저장 경로: {save_dir} (원천엑셀 {'성공' if excel_ok else '누락'})")
+    return excel_ok
 
     # [롤백] 3탭 개별 PDF+엑셀로 되돌리려면 아래 루프 활성화.
     # process_tab_download 는 run_interactive 메뉴(수동 탭별 다운로드)에서 계속 사용.
@@ -497,7 +514,8 @@ async def run_interactive(page, context, year: int | None = None, month: int | N
                     if not wp:
                         log("  수임처명이 필요합니다.")
                         continue
-                    save_dir = make_save_dir(_SAVE_SITE,wp, year=year, month=month)
+                    save_dir = make_save_dir(_SAVE_SITE,wp, year=year, month=month,
+                                             subdir=_SAVE_SUBDIR)
                     await download_pdf_from_preview(context, save_dir, filename)
                 except Exception as e:
                     log(f"ERROR: {e}")
@@ -513,7 +531,8 @@ async def run_interactive(page, context, year: int | None = None, month: int | N
                     if not wp:
                         log("  수임처명이 필요합니다.")
                         continue
-                    save_dir = make_save_dir(_SAVE_SITE,wp, year=year, month=month)
+                    save_dir = make_save_dir(_SAVE_SITE,wp, year=year, month=month,
+                                             subdir=_SAVE_SUBDIR)
                     filename = f"국민연금보험료_결정내역_{_y}{_m:02d}_엑셀"
                     await save_excel(page, context, save_dir, filename)
                 except Exception as e:
@@ -527,7 +546,8 @@ async def run_interactive(page, context, year: int | None = None, month: int | N
                     if not wp:
                         log("  수임처명이 필요합니다.")
                         continue
-                    save_dir = make_save_dir(_SAVE_SITE,wp, year=year, month=month)
+                    save_dir = make_save_dir(_SAVE_SITE,wp, year=year, month=month,
+                                             subdir=_SAVE_SUBDIR)
                     result = await process_tab_download(
                         page, context, save_dir,
                         tab_index=TAB_RETRO,
@@ -548,7 +568,8 @@ async def run_interactive(page, context, year: int | None = None, month: int | N
                     if not wp:
                         log("  수임처명이 필요합니다.")
                         continue
-                    save_dir = make_save_dir(_SAVE_SITE,wp, year=year, month=month)
+                    save_dir = make_save_dir(_SAVE_SITE,wp, year=year, month=month,
+                                             subdir=_SAVE_SUBDIR)
                     tabs = [
                         (TAB_MEMBER, "가입자내역", "grdList2"),
                         (TAB_RETRO, "소급분내역", "grdList3"),
@@ -592,6 +613,15 @@ async def run_interactive(page, context, year: int | None = None, month: int | N
 
 if __name__ == "__main__":
     import argparse
+    import io
+    if sys.platform == "win32":
+        # 콘솔(cp949) → utf-8 출력 재래핑. import 시엔 이 블록이 안 돌아 pytest capture
+        # 및 GUI LogCapture 가 안전하다(run_swta0101.py 와 동일한 __main__ 진입 패턴).
+        try:
+            sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
+            sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
+        except (io.UnsupportedOperation, AttributeError, ValueError):
+            pass
     parser = argparse.ArgumentParser(description="국민연금 EDI 자동화")
     parser.add_argument("--auto", action="store_true",
                         help="비대화형 일괄 모드 (GUI 병렬 subprocess 용)")

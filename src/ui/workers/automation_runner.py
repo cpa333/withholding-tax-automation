@@ -350,7 +350,6 @@ class AutomationRunner(AsyncWorker):
             get_clients_with_biz_from_taxagent, search_clients_by_name,
         )
         from src.batch.db import BatchDB, ClientRepository
-        from src.batch.models import Client
 
         name_filter = cmd.get("name", "")
         if name_filter:
@@ -425,17 +424,9 @@ class AutomationRunner(AsyncWorker):
                 conn.execute("DELETE FROM steps")
                 conn.execute("DELETE FROM jobs")
                 conn.execute("DELETE FROM batches")
-                conn.execute("DELETE FROM clients")
-
-                client_repo = ClientRepository(db)
-                for c in clients_data:
-                    client_repo.upsert(Client(
-                        name=c["name"],
-                        portal="wehago",
-                        business_number=c["business_number"],
-                        report_cycle=c.get("report_cycle", ""),
-                        enabled=True,
-                    ))
+                # clients 갱신 — replace_clients_preserving_mgmt 가 DELETE+INSERT 하되
+                # management_number override 를 snapshot/restore 로 보존한다(예전엔 매번 wipe).
+                ClientRepository(db).replace_clients_preserving_mgmt(clients_data)
 
             self.log_message.emit(f"수임처 새로 가져오기 완료: {len(clients_data)}건")
             self.phase_changed.emit(1, "completed")

@@ -62,18 +62,26 @@ def make_save_dir(
     client_name: str,
     year: int | None = None,
     month: int | None = None,
+    subdir: str | None = None,
 ) -> str:
     """다운로드 디렉토리 경로 생성 (없으면 생성)
 
-    구조: ~/Desktop/{site_name}_{YYYYMM}/{client_name}/
+    구조: ~/Desktop/{site_name}_{YYYYMM}/{client_name}/[/{subdir}/]
+    subdir 가 주어지면 수임처 폴더 아래 추가 하위폴더를 만든다.
+
+    병렬(2번) 실행 시 두 CLI 가 공통 최상위(예: 공단EDI)를 쓰면서도 포털별로
+    ~/Desktop/공단EDI_{YYYYMM}/{client}/{국민연금|국민건강보험}/ 처럼 분리하기 위해
+    사용 — 두 Chrome 이 서로 다른 폴더에 써서 listdir/cleanup 파일 레이스를 없앤다.
+    단일 실행은 subdir=None 으로 현행 구조({site}_{period}/{client}/) 유지.
 
     이미 폴더가 존재하면 그대로 재사용하고, 없으면 생성.
 
     Args:
-        site_name: 사이트 식별명 (예: "국민연금", "국민건강보험")
+        site_name: 사이트 식별명 (예: "국민연금", "국민건강보험", "공단EDI")
         client_name: 수임처명 (공백은 '_'로 치환)
         year: 대상 연도 (기본: 현재 년도)
         month: 대상 월 (기본: 현재 월)
+        subdir: 수임처 폴더 아래 추가 하위폴더명 (병렬 포털 분리용). None 시 미사용.
 
     Returns:
         생성된 디렉토리 절대 경로
@@ -84,7 +92,10 @@ def make_save_dir(
     period = f"{y}{m:02d}"
 
     folder_name = client_name.replace(" ", "_")
-    rel = os.path.join(f"{site_name}_{period}", folder_name)
+    parts = [f"{site_name}_{period}", folder_name]
+    if subdir:
+        parts.append(subdir)
+    rel = os.path.join(*parts)
     desktop = get_desktop_path()
     save_dir = os.path.join(desktop, rel)
 

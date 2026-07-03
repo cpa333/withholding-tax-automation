@@ -13,15 +13,6 @@ import asyncio
 import sys
 import os
 
-if sys.platform == "win32":
-    import io
-    # GUI(LogCapture)에서는 stdout.detach()가 io.UnsupportedOperation을 내므로 가드.
-    try:
-        sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
-        sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
-    except (io.UnsupportedOperation, AttributeError, ValueError):
-        pass
-
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from playwright.async_api import async_playwright
@@ -396,6 +387,10 @@ async def main(args=None):
 
     # 저장 최상위 폴더명 오버라이드 — 병렬(--save-site) 시 NPS 와 공통 폴더로 묶음.
     _doc_download._SAVE_SITE = getattr(args, "save_site", None) or "국민건강보험"
+    # 병렬(--save-site 공단EDI) 시 포털별 하위폴더로 분리 — NPS·NHIS 두 Chrome 이 같은
+    # 수임처 폴더에 동시 쓰기하며 listdir/cleanup 레이스로 서로의 파일을 잠식·삭제하는
+    # 것 방지(BUG1/BUG2 근원). NPS 도 동일하게 _SAVE_SUBDIR 사용.
+    _doc_download._SAVE_SUBDIR = "국민건강보험" if getattr(args, "save_site", None) else None
 
     # Phase 1: Chrome 실행 + 연결
     log("\n[1/3] Chrome 실행...")
@@ -525,6 +520,15 @@ async def run_interactive(page, context):
 
 if __name__ == "__main__":
     import argparse
+    import io
+    if sys.platform == "win32":
+        # 콘솔(cp949) → utf-8 출력 재래핑. import 시엔 이 블록이 안 돌아 pytest capture
+        # 및 GUI LogCapture 가 안전하다(run_swta0101.py 와 동일한 __main__ 진입 패턴).
+        try:
+            sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
+            sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
+        except (io.UnsupportedOperation, AttributeError, ValueError):
+            pass
     parser = argparse.ArgumentParser(description="국민건강보험 EDI 자동화")
     parser.add_argument("--auto", action="store_true",
                         help="비대화형 일괄 모드 (GUI 병렬 subprocess 용)")

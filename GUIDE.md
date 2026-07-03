@@ -102,7 +102,7 @@ Nexacro 기반 웹 프레임워크로 일반 DOM click이 동작하지 않음:
 5. 저장 경로: `~/Desktop/국민연금_{YYYYMM}/{수임처명}/`
 6. 파일명: `국민연금보험료_결정내역_{YYYYMM}_{탭명}.pdf` / `.xlsx`
 
-> **공단 EDI 병렬 자동화(2번) 저장 경로:** 병렬 실행 시 건강보험·국민연금이 각각 별도 최상위 폴더를 만들지 않고 **공통 폴더 `~/Desktop/공단EDI_{YYYYMM}/{수임처명}/`** 하나에 두 기관 자료를 함께 저장. 두 CLI 에 `--save-site 공단EDI` 를 전달(`parallel_cli_worker.PARALLEL_SAVE_SITE`)해 `make_save_dir` 의 site_name 을 오버라이드(`nhis/_doc_download._SAVE_SITE`, `nps/nps_auto_cdp._SAVE_SITE`). 단독(NHIS/NPS 개별) 실행은 인자 미전달로 기존대로 각 사이트 폴더 사용.
+> **공단 EDI 병렬 자동화(2번) 저장 경로:** 병렬 실행 시 두 기관 자료를 **공통 최상위 아래 포털별 하위폴더로 분리** — `~/Desktop/공단EDI_{YYYYMM}/{수임처명}/{국민연금|국민건강보험}/`. 두 CLI 에 `--save-site 공단EDI` 를 전달(`parallel_cli_worker.PARALLEL_SAVE_SITE`)하고 `make_save_dir(site, client, …, subdir=_SAVE_SUBDIR)` 로 포털명(국민연금/국민건강보험)을 하위폴더로 넘겨 분리. 두 Chrome 이 서로 다른 하위폴더에 써서 listdir/cleanup 파일 레이스(한쪽이 다른쪽 파일 삭제/잠식 → BUG1 앞수임처 누락·BUG2 NPS raw 간헐 누락)를 원천 차단. 단독(NHIS/NPS 개별) 실행은 `subdir=None` 으로 기존대로 각 사이트 최상위 폴더 사용.
 
 > **날짜 의존성 (2026-06-12 업데이트):**
 > - GUI에서 선택한 연도/월로 결정내역 그리드의 내용 컬럼(col=3)에서 `{YYYY}.{MM}` 매칭
@@ -117,6 +117,8 @@ Nexacro 기반 웹 프레임워크로 일반 DOM click이 동작하지 않음:
 2. 끝에 `0` 추가: `XXXXXXXXXX0`
 
 例: `515-86-01709` → `51586017090`
+
+> **override & 보존:** `biz+'0'`는 단일 사업장 표준값. **지점/추가사업장**은 끝이 `1,2,…` 로 `biz+'0'`와 달라 → Phase1 표(관리번호 컬럼 col2)에 실제 번호를 직접 입력(override)해야 함. `get_management_number`(models.py)가 override 우선, 없으면 `biz+'0'` 자동계산. **새로가져오기가 override 를 보존**(`ClientRepository.replace_clients_preserving_mgmt`, db.py — DELETE+INSERT 전 {name:mgmt} snapshot → INSERT 후 같은 name에 restore; 예전엔 매번 wipe). 병렬 mgmts 조립(`main_window._on_start` ALL/SELECTED)도 동일 auto-calc 로 자가방어.
 
 #### 선택건 실행
 
@@ -156,7 +158,7 @@ Phase 1-5와 완전히 독립적으로 동작한다. NHIS/NPS 원천데이터나
    - **기간 설정**:
      - **매월** → GUI 선택 연/월 (미선택 시 직전월 자동 계산)
      - **반기** → **실행일 기준** (GUI 연/월 무시). `compute_half_period()`: 7~12월 실행→당해 1~6월(상반기) / 1~6월 실행→전년 7~12월(하반기). 반기 신고는 연 2회(7월·1월).
-   - **조회 → 마감/마감해제**: 이미 마감이면 스킵, 미마감이면 2단계 모달(유의사항 → 마감완료) 자동 처리
+   - **조회 → 마감/마감해제**: 미마감이면 마감 적용(2단계 모달: 유의사항 → 마감완료). 이미 마감이면 **마감을 자동 해제** — 동일한 확인 모달 패턴 처리 후 버튼이 "마감해제" → "마감" 으로 전환되었는지 검증. 전환되지 않으면 `RuntimeError` 로 해당 잡을 실패 처리(어댑터 `wehago_swta.py`의 try/except 경유).
 
 ### Phase 7: 원천전자신고 (WEHAGO — SWER0101)
 

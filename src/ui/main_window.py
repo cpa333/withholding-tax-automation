@@ -556,7 +556,12 @@ class MainWindow(QMainWindow):
                     "수임처 목록이 비어 있습니다. 먼저 '새로 가져오기'로 로드하세요."
                 )
                 return
-            mgmts = [c.get("management_number", "") for c in active]
+            from src.batch.models import biz_to_mgmt_no
+            # 사업장관리번호 — override 우선, 비었으면 biz+'0' 자동계산(병렬 자가방어:
+            # _load_clients(line 432)가 이미 biz+'0'를 주입하지만, 소비 지점에서도
+            # 직접 계산해 line 432 의존을 없앤다 — 회귀 시에도 견고).
+            mgmts = [c.get("management_number") or biz_to_mgmt_no(c.get("business_number", ""))
+                     for c in active]
             self.company_table.set_running(True)
             self.parallel_runner.start(nps_port=9223, nhis_port=9224,
                                        firms=firms, mgmts=mgmts, year=year, month=month)
@@ -713,7 +718,10 @@ class MainWindow(QMainWindow):
                 return
             # 사업장관리번호(override 우선) — CLI 가 관리번호 검색으로 수임처 선택.
             # 비었으면 CLI가 이름 fallback.
-            mgmts = [c.get("management_number", "") for c in sel]
+            from src.batch.models import biz_to_mgmt_no
+            # 사업장관리번호 — override 우선, 비었으면 biz+'0' 자동계산(병렬 자가방어).
+            mgmts = [c.get("management_number") or biz_to_mgmt_no(c.get("business_number", ""))
+                     for c in sel]
             year = self.year_spin.value()
             month = self.month_spin.value()
             self.company_table.set_running(True)

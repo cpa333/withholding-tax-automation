@@ -28,6 +28,7 @@ from src.automation.nps._constants import (
     DOWNLOAD_TIMEOUT_S, EXCEL_DOWNLOAD_TIMEOUT_S,
     CROWNIX_LOAD_TIMEOUT_S, PREVIEW_TAB_TIMEOUT_S,
     MODAL_WAIT_TIMEOUT_S, OUTPUT_CLICK_RETRIES, OUTPUT_STRATEGIES,
+    EXCEL_CLICK_RETRIES,
 )
 
 # Local alias
@@ -378,7 +379,11 @@ async def _click_crownix_pdf_save(rd_page):
 
 
 async def _setup_cdp_download(context, page, save_dir):
-    """Configure CDP download behavior, return files_before set."""
+    """Configure CDP download behavior, return (files_before set, cdp session).
+
+    cdp 세션을 함께 반환해 호출처가 사용 후 detach 하도록 한다(NHIS _doc_download 패턴).
+    이전엔 세션을 반환하지 않아 호출처가 detach 못 해 매 다운로드마다 세션이 누수됐다.
+    """
     os.makedirs(save_dir, exist_ok=True)
     cdp = await context.new_cdp_session(page)
     await cdp.send("Browser.setDownloadBehavior", {
@@ -386,7 +391,7 @@ async def _setup_cdp_download(context, page, save_dir):
         "downloadPath": save_dir,
         "eventsEnabled": True,
     })
-    return set(os.listdir(save_dir))
+    return set(os.listdir(save_dir)), cdp
 
 
 async def _wait_for_download(save_dir, before, timeout, label="file"):
@@ -416,6 +421,22 @@ def _rename_download(downloaded, save_dir, filename, ext=None):
     return final_path
 
 
+def _is_valid_xlsx(path):
+    """엑셀(zip) 매직(PK\\x03\\x04) + 최소 크기 검증.
+
+    PDF %PDF- 매직 게이트(download_pdf_from_preview)와 동일 구조. 공유 폴더에서
+    다른 파일(PDF/사이드카)을 grab 했거나 에러 페이지가 떨어진 경우를 가짜 엑셀로
+    리네임·보고하는 것을 방지(BUG2). xlsx 는 zip 컨테이너이므로 PK 매직으로 검증.
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(8)
+        size = os.path.getsize(path)
+    except OSError:
+        return False
+    return head[:4] == b"PK\x03\x04" and size >= 2048
+
+
 # --- PDF download ------------------------------------------------------------
 
 async def download_pdf_from_preview(context, save_dir, filename):
@@ -434,78 +455,83 @@ async def download_pdf_from_preview(context, save_dir, filename):
             pass
         return None
 
-    before = await _setup_cdp_download(context, rd_page, save_dir)
-
-    # PDF 저장 버튼 클릭 — '저장' 드롭다운 하위의 'PDF 파일로 저장'(다운로드).
-    # 보이는 PDF 아이콘은 'PDF 파일로 변환하여 인쇄'(인쇄)이므로 title 로 식별한다.
-    log("  PDF 저장 버튼 클릭...")
-    method = await _click_crownix_pdf_save(rd_page)
-    if method:
-        log(f"  PDF 버튼 클릭 ({method})")
-    else:
-        log("  WARN: 'PDF 파일로 저장' 버튼을 찾지 못함")
-
-    download_started = False
-    for _ in range(10):
-        await asyncio.sleep(1)
-        new_files = set(os.listdir(save_dir)) - before
-        # Crownix 는 UUID 이름(확장자 없음)으로 다운로드하기도 하므로,
-        # .crdownload 가 없고 새 파일이 있으면 다운로드 시작으로 본다.
-        if new_files and not any(f.endswith(".crdownload") for f in new_files):
-            download_started = True
-            break
-
-    if not download_started:
-        log("  PDF 클릭으로 다운로드 미시작 - Playwright locator 재시도...")
-        try:
-            pdf_btn = rd_page.locator(
-                'button.crownix-toolbar-button[title="PDF 파일로 저장"]'
-            ).first
-            if await pdf_btn.count() == 0:
-                pdf_btn = rd_page.locator(
-                    'button.crownix-toolbar-button', has_text="PDF"
-                ).first
-            await pdf_btn.click(force=True, timeout=5000)
-            for _ in range(10):
-                await asyncio.sleep(1)
-                new_files = set(os.listdir(save_dir)) - before
-                if new_files and not any(f.endswith(".crdownload") for f in new_files):
-                    download_started = True
-                    break
-        except Exception as e:
-            log(f"  Playwright locator click exception - {e}")
-
-    if not download_started:
-        log("  WARN: PDF download not detected - proceeding with wait...")
-
-    downloaded = await _wait_for_download(
-        save_dir, before, DOWNLOAD_TIMEOUT_S, label="PDF"
-    )
-    if downloaded:
-        final_path = _rename_download(downloaded, save_dir, filename, ext=".pdf")
-        await rd_page.close()
-        # PDF 무결성 검증 — Crownix 가 에러/사이드카 파일을 떨구는 경우
-        # 이를 PDF로 오인·리네임해 가짜 성공을 보고하는 것을 방지.
-        try:
-            with open(final_path, "rb") as f:
-                head = f.read(8)
-            size = os.path.getsize(final_path)
-            if head[:5] != b"%PDF-" or size < 2048:
-                log(f"  ERROR: 다운로드 파일이 PDF가 아님 (size={size} magic={head!r})")
-                os.remove(final_path)
-                return None
-        except Exception as e:
-            log(f"  WARN: PDF 검증 중 예외: {e}")
-        log(f"  PDF saved: {final_path}")
-        return final_path
-
-    log(f"  ERROR: PDF download timeout ({DOWNLOAD_TIMEOUT_S}s)")
+    before, cdp = await _setup_cdp_download(context, rd_page, save_dir)
     try:
-        await rd_page.close()
-        log("  rdPreview tab closed (timeout cleanup)")
-    except Exception:
-        pass
-    return None
+        # PDF 저장 버튼 클릭 — '저장' 드롭다운 하위의 'PDF 파일로 저장'(다운로드).
+        # 보이는 PDF 아이콘은 'PDF 파일로 변환하여 인쇄'(인쇄)이므로 title 로 식별한다.
+        log("  PDF 저장 버튼 클릭...")
+        method = await _click_crownix_pdf_save(rd_page)
+        if method:
+            log(f"  PDF 버튼 클릭 ({method})")
+        else:
+            log("  WARN: 'PDF 파일로 저장' 버튼을 찾지 못함")
+
+        download_started = False
+        for _ in range(10):
+            await asyncio.sleep(1)
+            new_files = set(os.listdir(save_dir)) - before
+            # Crownix 는 UUID 이름(확장자 없음)으로 다운로드하기도 하므로,
+            # .crdownload 가 없고 새 파일이 있으면 다운로드 시작으로 본다.
+            if new_files and not any(f.endswith(".crdownload") for f in new_files):
+                download_started = True
+                break
+
+        if not download_started:
+            log("  PDF 클릭으로 다운로드 미시작 - Playwright locator 재시도...")
+            try:
+                pdf_btn = rd_page.locator(
+                    'button.crownix-toolbar-button[title="PDF 파일로 저장"]'
+                ).first
+                if await pdf_btn.count() == 0:
+                    pdf_btn = rd_page.locator(
+                        'button.crownix-toolbar-button', has_text="PDF"
+                    ).first
+                await pdf_btn.click(force=True, timeout=5000)
+                for _ in range(10):
+                    await asyncio.sleep(1)
+                    new_files = set(os.listdir(save_dir)) - before
+                    if new_files and not any(f.endswith(".crdownload") for f in new_files):
+                        download_started = True
+                        break
+            except Exception as e:
+                log(f"  Playwright locator click exception - {e}")
+
+        if not download_started:
+            log("  WARN: PDF download not detected - proceeding with wait...")
+
+        downloaded = await _wait_for_download(
+            save_dir, before, DOWNLOAD_TIMEOUT_S, label="PDF"
+        )
+        if downloaded:
+            final_path = _rename_download(downloaded, save_dir, filename, ext=".pdf")
+            await rd_page.close()
+            # PDF 무결성 검증 — Crownix 가 에러/사이드카 파일을 떨구는 경우
+            # 이를 PDF로 오인·리네임해 가짜 성공을 보고하는 것을 방지.
+            try:
+                with open(final_path, "rb") as f:
+                    head = f.read(8)
+                size = os.path.getsize(final_path)
+                if head[:5] != b"%PDF-" or size < 2048:
+                    log(f"  ERROR: 다운로드 파일이 PDF가 아님 (size={size} magic={head!r})")
+                    os.remove(final_path)
+                    return None
+            except Exception as e:
+                log(f"  WARN: PDF 검증 중 예외: {e}")
+            log(f"  PDF saved: {final_path}")
+            return final_path
+
+        log(f"  ERROR: PDF download timeout ({DOWNLOAD_TIMEOUT_S}s)")
+        try:
+            await rd_page.close()
+            log("  rdPreview tab closed (timeout cleanup)")
+        except Exception:
+            pass
+        return None
+    finally:
+        try:
+            await cdp.detach()
+        except Exception:
+            pass
 
 
 # --- Excel/Integrated save (unified) -----------------------------------------
@@ -513,7 +539,16 @@ async def download_pdf_from_preview(context, save_dir, filename):
 async def _save_with_modal(page, context, save_dir, filename, *,
                            btn_id, modal_confirm_id, modal_cancel_id,
                            radio_full_ssn_id, label):
-    """Generic: click button, select full SSN, confirm, wait for download, rename."""
+    """Generic: click button, select full SSN, confirm, wait for download, rename.
+
+    PDF 경로(output_with_full_ssn/_click_output_button)의 robustness 를 엑셀에 이식:
+      - 저장버튼 클릭을 모달 출현으로 검증하며 재시도 — nexacro_click_button 은
+        page.mouse.click 후 {ok:True} 를 반환하지만 백그라운드/occluded 창에선
+        no-op 일 수 있어 모달이 떴는지로 확정(BUG2 원인인 거짓양성 차단).
+      - 리네임 후 zip 매직(PK) 검증 — 공유 폴더/사이드카 파일을 엑셀로 오인·리네임
+        해 가짜 성공을 보고하는 것 방지(PDF %PDF- 게이트와 동일 구조).
+    CDP 세션은 사용 후 finally 에서 detach(NHIS _doc_download 패턴).
+    """
     log(f"{label} button click...")
 
     # Dismiss existing modal
@@ -525,34 +560,63 @@ async def _save_with_modal(page, context, save_dir, filename, *,
         await nexacro_click_button(page, modal_cancel_id)
         await human_delay(1)
 
-    before = await _setup_cdp_download(context, page, save_dir)
+    before, cdp = await _setup_cdp_download(context, page, save_dir)
+    try:
+        # 저장 버튼 클릭 — 모달 출현으로 검증하며 재시도.
+        modal_opened = False
+        for attempt in range(1, EXCEL_CLICK_RETRIES + 1):
+            result = await nexacro_click_button(page, btn_id)
+            if result.get("ok") and await _wait_for_modal(page, modal_confirm_id):
+                log(f"  {label} modal opened (attempt {attempt}/{EXCEL_CLICK_RETRIES})")
+                modal_opened = True
+                break
+            log(f"  {label} 버튼/모달 실패 (attempt {attempt}/{EXCEL_CLICK_RETRIES}) result={result}")
+            if attempt < EXCEL_CLICK_RETRIES:
+                await human_delay(2)
+        if not modal_opened:
+            log(f"  ERROR: {label} 모달 오픈 실패 ({EXCEL_CLICK_RETRIES}회) - 다운로드 미진행")
+            return None
 
-    result = await nexacro_click_button(page, btn_id)
-    if not result.get("ok"):
-        log(f"  ERROR: {label} button click failed - {result}")
-        return None
-    await human_delay(2)
+        await human_delay(2)
+        log(f"select full SSN ({label} modal)...")
+        await nexacro_wait_and_click(page, radio_full_ssn_id)
+        await human_delay(1)
 
-    log(f"select full SSN ({label} modal)...")
-    await nexacro_wait_and_click(page, radio_full_ssn_id)
-    await human_delay(1)
+        log("click confirm...")
+        result = await nexacro_wait_and_click(page, modal_confirm_id)
+        if not result.get("ok"):
+            log(f"  ERROR: confirm click failed - {result}")
+            return None
 
-    log("click confirm...")
-    result = await nexacro_wait_and_click(page, modal_confirm_id)
-    if not result.get("ok"):
-        log(f"  ERROR: confirm click failed - {result}")
-        return None
+        downloaded = await _wait_for_download(
+            save_dir, before, EXCEL_DOWNLOAD_TIMEOUT_S, label=label
+        )
+        if not downloaded:
+            log(f"  ERROR: {label} download timeout ({EXCEL_DOWNLOAD_TIMEOUT_S}s)")
+            return None
 
-    downloaded = await _wait_for_download(
-        save_dir, before, EXCEL_DOWNLOAD_TIMEOUT_S, label=label
-    )
-    if downloaded:
         final_path = _rename_download(downloaded, save_dir, filename)
+        # 엑셀 무결성 검증 — PDF %PDF- 매직 게이트와 동일 구조. 공유 폴더에서 다른
+        # 파일을 grab 했거나 사이드카/에러 페이지가 떨어진 경우를 가짜 엑셀로
+        # 리네임·보고하는 것을 방지(BUG2). 실패 시 파일 제거 + None 반환(상층이
+        # 다운로드실패로 보고).
+        if not _is_valid_xlsx(final_path):
+            try:
+                with open(final_path, "rb") as f:
+                    head = f.read(8)
+                log(f"  ERROR: 다운로드 파일이 엑셀(zip)이 아님 "
+                    f"(size={os.path.getsize(final_path)} magic={head!r})")
+                os.remove(final_path)
+            except OSError:
+                log(f"  ERROR: 엑셀 검증/제거 실패 - {final_path}")
+            return None
         log(f"  {label} complete: {final_path}")
         return final_path
-
-    log(f"  ERROR: {label} download timeout ({EXCEL_DOWNLOAD_TIMEOUT_S}s)")
-    return None
+    finally:
+        try:
+            await cdp.detach()
+        except Exception:
+            pass
 
 
 async def save_excel(page, context, save_dir, filename):

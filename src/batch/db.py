@@ -406,6 +406,34 @@ class ClientRepository:
             self.db.rollback()
             raise
 
+    def replace_clients_preserving_mgmt(self, clients_data: list[dict],
+                                        portal: str = "wehago") -> None:
+        """새로가져오기용: 스크랩 데이터로 clients 갱신 + management_number override 보존.
+
+        새로가져오기는 DELETE+INSERT 인데, upsert 의 INSERT 분기(db.py INSERT 컬럼 목록)가
+        management_number 를 포함하지 않아 매번 빈 값(DEFAULT '')으로 리셋된다. 스크래퍼
+        (get_clients_with_biz_from_taxagent)도 management_number 를 긁어오지 않으므로,
+        DELETE 직전 {name: management_number} snapshot을 잡아 INSERT 후 같은 name에 복원한다.
+
+        clients_data: [{"name","business_number","report_cycle"}, ...] (portal 고정, 기본 wehago)
+        이름 기준 매칭 — 새로가져오기가 name 을 key 로 쓰므로 안정(이름이 바뀌면 미복원).
+        """
+        overrides = {
+            n: m for n, m in self.db.conn.execute(
+                "SELECT name, management_number FROM clients "
+                "WHERE management_number != ''"
+            ).fetchall()
+        }
+        self.db.conn.execute("DELETE FROM clients")
+        for c in clients_data:
+            new_id = self.upsert(Client(
+                name=c["name"], portal=portal,
+                business_number=c["business_number"],
+                report_cycle=c.get("report_cycle", ""), enabled=True,
+            ))
+            if new_id and c["name"] in overrides:
+                self.update_management_number(new_id, overrides[c["name"]])
+
     def update_report_cycle(self, client_id: int, value: str) -> bool:
         """수임처의 원천징수 신고주기(매월/반기) 갱신 (GUI 드롭다운 편집용).
 

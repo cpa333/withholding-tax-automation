@@ -26,6 +26,7 @@ from src.utils.save_path import make_save_dir
 # NPS 와 공통 폴더("공단EDI" 등)로 묶어 같은 수임처 폴더에 건강보험/국민연금 자료를 함께 저장.
 # 미지정 시 "국민건강보험" (단독 실행 기본값: ~/Desktop/국민건강보험_{YYYYMM}/{수임처}/).
 _SAVE_SITE = "국민건강보험"
+_SAVE_SUBDIR = None  # 병렬(--save-site 공단EDI) 시 포털 하위폴더명; 단일 시 None
 from src.utils.human import human_delay
 from src.automation.nhis._constants import (
     NHIS_EDI_MAIN,
@@ -456,7 +457,8 @@ async def run_single_firm_workflow(page, context, firm_name,
     4. 미리보기 + 웹EDI 탭 닫기
     5. 로그인 사업장 돌아가기
     """
-    save_dir = make_save_dir(_SAVE_SITE, firm_name, year=year, month=month)
+    save_dir = make_save_dir(_SAVE_SITE, firm_name, year=year, month=month,
+                             subdir=_SAVE_SUBDIR)
 
     log("  메인페이지 안정화 대기...")
     for i in range(PAGE_STABLE_TIMEOUT_S):

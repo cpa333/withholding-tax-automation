@@ -105,3 +105,4 @@ MODAL_WAIT_TIMEOUT_S = 5           # 모달 출현 대기
 
 OUTPUT_CLICK_RETRIES = 3           # 출력 버튼 클릭 재시도
 OUTPUT_STRATEGIES = 3              # 클릭 전략 수
+EXCEL_CLICK_RETRIES = 3            # 통합엑셀 저장 버튼 클릭 재시도
