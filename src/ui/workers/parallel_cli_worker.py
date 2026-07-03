@@ -1,7 +1,7 @@
 """GUI 병렬 자동화용 subprocess 워커 (QThread).
 
-두 CLI(NPS 9223 / NHIS 9224)를 WTAX_CDP_PORT env로 백그라운드 실행하고,
-stdout 을 폴링해 [NPS]/[NHIS] 접두사 로그로 방출한다.
+세 CLI(NPS 9223 / NHIS 9224 / 고용보험 9225)를 WTAX_CDP_PORT env로 백그라운드 실행하고,
+stdout 을 폴링해 [NPS]/[NHIS]/[고용] 접두사 로그로 방출한다.
 정지는 proc.pid 를 taskkill /T (CLI→Chrome 트리 종료) — kill_chrome(port=) 은
 GUI 프로세스의 _launched_pids 가 비어있어(자식 CLI 메모리) 안 통하므로 우회.
 """
@@ -23,29 +23,31 @@ PARALLEL_SAVE_SITE = "공단EDI"
 
 
 class ParallelCliRunner(QThread):
-    """NPS+NHIS CLI 를 병렬 subprocess 로 실행·모니터링."""
+    """NPS+NHIS+고용보험 CLI 를 병렬 subprocess 로 실행·모니터링."""
 
-    log_message = Signal(str)            # "[NPS] ..." / "[NHIS] ..." 라인
+    log_message = Signal(str)            # "[NPS] ..." / "[NHIS] ..." / "[고용] ..." 라인
     finished_one = Signal(str, bool)     # (which, success)
     all_finished = Signal()
     result_summary = Signal(str, str)    # (which, json) — _emit_summary 마커 파싱 결과
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._procs = {}                 # "nps"/"nhis" -> Popen
-        self._readers = {}               # "nps"/"nhis" -> Thread
+        self._procs = {}                 # "nps"/"nhis"/"comwel" -> Popen
+        self._readers = {}               # "nps"/"nhis"/"comwel" -> Thread
         self._nps_port = 9223
         self._nhis_port = 9224
+        self._comwel_port = 9225
 
-    def start(self, *, nps_port=9223, nhis_port=9224,
+    def start(self, *, nps_port=9223, nhis_port=9224, comwel_port=9225,
               firms=None, mgmts=None, year=None, month=None):
-        """두 CLI 백그라운드 시작. firms=None → 전체 수임처(--auto 만).
+        """세 CLI 백그라운드 시작. firms=None → 전체 수임처(--auto 만).
 
         mgmts: firms 와 같은 순서의 사업장관리번호 리스트. 제공되면 CLI 가
         이름 대신 관리번호로 수임처를 선택(원래 동작). 비었으면 이름 fallback.
         """
         self._nps_port = nps_port
         self._nhis_port = nhis_port
+        self._comwel_port = comwel_port
         # 본 파일(src/ui/workers/) 기준 3단계 위 = repo root (src 패키지 부모).
         # 주의: 2단계는 src/ 까지라 python -m src... 가 src 를 못 찾음(ModuleNotFoundError).
         repo_root = os.path.abspath(
@@ -57,9 +59,13 @@ class ParallelCliRunner(QThread):
                    "PYTHONUTF8": "1", "PYTHONPATH": pypath}
         env_nhis = {**os.environ, "WTAX_CDP_PORT": str(nhis_port),
                     "PYTHONUTF8": "1", "PYTHONPATH": pypath}
+        env_comwel = {**os.environ, "WTAX_CDP_PORT": str(comwel_port),
+                      "PYTHONUTF8": "1", "PYTHONPATH": pypath}
         self._spawn("nps", "src.automation.nps.nps_auto_cdp", env_nps,
                     repo_root, firms, mgmts, year, month)
         self._spawn("nhis", "src.automation.nhis.nhis_edi_auto_cdp", env_nhis,
+                    repo_root, firms, mgmts, year, month)
+        self._spawn("comwel", "src.automation.comwel.comwel_auto_cdp", env_comwel,
                     repo_root, firms, mgmts, year, month)
         super().start()  # QThread.run — 완료 대기
 
@@ -93,7 +99,8 @@ class ParallelCliRunner(QThread):
         self._readers[which] = t
 
     def _pump(self, which):
-        prefix = "[NPS]" if which == "nps" else "[NHIS]"
+        prefix = {"nps": "[NPS]", "nhis": "[NHIS]", "comwel": "[고용]"}.get(
+            which, f"[{which.upper()}]")
         proc = self._procs.get(which)
         if not proc or not proc.stdout:
             return
@@ -155,6 +162,7 @@ class ParallelCliRunner(QThread):
         from src.utils.chrome_cdp import kill_chrome_by_port
         kill_chrome_by_port(self._nps_port)
         kill_chrome_by_port(self._nhis_port)
+        kill_chrome_by_port(self._comwel_port)
         self.requestInterruption()
 
     def is_running(self):

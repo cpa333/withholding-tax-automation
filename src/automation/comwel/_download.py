@@ -37,6 +37,13 @@ from src.automation.comwel._constants import (
     POPUP_TIMEOUT_S,
 )
 
+# 저장 최상위 폴더명(site_name). 병렬(--save-site 공단EDI) 시 "공단EDI"로 오버라이드.
+# comwel_auto_cdp.py main() 에서 이 모듈 변수를 설정 (NPS/NHIS 패턴과 동일).
+# 단독 실행(phase 5) 기본값: "고용보험" → ~/Desktop/고용보험_{YYYYMM}/{수임처}/
+# 병렬 실행(phase 2): "공단EDI", subdir="고용보험" → ~/Desktop/공단EDI_{YYYYMM}/{수임처}/고용보험/
+_SAVE_SITE = "고용보험"
+_SAVE_SUBDIR = None  # 병렬(--save-site 공단EDI) 시 포털 하위폴더명; 단독 실행 시 None
+
 
 # ─── CDP 다운로드 헬퍼 (NPS 패턴) ────────────────────────────────────────────
 
@@ -275,7 +282,9 @@ async def download_support_info_printout(
         log(f"  지원금 데이터 {count}건 — 인쇄 진행")
 
     # 데이터가 있으므로 여기서 폴더 생성 (0건은 위에서 반환되어 폴더 안 생김)
-    save_dir = make_save_dir("고용보험", client_name, year=year, month=month)
+    # _SAVE_SITE/_SAVE_SUBDIR: 병렬(공단EDI) 시 comwel_auto_cdp main()에서 오버라이드.
+    save_dir = make_save_dir(_SAVE_SITE, client_name, year=year, month=month,
+                             subdir=_SAVE_SUBDIR)
 
     # 4) 인쇄하기 버튼 클릭 → WZ0203 모달 + ClipReport(ifr_Report) 오픈
     #    CDP 다운로드 감시를 미리 설정해 두고 클릭.

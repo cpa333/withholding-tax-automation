@@ -158,6 +158,13 @@ async def main(args=None):
     _SAVE_SITE = getattr(args, "save_site", None) or "고용보험"
     _SAVE_SUBDIR = "고용보험" if getattr(args, "save_site", None) else None
 
+    # _download 모듈의 저장 경로 변수도 동일하게 오버라이드 (NHIS 패턴:
+    # nhis_edi_auto_cdp.py 가 _doc_download._SAVE_SITE 를 설정하는 것과 동일).
+    # download_support_info_printout 이 이 값을 참조해 make_save_dir 호출.
+    from src.automation.comwel import _download
+    _download._SAVE_SITE = _SAVE_SITE
+    _download._SAVE_SUBDIR = _SAVE_SUBDIR
+
     # ═══ Phase 1: Chrome 실행 + 연결 ═══
     log("\n[1/3] Chrome 실행...")
     result = launch_chrome(url=COMWEL_URL)

@@ -453,7 +453,8 @@ class MainWindow(QMainWindow):
         self._show_parallel_report()
 
     def _on_parallel_finished_one(self, which: str, success: bool):
-        label = "국민연금(NPS)" if which == "nps" else "건강보험(NHIS)"
+        label = {"nps": "국민연금(NPS)", "nhis": "건강보험(NHIS)",
+                 "comwel": "고용보험(COMWEL)"}.get(which, which)
         self._on_log(f"[병렬] {label} {'완료' if success else '실패(로그 확인)'}")
 
     def _on_parallel_result_summary(self, which: str, payload_json: str):
@@ -467,25 +468,27 @@ class MainWindow(QMainWindow):
     def _show_parallel_report(self):
         """병렬 종료 후 탐색실패(not-found) 수임처를 통합 다이얼로그로 안내.
 
-        두 CLI의 result_summary(마커) 결과를 합쳐, 한 건이라도 not-found 가 있으면
-        QMessageBox 로 정리해 보여준다. 없으면 조용히 종료(로그 패널 요약으로 충분).
+        세 CLI(NPS/NHIS/고용보험)의 result_summary(마커) 결과를 합쳐, 한 건이라도
+        not-found 가 있으면 QMessageBox 로 정리해 보여준다. 없으면 조용히 종료.
         """
-        nps_nf = self._parallel_results.get("nps", {}).get("not_found", [])
-        nhis_nf = self._parallel_results.get("nhis", {}).get("not_found", [])
-        self._on_log(f"[병렬] 리포트 수신: 국민연금 미탐색 {len(nps_nf)}건, 건강보험 미탐색 {len(nhis_nf)}건")
+        PORTALS = [("nps", "국민연금"), ("nhis", "건강보험"), ("comwel", "고용보험")]
+        sections = []
+        log_parts = []
+        for which, label in PORTALS:
+            nf = self._parallel_results.get(which, {}).get("not_found", [])
+            log_parts.append(f"{label} 미탐색 {len(nf)}건")
+            if nf:
+                sections.append((label, nf))
+        self._on_log(f"[병렬] 리포트 수신: {', '.join(log_parts)}")
         self._parallel_results = {}  # 다음 실행을 위해 초기화
-        if not nps_nf and not nhis_nf:
+        if not sections:
             return
         lines = ["탐색 실패(스킵) 수임처 요약", ""]
-        if nps_nf:
-            lines.append(f"■ 국민연금: {len(nps_nf)}건")
-            for s in nps_nf:
+        for label, nf in sections:
+            lines.append(f"■ {label}: {len(nf)}건")
+            for s in nf:
                 lines.append(f"   - {s.get('name', '?')} [{s.get('reason', '?')}]")
             lines.append("")
-        if nhis_nf:
-            lines.append(f"■ 건강보험: {len(nhis_nf)}건")
-            for s in nhis_nf:
-                lines.append(f"   - {s.get('name', '?')} [{s.get('reason', '?')}]")
         QMessageBox.information(self, "병렬 자동화 결과", "\n".join(lines))
 
     def _on_runner_finished(self):
@@ -564,10 +567,10 @@ class MainWindow(QMainWindow):
             mgmts = [c.get("management_number") or biz_to_mgmt_no(c.get("business_number", ""))
                      for c in active]
             self.company_table.set_running(True)
-            self.parallel_runner.start(nps_port=9223, nhis_port=9224,
+            self.parallel_runner.start(nps_port=9223, nhis_port=9224, comwel_port=9225,
                                        firms=firms, mgmts=mgmts, year=year, month=month)
-            self._on_log(f"[병렬] 전체 수임처 {len(firms)}건 병렬 실행 (NPS 9223 / NHIS 9224)")
-            self._on_log("[병렬] 두 Chrome이 열리면 각각 공동인증서로 로그인하세요 (첫 1회, 이후 세션 재사용)")
+            self._on_log(f"[병렬] 전체 수임처 {len(firms)}건 병렬 실행 (NPS 9223 / NHIS 9224 / 고용보험 9225)")
+            self._on_log("[병렬] 세 Chrome이 열리면 각각 공동인증서로 로그인하세요 (첫 1회, 이후 세션 재사용)")
             return
 
         # 비밀번호 필요 phase: 툴바 비밀번호 필드에서 읽기 (미입력 시 강력 알림 후 차단)
@@ -726,7 +729,7 @@ class MainWindow(QMainWindow):
             year = self.year_spin.value()
             month = self.month_spin.value()
             self.company_table.set_running(True)
-            self.parallel_runner.start(nps_port=9223, nhis_port=9224,
+            self.parallel_runner.start(nps_port=9223, nhis_port=9224, comwel_port=9225,
                                        firms=firms, mgmts=mgmts, year=year, month=month)
             self._on_log(f"[병렬] 선택 수임처 {len(firms)}건 병렬 실행: {', '.join(firms)}")
             return
