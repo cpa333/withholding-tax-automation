@@ -64,6 +64,9 @@ formulas_check.txt
 simple_read.txt
 위하고_*.xlsx
 
+# Office 임시 잠금 파일 (~$...)
+~$*
+
 # Claude memory
 .claude/
 

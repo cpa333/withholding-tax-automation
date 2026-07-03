@@ -21,6 +21,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import date
@@ -45,6 +46,28 @@ def sha256_of(path: str) -> str:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def virustotal_preflight(path: str) -> None:
+    """배포 전 VirusTotal 스캔 — Defender 오탐(0x800700E1) 회귀 조기 감지.
+
+    VT_API_KEY 환경변수 + vt-cli(`vt`) 가 모두 있을 때만 동작(미설정 시 스킵).
+    업로드만 수행한다 — 결과는 VT 웹에서 수동 확인 후 탐지 다수(≥10/72) 시 릴리스 중단.
+    """
+    api_key = os.environ.get("VT_API_KEY")
+    if not api_key or shutil.which("vt") is None:
+        print("[VT] VirusTotal 게이트 미설정(VT_API_KEY 또는 vt-cli 없음) — 스킵")
+        return
+    print(f"[VT] {path} 스캔 업로드 중(수분 소요 가능)...")
+    try:
+        rc = subprocess.run(["vt", "scan", "file", path]).returncode
+    except FileNotFoundError:
+        print("[VT][WARN] vt-cli 실행 실패 — 스킵")
+        return
+    if rc != 0:
+        print("[VT][WARN] 업로드 실패 — VT 웹에서 수동 확인 권장")
+    else:
+        print("[VT] 업로드 완료. VT 웹에서 탐지 엔진 수 확인 후 이상 시 릴리스 중단.")
 
 
 def main():
@@ -111,6 +134,8 @@ def main():
     print(f"      조회 URL: {updater.VERSION_JSON_URL}")
 
     if args.publish:
+        # Defender 오탐 회귀 조기 감지 — VirusTotal 사전 스캔(미설정 시 no-op)
+        virustotal_preflight(INSTALLER)
         print("\n[4-a] gh release create 실행...")
         # 에셋명은 ASCII(ASSET_NAME)로 업로드 — 한글 파일명은 gh 가 _.exe 로 깨뜨리고
         # updater 의 URL 요청도 실패시킨다. 같은 내용을 ASCII 이름으로 복사해 업로드.

@@ -20,6 +20,35 @@ ISCC_PATH = os.path.join(_local, "Programs", "Inno Setup 6", "ISCC.exe")
 INNO_SETUP_URL = "https://jrsoftware.org/isdl.php"  # 공식 다운로드 페이지
 
 
+# 앱은 QtWidgets/QtCore/QtGui 만 사용(브라우저 자동화는 Playwright + 시스템 Chrome).
+# 그러나 --collect-submodules=PySide6 가 PySide6 전체(Qt6 DLL 595MB, 그중 WebEngine
+# ~300MB 포함)을 번들에 끌어온다. 아래 미사용 모듈을 --exclude-module 로 명시 제거하면
+# 번들 크기가 859→~315MB 로 줄고, 무엇보다 Defender 휴리스틱 오탐(0x800700E1)의 가장
+# 큰 표면인 "대량의 느슨한 네이티브 바이너리"가 크게 감소한다.
+# ★변경 시 반드시 verify_bundle() + 실기기 스모크(1·2단계) 로 ImportError/DLL 누락 확인.
+# 원천징수자동화.spec 의 excludes 와 동일 목록 유지.
+_QT_EXCLUDE_MODULES = [
+    "PySide6.QtWebEngineCore", "PySide6.QtWebEngineQuick",
+    "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineQuickDelegatesQml",
+    "PySide6.Qt3DCore", "PySide6.Qt3DRender", "PySide6.Qt3DAnimation",
+    "PySide6.Qt3DExtras", "PySide6.Qt3DInput", "PySide6.Qt3DLogic",
+    "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtQuick3D",
+    "PySide6.QtQuickWidgets", "PySide6.QtQuickControls2",
+    "PySide6.QtQuickTest", "PySide6.QtQuickTemplates2",
+    "PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets",
+    "PySide6.QtBluetooth", "PySide6.QtNfc", "PySide6.QtLocation",
+    "PySide6.QtPositioning", "PySide6.QtSensors", "PySide6.QtCharts",
+    "PySide6.QtDataVisualization", "PySide6.QtGraphs",
+    "PySide6.QtHttpServer", "PySide6.QtRemoteObjects", "PySide6.QtScxml",
+    "PySide6.QtSerialBus", "PySide6.QtSerialPort",
+    "PySide6.QtVirtualKeyboard", "PySide6.QtTextToSpeech",
+    "PySide6.QtWebChannel", "PySide6.QtWebSockets", "PySide6.QtWebView",
+    "PySide6.QtPdf", "PySide6.QtPdfWidgets", "PySide6.QtDesigner",
+    "PySide6.QtHelp", "PySide6.QtUiTools", "PySide6.QtTest",
+    "PySide6.QtOpenGL", "PySide6.QtOpenGLWidgets",
+]
+
+
 def read_version():
     """src/version.py 에서 __version__ 파싱 (버전 단일 소스)."""
     p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src", "version.py")
@@ -154,6 +183,10 @@ def build_pyinstaller(driver_dir):
         # 진입점
         "gui_main.py",
     ]
+    # Qt 미사용 모듈 제외 — collect-submodules=PySide6 가 끌어온 Qt6 전체 중
+    # 실제 미사용(WebEngine/Qml/Quick/3D/Multimedia/...)을 drop.
+    for _mod in _QT_EXCLUDE_MODULES:
+        cmd += ["--exclude-module", _mod]
 
     print("\n[1/3] PyInstaller onedir 빌드 시작...")
     print(" ".join(cmd))
@@ -231,6 +264,14 @@ def verify_bundle():
         ("PySide6 qwindows 플러그인",
          lambda: os.path.isfile(os.path.join(
              internal, "PySide6", "plugins", "platforms", "qwindows.dll"))),
+        # Qt 미사용 모듈 exclude 검증 — WebEngine(~300MB)은 번들에 없어야 정상,
+        # QtCore/Gui/Widgets(Qt6Widgets.dll)은 유지되어야 정상.
+        ("WebEngine 제외 확인(Qt6WebEngineCore.dll 없음)",
+         lambda: not os.path.isfile(os.path.join(
+             internal, "PySide6", "Qt6WebEngineCore.dll"))),
+        ("필수 Qt 위젯 유지(Qt6Widgets.dll)",
+         lambda: os.path.isfile(os.path.join(
+             internal, "PySide6", "Qt6Widgets.dll"))),
         ("playwright node 드라이버",
          lambda: os.path.isfile(os.path.join(
              internal, "playwright", "driver", "node.exe"))),

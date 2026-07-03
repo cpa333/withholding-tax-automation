@@ -54,6 +54,17 @@ gh api repos/cobaetoo/withholding-tax-releases/contents/version.json -X PUT \
 한글 파일명은 (1) gh 업로드 시 `_.exe` 로 깨지고 (2) updater 의 urllib URL 요청이 `UnicodeEncodeError` 로 실패하므로 반드시 ASCII 여야 한다.
 `version.json` 반영(4단계)은 앱이 새 버전을 인식하는 데 필수이며, 위 `gh api contents` PUT 한 줄로 완료된다 (raw URL 반영에 수십 초~1분 지연 있음).
 
+## 릴리스 전 체크리스트 (Defender 오탐 0x800700E1 방지)
+
+매 릴리스마다 해시가 바뀌어 Defender 평판이 리셋되므로 아래를 점검한다.
+
+- [ ] `build.py` Qt 미사용 모듈 exclude 정상 — `verify_bundle()` 통과(WebEngine 제거 / Qt6Widgets 유지 어설션)
+- [ ] `installer.iss` `Compression=zip` 유지(LZMA 휴리스틱 회피)
+- [ ] (설정 시) VirusTotal 사전 스캔 — `VT_API_KEY` + `vt-cli` 있으면 `release.py --publish` 시 자동 업로드; 탐지 다수(≥10/72)면 릴리스 중단
+- [ ] Microsoft 오탐 제출 — https://www.microsoft.com/en-us/wdsi/filesubmission ("should not be detected") 로 신규 `원천징수자동화.exe` + `whta_setup.exe` 제출 (수일 내 평판 반영)
+- [ ] `tools/add_defender_exclusion.bat` 를 설치 파일과 함께 배포(GitHub 릴리스 에셋 번들 등)
+- [ ] `docs/설치안내서.md` · `USER_GUIDE.md §13` 의 오탐 대처 절차가 최신
+
 ## version.json 스키마
 
 `version.json.example` 참고.
@@ -90,6 +101,17 @@ Windows SmartScreen 파란 차단 화면이 뜨며, 사용자가 "추가 정보 
 - **`docs/설치안내서.md`** — 비전공자용 A4 1장 안내(SmartScreen 대처법 중심) 배포
 - **USB / 사내 공유 폴더 직접 전달** 시 MotW 가 붙지 않아 SmartScreen 이 뜨지 않음 (소수 실무자 배포에 최적)
 - 인스톨러가 Chrome 미설치를 설치 단계에서 차단
+
+### Defender 오탐(0x800700E1) 대응 — Tier 0+1 (코드 서명 없이)
+
+특정 PC에서 Defender 가 미서명 PyInstaller 바이너리를 악성코드로 오탐(실행 차단/격리, `0x800700E1`)하는 사례에 대한 대응. 서명 대신 빌드/배포 단계에서 탐지 표면을 줄이고 평판을 관리한다:
+
+- **`tools/add_defender_exclusion.bat`** — 설치/데이터 폴더 + 프로세스를 Defender 예외에 추가하는 도우미. 사용자가 우클릭 "관리자 권한으로 실행"(`Add-MpPreference` 는 관리자 필요 + EDR 4104 오탐 대상이므로 **설치/업데이터가 자동 호출하지 않음**).
+- **`build.py` Qt 미사용 모듈 exclude** — `--collect-submodules=PySide6` 가 끌어온 WebEngine(~300MB)·Qml·Quick·3D·Multimedia 등을 제거해 번들 859→~315MB, "대량 느슨한 네이티브 바이너리" 탐지 표면 축소. `verify_bundle()` 이 WebEngine 제거/Qt6Widgets 유지를 검증.
+- **`installer.iss` 압축 `lzma2/ultra64`→`zip`** — LZMA 압축이 Defender 휴리스틱을 유발하는 문서화된 패턴을 제거(Qt exclude 선행 전제 — 단독 전환 시 설치파일 400+MB 폭증).
+- **매 버전 Microsoft 오탐 제출** — https://www.microsoft.com/en-us/wdsi/filesubmission (해시가 바뀌므로 신버전마다 재제출; 수일 내 평판 반영).
+- **`USER_GUIDE.md §13` / `docs/설치안내서.md`** — 사용자용 복원·예외 절차.
+- **잔존 리스크:** 자동업데이터의 드로퍼형 패턴(`src/utils/updater.py` `cmd /c ping & installer /VERYSILENT && start`)은 정상 기능이므로 미변경. 데이터/다운로드 폴더 예외 + MS 제출로 완화. **근본 해소는 코드 서명**(아래 향후 옵션).
 
 향후 옵션(필요 시):
 - **인스톨러만 서명** (Azure Trusted Signing 월 $9.99 또는 저가 OV cert): 본 exe 는 미서명 유지하되 사용자가 SmartScreen 을 안 보게 가능

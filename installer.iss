@@ -22,7 +22,10 @@ DefaultGroupName=원천징수 자동화
 ; 출력 설정
 OutputDir=installer_output
 OutputBaseFilename=원천징수자동화_설치
-Compression=lzma2/ultra64
+; LZMA(ultra64) 압축은 Windows Defender 휴리스틱 오탐(0x800700E1)을 유발하는
+; 문서화된 패턴이다. zip(deflate)으로 변경하여 LZMA 서명을 제거.
+; 용량 손실은 build.py 의 Qt 미사용 모듈 exclude(번들 859→~315MB)가 상쇄한다.
+Compression=zip
 SolidCompression=yes
 
 ; 아이콘
