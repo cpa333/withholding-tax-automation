@@ -988,25 +988,86 @@ async def click_menu_item(page, item_text):
 # ═══════════════════════════════════════════════════════════════════════
 
 _PERIOD_RADIO_JS = r"""() => {
-    // SWTA 매월/반기 라디오를 한 번 읽어 현재 상태 반환.
-    //   - 반기 수임처 → '반기' 라디오(value=1)가 체크되어 로드.
-    //   - 매월 수임처 → 어느 라디오도 체크되지 않음(매월 = 기본값).
-    // 라벨 텍스트(.label_text)와 value 속성(0=매월/1=반기) 둘 다로 판별(이중 신호).
-    // 반환: '반기' | '매월' | 'unknown'(라디오는 있으나 인식 불가) | null(라디오 미로드)
-    const radios = Array.from(document.querySelectorAll('input.LSinput[type=radio]'));
-    if (radios.length === 0) return null;
-    let checkedBanGi = false, hasBanGi = false, hasMonthly = false;
-    for (const r of radios) {
-        const labelText = (r.closest('label')?.querySelector('.label_text')?.textContent || '').trim();
-        const v = String(r.value || '');
-        const isBanGi = (labelText === '반기' || v === '1');
-        const isMonthly = (labelText === '매월' || v === '0');
-        if (isBanGi) hasBanGi = true;
-        if (isMonthly) hasMonthly = true;
-        if (r.checked && isBanGi) checkedBanGi = true;
+    // SWTA 매월/반기 신고주기 다중신호(multi-signal) 판별.
+    // 실측: 반기 수임처도 매월/반기 라디오 "둘 다" checked=false (WEHAGO LUXcomp 가
+    // input.checked 대신 class/aria/SVG 등으로 선택 표시). 따라서 native checked 외에
+    // aria-checked / 선택 class 토큰 / data-속성 / 조상 체인(최대 4단계)을 모두 조사.
+    // 반환: '반기' | '매월' | 'unknown'(후보는 있으나 선택 신호 없음) | null(후보 미로드)
+    const SEL_TOKENS = new Set([
+        'on','active','selected','checked','is_checked','is_selected',
+        'radio_on','onradio','lux_checked','lux_selected','lux_on','is_on'
+    ]);
+    function hasSelClass(el) {
+        if (!el) return false;
+        const cls = el.className;
+        if (typeof cls !== 'string' || !cls) return false;
+        const parts = cls.toLowerCase().split(/\s+/);
+        for (let i = 0; i < parts.length; i++) if (SEL_TOKENS.has(parts[i])) return true;
+        return false;
     }
-    if (checkedBanGi) return '반기';
-    if (hasBanGi || hasMonthly) return '매월';
+    function selSignal(el) {
+        if (!el) return false;
+        if (el.tagName === 'INPUT' && el.type === 'radio' && el.checked) return true; // native
+        if (el.getAttribute) {
+            const ac = el.getAttribute('aria-checked');
+            if (ac && /^true$/i.test(ac)) return true;                              // ARIA
+            const d = el.getAttribute('data-checked') || el.getAttribute('data-selected');
+            if (d && /^(true|1|checked|selected)$/i.test(d)) return true;           // data-attr
+        }
+        if (hasSelClass(el)) return true;                                           // class token
+        return false;
+    }
+    function isSelected(el) {
+        if (selSignal(el)) return true;                          // self
+        const label = el.closest ? el.closest('label') : null;
+        if (selSignal(label)) return true;                       // <label>
+        // ★ LUXcomp 라디오: 선택된 쪽의 label svg 안에 <circle>(채워진 점)이 추가됨
+        //   (실측: 반기 라디오는 circleCount=1, 매월은 0). checked/class/aria 모두
+        //   무관한 이 컨트롤의 실제 선택 신호.
+        if (label && label.querySelector('svg circle')) return true;
+        let node = el.parentElement, depth = 0;                  // 조상 체인(4단계)
+        while (node && depth < 4) { if (selSignal(node)) return true; node = node.parentElement; depth++; }
+        return false;
+    }
+    function classify(el) {
+        const label = el.closest ? el.closest('label') : null;
+        let text = '';
+        if (label) {
+            const lt = label.querySelector('.label_text');
+            text = (lt ? lt.textContent : label.textContent) || '';
+        }
+        if (!text) text = el.textContent || '';
+        text = text.replace(/\s+/g, '');
+        const v = String(el.value || '');
+        if (text.indexOf('반기') >= 0 || v === '1') return '반기';
+        if (text.indexOf('매월') >= 0 || v === '0') return '매월';
+        return null;
+    }
+    // 후보: (1) 진짜 radio + (2) '반기'/'매월' leaf 텍스트 위젯(비-input 라디오 대비)
+    const radios = Array.from(document.querySelectorAll('input[type=radio]'));
+    const cues = [];
+    document.querySelectorAll('button,a,span,div,label').forEach(el => {
+        if (el.children.length === 0 && el.offsetWidth > 0) {
+            const t = (el.textContent || '').trim();
+            if (t === '반기' || t === '매월') cues.push(el);
+        }
+    });
+    const candidates = radios.concat(cues);
+    if (candidates.length === 0) return null;
+
+    let banSel = false, monSel = false, hasBan = false, hasMon = false, any = false;
+    for (let i = 0; i < candidates.length; i++) {
+        const kind = classify(candidates[i]);
+        if (!kind) continue;
+        any = true;
+        const sel = isSelected(candidates[i]);
+        if (kind === '반기') { hasBan = true; if (sel) banSel = true; }
+        else                 { hasMon = true; if (sel) monSel = true; }
+    }
+    if (monSel) return '매월';           // 매월 명시 선택 우선(반기 오탐 차단)
+    if (banSel) return '반기';           // ★ 반기 확정 — 오판 수정의 핵심
+    if (hasBan || hasMon) return '매월'; // 선택 신호 못 찾음 → 매월(원래 의미 보존, 매월 회귀 방지)
+    if (any) return 'unknown';
     return 'unknown';
 }"""
 
@@ -1017,6 +1078,73 @@ async def _read_period_radio_state(page):
         return await page.evaluate(_PERIOD_RADIO_JS)
     except Exception:
         return None
+
+
+async def _dump_radio_diagnostic(page, result, last):
+    """라디오 판별 DOM 진단을 파일로 덤프(라이브 튜닝/회귀 분석용).
+
+    WTAX_DEBUG_SWTA env 가 설정된 경우에만 동작(기본 off — 정상 매월/반기 실행
+    시 파일 쓰기를 막기 위함). 반기 수임처의 주기 오판 등 회귀 의심 시 env 를
+    켜고 재실행하면 라디오 DOM(조상 체인/SVG circle 등)을 swta_radio_debug.txt 에 남긴다.
+    """
+    import os
+    if not os.environ.get("WTAX_DEBUG_SWTA"):
+        return
+    try:
+        import json as _json
+        from src.config import APP_DATA_DIR
+        diag = await page.evaluate(r"""() => {
+            // 매월/반기 라디오만 상세 분석 — 둘 다 input.checked=false 로 관측되어
+            // 실제 선택 표시(SVG 내 점 / 조상 "on" 클래스 / computed fill)를 찾는다.
+            const all = Array.from(document.querySelectorAll('input[type=radio]'));
+            const isPeriod = (r) => {
+                const lab = r.closest('label');
+                const lt = lab ? (lab.querySelector('.label_text')?.textContent || '').trim() : '';
+                return lt === '매월' || lt === '반기' || r.value === '0' || r.value === '1';
+            };
+            const radios = all.filter(isPeriod).map(r => {
+                const lab = r.closest('label');
+                const labelText = lab ? (lab.querySelector('.label_text')?.textContent || '').trim() : '';
+                const paths = Array.from(lab ? lab.querySelectorAll('path') : []).map(p => ({
+                    d: (p.getAttribute('d') || '').slice(0, 60),
+                    fill: p.getAttribute('fill'),
+                    computedFill: getComputedStyle(p).fill,
+                }));
+                const circles = Array.from(lab ? lab.querySelectorAll('circle') : []).map(c => ({
+                    cx: c.getAttribute('cx'), cy: c.getAttribute('cy'),
+                    r: c.getAttribute('r'), fill: c.getAttribute('fill'),
+                    computedFill: getComputedStyle(c).fill,
+                }));
+                const chain = [];
+                const selCls = [];
+                let el = lab;
+                for (let i = 0; i < 6 && el; i++) {
+                    const cls = el.className || '';
+                    chain.push({lv: i, tag: el.tagName, class: cls, id: el.id});
+                    if (/on|sel|active|curr|check|focus|toggle|choice/i.test(cls)) {
+                        selCls.push({lv: i, tag: el.tagName, class: cls});
+                    }
+                    el = el.parentElement;
+                }
+                return {
+                    value: r.value, checked: r.checked, labelText,
+                    pathCount: paths.length, circleCount: circles.length,
+                    paths, circles, chain, selCls,
+                    labelOuterFull: lab ? lab.outerHTML : '',
+                };
+            });
+            return {periodRadioCount: radios.length, radios: radios};
+        }""")
+        if not isinstance(diag, dict):
+            return  # 실 DOM 응답이 아님(테스트 fake 페이지 등) — 파일 덤프 스킵
+        os.makedirs(APP_DATA_DIR, exist_ok=True)
+        dbg = os.path.join(APP_DATA_DIR, "swta_radio_debug.txt")
+        with open(dbg, "w", encoding="utf-8") as f:
+            f.write(f"get_report_period_type result={result!r}, last={last!r}\n\n")
+            f.write(_json.dumps(diag, ensure_ascii=False, indent=2))
+        log(f"    [신고주기] 라디오 DOM 진단 덤프 → {dbg}")
+    except Exception as e:
+        log(f"    [신고주기] 진단 덤프 실패(무시 가능): {e}")
 
 
 async def get_report_period_type(page, settle_seconds: float = 5.0,
@@ -1053,18 +1181,22 @@ async def get_report_period_type(page, settle_seconds: float = 5.0,
         if st == "반기":
             if i > 0:
                 log(f"    [신고주기] 반기 확정 ({i}회 폴링 후 관측)")
+            # 반기 확정도 감사 덤프(어떤 신호로 잡았는지 확인 + 매월 오탐 감시).
+            await _dump_radio_diagnostic(page, "반기", "반기")
             return "반기"
         if st in ("매월", "unknown"):
             last = st
         # st is None → 라디오 일시 소멸(드문 경우), last 유지하며 계속 폴링
         await asyncio.sleep(interval)
 
-    # 3) 정착 창 동안 반기 미관측
-    if last == "매월":
+    # 3) 정착 창 동안 반기 미관측 → 진단 덤프 후 반환 (반기 오판 원인 파악)
+    result = "매월" if last == "매월" else None
+    await _dump_radio_diagnostic(page, result, last)
+    if result == "매월":
         log(f"    [신고주기] 매월 확정 ({rounds}회 폴링, 반기 미관측)")
-        return "매월"
-    log(f"    [신고주기] 판별 불가 (last={last}) → 상층에서 매월 폴백")
-    return None
+    else:
+        log(f"    [신고주기] 판별 불가 (last={last}) → 상층에서 매월 폴백")
+    return result
 
 
 async def set_period_fields(page, year, start_month, end_month):
@@ -1111,8 +1243,48 @@ async def set_period_fields(page, year, start_month, end_month):
     }""")
 
     if not rects:
-        log("    WARNING: no period fields found")
-        return
+        # 기간 item 구조가 기대(4-div + 2-sprite)와 다름 — 반기 페이지가 매월과 다른
+        # 컨트롤(반기 구분 셀렉터 등)을 쓸 때 이쪽으로 빠진다. 과거엔 조용히 return 해
+        # 기간 미설정 상태로 조회·마감이 진행되었음(반기 버그). 이제 DOM 스냅샷을 덤프해
+        # 튜닝 근거를 남기고 raise 로 중단한다.
+        diag = await page.evaluate("""() => {
+            const out = [];
+            document.querySelectorAll('#SearchMain .item').forEach((item, idx) => {
+                const title = item.querySelector('.item_title, strong');
+                const t = title ? title.textContent.trim() : '';
+                if (!t.includes('기간')) return;
+                out.push({
+                    idx, title: t,
+                    inputDivs: item.querySelectorAll('div[tabindex="0"]').length,
+                    spriteBtns: item.querySelectorAll('button .WSC_LUXSpriteIcon').length,
+                    radios: item.querySelectorAll('input[type=radio]').length,
+                    selects: item.querySelectorAll('select').length,
+                    html: item.outerHTML.slice(0, 1500),
+                });
+            });
+            return out;
+        }""")
+        # 진단 스냅샷을 파일로도 저장(라이브 튜닝 — 사용자가 공유하기 쉽게).
+        try:
+            import os
+            import json as _json
+            from src.config import APP_DATA_DIR
+            os.makedirs(APP_DATA_DIR, exist_ok=True)
+            _dbg = os.path.join(APP_DATA_DIR, "swta_period_debug.txt")
+            with open(_dbg, "w", encoding="utf-8") as _f:
+                _f.write(
+                    f"set_period_fields(year={year}, "
+                    f"start_month={start_month}, end_month={end_month}) 기간 item 없음\n\n"
+                )
+                _f.write(_json.dumps(diag, ensure_ascii=False, indent=2))
+            log(f"    [진단] 기간 영역 DOM 스냅샷 저장 → {_dbg}")
+        except Exception as _e:
+            log(f"    [진단] 스냅샷 파일 저장 실패(무시 가능): {_e}")
+        raise RuntimeError(
+            "[SWTA0101] 기간 설정 실패 — 기간 item 구조가 기대(div[tabindex=0]≥4 + "
+            "sprite≥2)와 다릅니다. 반기 페이지 컨트롤 차이일 수 있습니다. "
+            f"진단 스냅샷={diag}"
+        )
 
     for rect in rects:
         label = rect.get("title", "기간항목")
@@ -1214,7 +1386,12 @@ async def set_period_fields(page, year, start_month, end_month):
             log(f"      mismatch (retry {retry+1}): got {verify}, expected {expected}")
             await asyncio.sleep(0.5)
         else:
-            log(f"      FAILED to set period after 3 retries")
+            # 3회 재시도 후에도 검증 불일치 → 조용히 넘기지 않고 raise(잡 실패).
+            raise RuntimeError(
+                f"[SWTA0101] 기간 설정 검증 실패(3회 재시도 후 불일치): "
+                f"rect={rect.get('title')}, expected=[{year},{start_month:02d},"
+                f"{year},{end_month:02d}]"
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════
