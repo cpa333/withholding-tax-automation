@@ -180,15 +180,35 @@ async def _click_by_id(page, element_id: str) -> bool:
     }""", element_id)
 
 
+async def _is_on_20209(page) -> bool:
+    """현재 20209(부과고지 보험료 조회) 화면인지 판별.
+
+    20209 화면에만 관리번호 입력란(maeGwanriNo)이 가시 상태로 존재.
+    메인 대시보드에는 없으므로, 두 번째 수임처부터는 진입을 스킵할 수 있다.
+    """
+    return await page.evaluate(r"""(id) => {
+        const el = document.getElementById(id);
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0;
+    }""", INPUT_MGMT_NO_ID)
+
+
 async def navigate_to_premium_20209(page):
     """부과고지 보험료 조회(20209) 화면으로 진입 (엑셀 E95~E97).
 
     메인 대시보드에서 퀵메뉴로 20209 진입이 가장 빠르고 안정적(라이브 검증).
-    흐름: 메인 대시보드 → '조회/부과고지 보험료 조회' 퀵메뉴 클릭.
+    이미 20209 화면이면(두 번째 수임처부터) 진입을 스킵한다 — 퀵메뉴가 20209 화면에는
+    없고, GNB 경로를 타면 화면이 꼬여 워크플로우가 실패하는 버그 방지.
 
     Returns:
-        bool: 20209 화면 진입 성공 여부.
+        bool: 20209 화면 진입 성공 여부 (이미 있어도 True).
     """
+    # 이미 20209 화면이면 스킵
+    if await _is_on_20209(page):
+        log("[COMWEL] 20209 화면 이미 표시 중 — 진입 스킵")
+        return True
+
     log("[COMWEL] 부과고지 보험료 조회(20209) 진입...")
     # 퀵메뉴(본문)로 진입 시도 — 메인 대시보드에 있을 때 동작
     ok = await _click_by_id(page, QUICKMENU_20209_ID)
@@ -198,7 +218,7 @@ async def navigate_to_premium_20209(page):
         await dismiss_dialogs(page)
         return True
 
-    # 퀵메뉴 없으면(이미 다른 화면) GNB 메뉴 경로로 진입
+    # 퀵메뉴 없으면(다른 업무 화면) GNB 메뉴 경로로 진입
     log("  퀵메뉴 없음 — GNB 메뉴 경로 시도")
     # 1단계: 정보조회 (펼침)
     await _click_by_id(page, MENU_INFO_INQUIRY_ID)

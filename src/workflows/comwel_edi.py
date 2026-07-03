@@ -16,7 +16,6 @@
 from src.workflows.registry import register
 from src.workflows.base import BaseWorkflow
 from src.batch.state import StateManager
-from src.utils.save_path import make_save_dir
 
 
 @register(
@@ -88,16 +87,15 @@ class ComwelEdiWorkflow(BaseWorkflow):
                 return False
             state.after_step(job_id, "search_main")
 
-        # 사업장 전환 성공 후에만 폴더 생성 (검색 실패 시 빈 폴더 방지)
-        firm_dir = make_save_dir("고용보험", client_name, year=year, month=month)
-
         # 4) 고용 탭 → 지원금정보 팝업 → 인쇄하기
+        # 폴더는 download_support_info_printout 내부에서 데이터 있을 때만 생성
+        # (0건 수임처는 빈 폴더도 만들지 않음).
         download_ok = True
         if not state.should_skip_step(job_id, "print_download"):
             state.before_step(job_id, "print_download", 4)
             try:
                 result = await download_support_info_printout(
-                    page, context, firm_dir, year=year, month=month,
+                    page, context, client_name, year=year, month=month,
                 )
                 if result.get("path"):
                     # 파일 다운로드 성공

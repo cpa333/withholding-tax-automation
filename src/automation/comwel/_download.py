@@ -212,7 +212,7 @@ async def _read_support_count(page) -> int | None:
 
 
 async def download_support_info_printout(
-    page, context, save_dir, *, year: int = None, month: int = None,
+    page, context, client_name, *, year: int = None, month: int = None,
 ):
     """고용보험료 지원금 정보 인쇄물 다운로드 (엑셀 E100~E102).
 
@@ -222,11 +222,19 @@ async def download_support_info_printout(
     0건일 때 인쇄 버튼은 활성(disabled=False)이지만 의미 없는 빈 인쇄물이
     생성되므로, 0건이면 인쇄를 생략하고 정상(빈 결과)으로 처리한다.
 
+    **폴더 생성 지연**: 0건 수임처는 빈 폴더조차 만들지 않도록, save_dir 폴더는
+    실제 다운로드가 일어날 때(데이터 1건 이상)만 생성한다.
+
+    Args:
+        client_name: 수임처명 (make_save_dir 용). save_dir 경로 대신 전달.
+
     Returns:
         dict: {"path": 경로|None, "format": "pdf"|"xlsx"|None,
                "print_clicked": bool, "count": int|None,
                "skipped": bool(0건으로 스킵 여부)}
     """
+    from src.utils.save_path import make_save_dir
+
     period = f"{year}{month:02d}" if year and month else ""
     base_name = f"고용보험료지원금정보_{period}" if period else "고용보험료지원금정보"
 
@@ -239,14 +247,18 @@ async def download_support_info_printout(
                 "count": None, "skipped": False}
 
     # 3) 데이터 건수 확인 — 0건이면 인쇄 생략 (라이브 검증)
+    #    0건 수임처는 폴더 생성도 하지 않는다 (빈 폴더 방지).
     count = await _read_support_count(page)
     if count is not None and count == 0:
-        log(f"  지원금 데이터 0건 — 인쇄 생략 (정상)")
+        log(f"  지원금 데이터 0건 — 인쇄 생략 (정상, 폴더 미생성)")
         await _close_support_popup(page)
         return {"path": None, "format": None, "print_clicked": False,
                 "count": 0, "skipped": True}
     if count and count > 0:
         log(f"  지원금 데이터 {count}건 — 인쇄 진행")
+
+    # 데이터가 있으므로 여기서 폴더 생성 (0건은 위에서 반환되어 폴더 안 생김)
+    save_dir = make_save_dir("고용보험", client_name, year=year, month=month)
 
     # 4) 인쇄하기 버튼 클릭 → WZ0203 모달 + ClipReport(ifr_Report) 오픈
     #    CDP 다운로드 감시를 미리 설정해 두고 클릭.

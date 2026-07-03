@@ -25,7 +25,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from playwright.async_api import async_playwright
 from src.utils.chrome_cdp import launch_chrome, connect_page as cdp_connect
-from src.utils.save_path import make_save_dir
 
 # 저장 최상위 폴더명(site_name). CLI --save-site 로 오버라이드 — 병렬 실행 시
 # 공통 폴더("공단EDI")로 묶음. 미지정 시 "고용보험"
@@ -81,11 +80,8 @@ async def run_single_workplace(page, context, workplace_name, *,
     """단일 사업장 인쇄물 다운로드 워크플로우 (라이브 검증 흐름).
 
     흐름: 20209 진입 → 연월 설정 → 사업장 전환 → 본화면조회 → 고용탭/지원금/인쇄.
+    폴더는 download_support_info_printout 내부에서 데이터 있을 때만 생성.
     """
-    log(f"  저장 폴더 준비: {_SAVE_SITE}")
-    firm_dir = make_save_dir(_SAVE_SITE, workplace_name,
-                             year=year, month=month, subdir=_SAVE_SUBDIR)
-
     # 0) 20209 화면 진입 (첫 수임처이거나 페이지가 대시보드일 때)
     await navigate_to_premium_20209(page)
 
@@ -102,12 +98,15 @@ async def run_single_workplace(page, context, workplace_name, *,
     # 3) 본 화면 조회(btnSearch) — 데이터 로드 (라이브 검증)
     await search_main(page)
 
-    # 4) 고용 탭 → 지원금정보 → 인쇄
+    # 4) 고용 탭 → 지원금정보 → 인쇄 (폴더는 데이터 있을 때만 생성)
     result = await download_support_info_printout(
-        page, context, firm_dir, year=year, month=month,
+        page, context, workplace_name, year=year, month=month,
     )
     await dismiss_dialogs(page)
     if result.get("path"):
+        return True
+    if result.get("skipped"):
+        log(f"  '{workplace_name}' 지원금 0건 — 스킵 (폴더 미생성)")
         return True
     log(f"  '{workplace_name}' 인쇄물 다운로드 없음/실패")
     return False
