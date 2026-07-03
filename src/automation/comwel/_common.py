@@ -198,8 +198,10 @@ async def navigate_to_premium_20209(page):
     """부과고지 보험료 조회(20209) 화면으로 진입 (엑셀 E95~E97).
 
     메인 대시보드에서 퀵메뉴로 20209 진입이 가장 빠르고 안정적(라이브 검증).
-    이미 20209 화면이면(두 번째 수임처부터) 진입을 스킵한다 — 퀵메뉴가 20209 화면에는
-    없고, GNB 경로를 타면 화면이 꼬여 워크플로우가 실패하는 버그 방지.
+    이미 20209 화면이면(두 번째 수임처부터) 진입을 스킵한다.
+
+    로그인 직후 메인 대시보드가 완전히 로드되기 전에 메뉴를 클릭하면 실패할 수 있어,
+    퀵메뉴가 나타날 때까지 폴링 대기한다. 진입 후 _is_on_20209 으로 실제 진입 검증.
 
     Returns:
         bool: 20209 화면 진입 성공 여부 (이미 있어도 True).
@@ -210,16 +212,26 @@ async def navigate_to_premium_20209(page):
         return True
 
     log("[COMWEL] 부과고지 보험료 조회(20209) 진입...")
-    # 퀵메뉴(본문)로 진입 시도 — 메인 대시보드에 있을 때 동작
-    ok = await _click_by_id(page, QUICKMENU_20209_ID)
-    if ok:
+
+    # 퀵메뉴가 나타날 때까지 폴링 대기 (로그인 직후 대시보드 로딩 시간 고려)
+    quick_ready = False
+    for _ in range(10):
+        if await _click_by_id(page, QUICKMENU_20209_ID):
+            quick_ready = True
+            break
+        await asyncio.sleep(1)
+
+    if quick_ready:
         log("  20209 퀵메뉴 클릭")
         await asyncio.sleep(MENU_NAV_DELAY_S + 1)
         await dismiss_dialogs(page)
-        return True
+        # 실제 진입 검증
+        if await _is_on_20209(page):
+            return True
+        log("  퀵메뉴 클릭 후 20209 진입 미확인 — GNB 경로 시도")
 
-    # 퀵메뉴 없으면(다른 업무 화면) GNB 메뉴 경로로 진입
-    log("  퀵메뉴 없음 — GNB 메뉴 경로 시도")
+    # 퀵메뉴 실패/미진입 시 GNB 메뉴 경로로 진입
+    log("  GNB 메뉴 경로 시도")
     # 1단계: 정보조회 (펼침)
     await _click_by_id(page, MENU_INFO_INQUIRY_ID)
     await asyncio.sleep(MENU_NAV_DELAY_S)
@@ -227,10 +239,15 @@ async def navigate_to_premium_20209(page):
     await _click_by_id(page, MENU_PREMIUM_INQUIRY_ID)
     await asyncio.sleep(MENU_NAV_DELAY_S)
     # 3단계: 부과고지 보험료 조회(20209)
-    ok = await _click_by_id(page, MENU_PREMIUM_20209_ID)
+    await _click_by_id(page, MENU_PREMIUM_20209_ID)
     await asyncio.sleep(MENU_NAV_DELAY_S + 1)
     await dismiss_dialogs(page)
-    return ok
+
+    # 최종 진입 검증
+    if await _is_on_20209(page):
+        return True
+    log("  ⚠ 20209 화면 진입 실패 (퀵메뉴 + GNB 모두 실패)")
+    return False
 
 
 async def collapse_gnb_menu(page):
