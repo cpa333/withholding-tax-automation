@@ -159,11 +159,11 @@ python src/automation/wehago/run_swer0101.py
 - 메뉴 ID: `SWSA0101` (급여자료입력) → `SWTA0101` (원천징수이행상황신고서)
 
 #### [SWTA-2] 매월/반기 → 귀속기간/지급기간 설정
-- `get_report_period_type(page)`: 표 내 라디오 버튼(`input.LSinput[type=radio]`)에서 매월/반기 체크 상태 읽기
+- `get_report_period_type(page)`: 표 내 라디오 버튼(`input.LSinput[type=radio]`, value 0=매월/1=반기)에서 매월/반기 체크 상태 읽기. 라디오 렌더 대기(`wait_for_selector`) 후 **5초 정착 창 폴링** — 반기 관측 시 즉시 확정, 정착 창 내내 미관측 시 매월 확정. (매월="반기 미체크" 부정형 신호 → 단일 읽기 오판 방지)
 - `set_period_fields(page, year, start_month, end_month)`: `#SearchMain` 상단 기간 설정 영역 조작
-- **기간 계산 로직**:
-  - **매월**: 현 시점 기준 저번달 (예: 2026년 5월 → `2026년 04월 ~ 04월`)
-  - **반기**: 올해 `01월 ~ 06월`
+- **기간 계산 로직** (DB `report_cycle` 우선, 비어있으면 라디오 ground truth → 어댑터가 DB 역충전):
+  - **매월**: GUI 선택 연/월 (미선택 시 직전월 자동 계산)
+  - **반기**: `compute_half_period()` 실행일 기준 — 7~12월 실행→당해 1~6월(상반기) / 1~6월 실행→전년 7~12월(하반기). 반기 신고는 연 2회(7월·1월)
 - **페이지 구조** (`#SearchMain > .item[]`):
   | idx | 항목 | 컨트롤 |
   |-----|------|--------|
@@ -395,6 +395,7 @@ python src/automation/wehago/run_swer0101.py
 - PrintDialog 클래스명 하드코딩 → 정규식 기반 탐색 (`class_name_re`)으로 변경
 - 바탕화면 경로 `USERPROFILE\Desktop` → `SHGetFolderPathW` API로 변경 (OneDrive 대응)
 - SWTA0101 반기 신고 시 하반기(7~12월) 자동 판단 로직 추가
+- SWTA0101 신고주기 라디오 단일읽기 오판(반기→매월) 수정: 라디오 렌더 대기 + 5초 정착 창 폴링으로 판별 신뢰성 확보. 빈 주기 수임처 역충전 시 DB 오염 방지.
 
 ### dismiss_dialogs 개선 (z-index 정렬 + 모달별 분기 처리)
 - z-index 내림차순 정렬로 상위 모달부터 처리 (하위 모달 가림 문제 해결)

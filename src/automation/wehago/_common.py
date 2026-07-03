@@ -987,25 +987,84 @@ async def click_menu_item(page, item_text):
 # 기간 설정
 # ═══════════════════════════════════════════════════════════════════════
 
-async def get_report_period_type(page):
+_PERIOD_RADIO_JS = r"""() => {
+    // SWTA 매월/반기 라디오를 한 번 읽어 현재 상태 반환.
+    //   - 반기 수임처 → '반기' 라디오(value=1)가 체크되어 로드.
+    //   - 매월 수임처 → 어느 라디오도 체크되지 않음(매월 = 기본값).
+    // 라벨 텍스트(.label_text)와 value 속성(0=매월/1=반기) 둘 다로 판별(이중 신호).
+    // 반환: '반기' | '매월' | 'unknown'(라디오는 있으나 인식 불가) | null(라디오 미로드)
+    const radios = Array.from(document.querySelectorAll('input.LSinput[type=radio]'));
+    if (radios.length === 0) return null;
+    let checkedBanGi = false, hasBanGi = false, hasMonthly = false;
+    for (const r of radios) {
+        const labelText = (r.closest('label')?.querySelector('.label_text')?.textContent || '').trim();
+        const v = String(r.value || '');
+        const isBanGi = (labelText === '반기' || v === '1');
+        const isMonthly = (labelText === '매월' || v === '0');
+        if (isBanGi) hasBanGi = true;
+        if (isMonthly) hasMonthly = true;
+        if (r.checked && isBanGi) checkedBanGi = true;
+    }
+    if (checkedBanGi) return '반기';
+    if (hasBanGi || hasMonthly) return '매월';
+    return 'unknown';
+}"""
+
+
+async def _read_period_radio_state(page):
+    """SWTA 라디오 단일 읽기. '반기'/'매월'/'unknown'/None 반환."""
+    try:
+        return await page.evaluate(_PERIOD_RADIO_JS)
+    except Exception:
+        return None
+
+
+async def get_report_period_type(page, settle_seconds: float = 5.0,
+                                 interval: float = 0.5):
     """원천징수이행상황신고서의 매월/반기 신고주기 반환 (읽기 전용, 클릭 금지).
 
     WEHAGO SWTA 화면의 동작(실사 DOM 확인):
       - 반기 수임처 → '반기' 라디오가 명시적으로 체크되어 로드됨.
       - 매월 수임처 → 어느 라디오도 체크되지 않은 채 로드됨(매월 = 기본값).
-    따라서 '반기'가 체크되어 있으면 '반기', 그 외(매월 라디오 존재)면 '매월' 반환.
-    라디오 자체가 없으면 None. 라디오는 시스템 고정이라 클릭으로 변경 불가 → 읽기만 한다.
+
+    ★매월 = "반기가 체크되지 않음"이라는 부정형 신호이므로, 한 번의 읽기로는
+    "아직 반기 체크 전(페이지 로딩 중)"과 "매월(확정)"을 구분할 수 없다. 이전 구현은
+    고정 3초 sleep 후 단 한 번 읽어, 반기 수임처가 반기로 체크되기 전에 읽히면 매월로
+    오판(→해당 월만 마감 + DB까지 매월로 역충전)하는 버그가 있었다.
+
+    따라서 라디오 렌더를 기다린 뒤 정착 창(settle_seconds) 동안 폴링한다:
+      - '반기'가 관측되면 즉시 '반기' 확정(빠른 경로).
+      - 정착 창 내내 '반기'가 관측되지 않으면 '매월' 확정.
+      - 라디오 자체가 안 뜨거나 라벨/value 인식 불가면 None(판별 불가).
+    라디오는 시스템 고정이라 클릭으로 변경 불가 → 읽기만 한다.
     """
-    return await page.evaluate(r"""() => {
-        const radios = document.querySelectorAll('input.LSinput[type=radio]');
-        let hasMonthly = false;
-        for (const r of radios) {
-            const label = r.closest('label')?.querySelector('.label_text')?.textContent?.trim();
-            if (label === '반기' && r.checked) return '반기';
-            if (label === '매월') hasMonthly = true;
-        }
-        return hasMonthly ? '매월' : null;
-    }""")
+    # 1) 라디오 렌더 대기 (미로드 시 None)
+    try:
+        await page.wait_for_selector('input.LSinput[type=radio]', timeout=10000)
+    except Exception:
+        log("    [신고주기] 라디오 미발견(페이지 미로드) → 판별 불가")
+        return None
+
+    # 2) 정착 창 동안 폴링: '반기'가 관측되면 즉시 확정
+    rounds = max(1, int(round(settle_seconds / max(interval, 0.05))))
+    last = None
+    for i in range(rounds):
+        st = await _read_period_radio_state(page)
+        if st == "반기":
+            if i > 0:
+                log(f"    [신고주기] 반기 확정 ({i}회 폴링 후 관측)")
+            return "반기"
+        if st in ("매월", "unknown"):
+            last = st
+        # st is None → 라디오 일시 소멸(드문 경우), last 유지하며 계속 폴링
+        await asyncio.sleep(interval)
+
+    # 3) 정착 창 동안 반기 미관측
+    if last == "매월":
+        log(f"    [신고주기] 매월 확정 ({rounds}회 폴링, 반기 미관측)")
+        return "매월"
+    log(f"    [신고주기] 판별 불가 (last={last}) → 상층에서 매월 폴백")
+    return None
 
 
 async def set_period_fields(page, year, start_month, end_month):
