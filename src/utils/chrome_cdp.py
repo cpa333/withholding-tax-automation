@@ -270,7 +270,11 @@ def _attempt_launch(chrome_path, junc, profile, url, *, port=CDP_PORT, kill_wait
             f"--remote-debugging-port={port}",
             f"--user-data-dir={junc}",
             f"--profile-directory={profile}",
-            "--start-maximized",
+            # 창 크기 고정 — --start-maximized 는 OS 수준 최대화라 모니터 해상도에
+            # 따라 실제 viewport 가 달라짐. 근로복지공단 반응형 헤더는 viewport 너비가
+            # 좁으면 GNB 메뉴를 숨기므로, 모든 PC/해상도에서 1920x1080 을 보장하려면
+            # Chrome 프로세스 수준에서 고정 (--window-size). set_viewport_size 와 이중 방어.
+            "--window-size=1920,1080",
             # webdriver=true 원천 차단 — a2f9c11이 --test-type(탐지신호라 제거 맞음)과
             # 함께 묶어 삭제한 플래그 복원. NHIS EDI 보안프로그램이 navigator.webdriver
             # 를 감지해 페이지를 무한 리로드(로그인 루프)하는 것을 막는다. blink 레벨에서
