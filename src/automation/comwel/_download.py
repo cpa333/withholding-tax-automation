@@ -4,13 +4,13 @@
 
 라이브 검증된 전체 흐름:
   1. 하단 '고용' 탭(btnTabGy) 클릭
-  2. 지원금정보 버튼(텍스트 매칭 — 라벨/동적 id 가변) 클릭 → WL0502_P02 팝업 오픈
+  2. 지원금정보 버튼(키워드 매칭 — 라벨/동적 id 가변) 클릭 → WL0502_P02 팝업 오픈
   3. 데이터 건수 확인 — 0건이면 인쇄 생략(정상 처리)
   4. 팝업 내 '인쇄하기' 버튼(텍스트 매칭) 클릭 → WZ0203 모달 + ifr_Report(ClipReport) 오픈
-  5. ClipReport 리포트 뷰어:
-     a. report_menu_save_button("저장") 클릭 → 파일 형식 다이얼로그
-     b. select_label 에서 "PDF 저장(*.pdf)" 선택
-     c. download_main_option_download_button("저장") 클릭 → PDF 다운로드
+  5. ClipReport 리포트 뷰어에서 PDF + 엑셀 동시 다운로드:
+     a. report_menu_pdf_download_button("PDF 저장") → PDF 직접 다운로드
+     b. report_menu_excel_download_button("엑셀 저장") → 엑셀 직접 다운로드
+     (전용 버튼은 형식 선택 다이얼로그 없이 직접 다운로드 — save_button 흐름보다 간단)
 
 주의:
 - 지원금 버튼 라벨이 사업장에 따라 다름 ("사회보험료 지원금정보" / "고용보험료 지원금 정보")
@@ -32,6 +32,7 @@ from src.automation.comwel._constants import (
     REPORT_IFRAME_NAME, REPORT_BTN_SAVE_ID, REPORT_MODAL_CLOSE_ID,
     REPORT_FORMAT_SELECT_ID, REPORT_FORMAT_PDF_TEXT,
     REPORT_DOWNLOAD_BTN_ID,
+    REPORT_BTN_PDF_DOWNLOAD_ID, REPORT_BTN_EXCEL_DOWNLOAD_ID,
     DOWNLOAD_TIMEOUT_S, PRINT_CLICK_RETRIES,
     POPUP_TIMEOUT_S,
 )
@@ -76,14 +77,16 @@ def _detect_format(path):
     if head[:5] == b"%PDF-":
         return "pdf"
     if head[:4] == b"PK\x03\x04" and os.path.getsize(path) >= 2048:
-        return "xlsx"
+        return "xlsx"   # OOXML (xlsx)
+    if head[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        return "xls"    # OLE2 Compound Document (구 엑셀 .xls) — ClipReport 엑셀 형식
     return None
 
 
 def _rename_download(downloaded, save_dir, base_name):
     """형식 자동 판별 후 리네임."""
     fmt = _detect_format(downloaded)
-    ext = {"pdf": ".pdf", "xlsx": ".xlsx"}.get(fmt, ".bin")
+    ext = {"pdf": ".pdf", "xlsx": ".xlsx", "xls": ".xls"}.get(fmt, ".bin")
     final_path = os.path.join(save_dir, f"{base_name}{ext}")
     if downloaded != final_path:
         if os.path.exists(final_path):
@@ -283,19 +286,24 @@ async def download_support_info_printout(
             return {"path": None, "format": None, "print_clicked": False,
                     "count": count, "skipped": False}
 
-        # 5) ClipReport 리포트 뷰어에서 PDF 저장 (라이브 검증 흐름)
-        #    ifr_Report 프레임이 로드될 때까지 대기 → 저장 버튼 → 형식 PDF → 다운로드
+        # 5) ClipReport 리포트 뷰어에서 PDF + 엑셀 다운로드 (전용 버튼, 라이브 검증)
+        #    report_menu_pdf_download_button / report_menu_excel_download_button 은
+        #    형식 선택 다이얼로그 없이 직접 다운로드 → 간단하고 안정적.
         await asyncio.sleep(3)  # ClipReport 로딩 대기
-        downloaded = await _clipreport_save_pdf(page, save_dir, before, base_name)
-        if downloaded:
-            final_path, fmt = downloaded
-            log(f"  인쇄물 저장: {os.path.basename(final_path)} (형식: {fmt})")
-            return {"path": final_path, "format": fmt, "print_clicked": True,
-                    "count": count, "skipped": False}
+        files = await _clipreport_download_files(page, save_dir, before, base_name)
+        if files:
+            paths = [f[0] for f in files]
+            for fpath, fmt in files:
+                log(f"  인쇄물 저장: {os.path.basename(fpath)} (형식: {fmt})")
+            return {"path": paths[0] if paths else None,
+                    "paths": paths,
+                    "formats": [f[1] for f in files],
+                    "format": files[0][1] if files else None,
+                    "print_clicked": True, "count": count, "skipped": False}
 
-        log("  ⚠ ClipReport PDF 저장 실패")
-        return {"path": None, "format": None, "print_clicked": True,
-                "count": count, "skipped": False}
+        log("  ⚠ ClipReport 다운로드 실패")
+        return {"path": None, "paths": [], "format": None, "formats": [],
+                "print_clicked": True, "count": count, "skipped": False}
     finally:
         # 다운로드 성공/실패 무관 WZ0203 모달 + 지원금 팝업 확실히 닫기
         # (남아있으면 다음 수임처 진행 시 꼬임 — 라이브 검증)
@@ -309,80 +317,78 @@ async def download_support_info_printout(
             pass
 
 
-async def _clipreport_save_pdf(page, save_dir, before, base_name):
-    """ClipReport 리포트 뷰어(ifr_Report 프레임)에서 PDF 저장 (라이브 검증).
-
-    흐름:
-      1) ifr_Report 프레임 찾기 (ClipReport/reportView)
-      2) report_menu_save_button("저장") 클릭 → 파일 형식 다이얼로그 오픈
-      3) select_label 에서 "PDF 저장(*.pdf)" 선택
-      4) download_main_option_download_button("저장") 클릭 → PDF 다운로드
-
-    Returns:
-        (final_path, format) or None
-    """
-    # ifr_Report 프레임 찾기
-    report_frame = None
-    for _ in range(15):
+async def _find_report_frame(page, max_wait: int = 15):
+    """ifr_Report(ClipReport) 프레임을 찾을 때까지 대기 후 반환."""
+    for _ in range(max_wait):
         for fr in page.frames:
             if fr.name == REPORT_IFRAME_NAME or "ClipReport" in fr.url:
-                report_frame = fr
-                break
-        if report_frame:
-            break
+                return fr
         await asyncio.sleep(1)
+    return None
 
-    if not report_frame:
-        log("  ⚠ ClipReport 프레임(ifr_Report)을 찾지 못함")
-        return None
 
-    # report_menu_save_button("저장") 클릭 → 형식 다이얼로그 오픈
+async def _clipreport_download_one(report_frame, btn_id: str, save_dir, before,
+                                   base_name: str, ext: str, label: str):
+    """ClipReport 전용 다운로드 버튼 클릭 → 단일 파일 다운로드.
+
+    전용 버튼(pdf_download/excel_download)은 형식 다이얼로그 없이 직접 다운로드.
+    Returns: (final_path, format) or None
+    """
     try:
-        saved = await report_frame.evaluate(r'''(id) => {
+        clicked = await report_frame.evaluate(r'''(id) => {
             const btn = document.getElementById(id);
             if (!btn) return false;
             btn.click();
             return true;
-        }''', REPORT_BTN_SAVE_ID)
-        if not saved:
-            log(f"  ⚠ '{REPORT_BTN_SAVE_ID}' 버튼을 찾지 못함")
+        }''', btn_id)
+        if not clicked:
+            log(f"  ⚠ '{label}' 버튼을 찾지 못함 ({btn_id})")
             return None
     except Exception as e:
-        log(f"  ⚠ 저장 버튼 클릭 실패: {e}")
+        log(f"  ⚠ '{label}' 버튼 클릭 실패: {e}")
         return None
+
+    downloaded = await _wait_for_download(save_dir, before, DOWNLOAD_TIMEOUT_S,
+                                          label=label)
+    if not downloaded:
+        log(f"  ⚠ '{label}' 다운로드 감지 안 됨")
+        return None
+    fmt = _detect_format(downloaded) or ext
+    final_path, detected_fmt = _rename_download(downloaded, save_dir, base_name)
+    return (final_path, detected_fmt)
+
+
+async def _clipreport_download_files(page, save_dir, before, base_name):
+    """ClipReport 리포트 뷰어에서 PDF + 엑셀 다운로드 (전용 버튼 기반).
+
+    라이브 검증: report_menu_pdf_download_button / report_menu_excel_download_button 은
+    형식 선택 다이얼로그 없이 직접 다운로드. 두 파일을 순차적으로 다운로드.
+
+    Returns:
+        [(final_path, format), ...] or None (모두 실패 시)
+    """
+    report_frame = await _find_report_frame(page)
+    if not report_frame:
+        log("  ⚠ ClipReport 프레임(ifr_Report)을 찾지 못함")
+        return None
+
+    results = []
+    # 1) PDF 다운로드
+    pdf = await _clipreport_download_one(
+        report_frame, REPORT_BTN_PDF_DOWNLOAD_ID, save_dir, before,
+        base_name, "pdf", "PDF 저장",
+    )
+    if pdf:
+        results.append(pdf)
+        before = set(os.listdir(save_dir))  # 다음 다운로드 감지를 위해 갱신
     await asyncio.sleep(1)
 
-    # 파일 형식 PDF 선택 + 다운로드 버튼 클릭
-    try:
-        result = await report_frame.evaluate(r'''(args) => {
-            const out = {};
-            // select_label 에서 PDF 옵션 선택
-            const sel = document.getElementById(args.selectId);
-            if (sel) {
-                const pdfOpt = Array.from(sel.options).find(o => /PDF/i.test(o.text));
-                if (pdfOpt) {
-                    sel.value = pdfOpt.value;
-                    sel.dispatchEvent(new Event("change", {bubbles: true}));
-                    out.format = pdfOpt.text;
-                }
-            }
-            // 다운로드 버튼 클릭
-            const dl = document.getElementById(args.downloadBtnId);
-            if (dl) { dl.click(); out.clicked = true; }
-            return out;
-        }''', {"selectId": REPORT_FORMAT_SELECT_ID,
-                "downloadBtnId": REPORT_DOWNLOAD_BTN_ID})
-        if not result.get("clicked"):
-            log("  ⚠ 다운로드 버튼 클릭 실패")
-            return None
-    except Exception as e:
-        log(f"  ⚠ 형식 선택/다운로드 실패: {e}")
-        return None
-
-    # 다운로드 완료 대기
-    downloaded = await _wait_for_download(
-        save_dir, before, DOWNLOAD_TIMEOUT_S, label="고용보험 PDF",
+    # 2) 엑셀 다운로드
+    excel = await _clipreport_download_one(
+        report_frame, REPORT_BTN_EXCEL_DOWNLOAD_ID, save_dir, before,
+        base_name, "xlsx", "엑셀 저장",
     )
-    if not downloaded:
-        return None
-    return _rename_download(downloaded, save_dir, base_name)
+    if excel:
+        results.append(excel)
+
+    return results if results else None
