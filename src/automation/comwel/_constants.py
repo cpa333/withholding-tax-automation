@@ -77,6 +77,7 @@ BTN_EXCEL_TEXT = "엑셀저장"
 #   3) download_main_option_download_button("저장") 클릭 → 실제 다운로드
 REPORT_IFRAME_NAME = "ifr_Report"          # ClipReport iframe name
 REPORT_MODAL_ID = "mf_wfm_content_WL0502_P02_wframe_WZ0203"
+REPORT_MODAL_CLOSE_ID = "mf_wfm_content_WL0502_P02_wframe_WZ0203_close"
 REPORT_BTN_SAVE_ID = "report_menu_save_button"            # 리포트 뷰어 "저장"
 REPORT_FORMAT_SELECT_ID = "select_label"                  # 파일 형식 select
 REPORT_FORMAT_PDF_TEXT = "PDF 저장(*.pdf)"                # PDF 옵션 텍스트

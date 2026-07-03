@@ -1066,6 +1066,10 @@ class AutomationRunner(AsyncWorker):
             return False
 
         await self._reconnect_page("comwel_edi")
+        # 로그인 직후 페이지 안정화 대기 (메인 대시보드 렌더링 완료 후 진행).
+        # 로그인 확인 즉시 첫 수임처를 시작하면 대시보드가 덜 로드되어
+        # 메뉴/요소 클릭이 빗나가는 것을 방지.
+        await asyncio.sleep(1)
         return True
 
     async def _wait_for_login_hometax(self) -> bool:

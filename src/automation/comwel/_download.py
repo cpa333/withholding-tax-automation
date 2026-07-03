@@ -29,7 +29,7 @@ from src.automation.comwel._constants import (
     BTN_SUPPORT_INFO_KEYWORD,
     POPUP_SUPPORT_ID, POPUP_SUPPORT_CLOSE_ID,
     BTN_PRINT_TEXT, BTN_EXCEL_TEXT,
-    REPORT_IFRAME_NAME, REPORT_BTN_SAVE_ID,
+    REPORT_IFRAME_NAME, REPORT_BTN_SAVE_ID, REPORT_MODAL_CLOSE_ID,
     REPORT_FORMAT_SELECT_ID, REPORT_FORMAT_PDF_TEXT,
     REPORT_DOWNLOAD_BTN_ID,
     DOWNLOAD_TIMEOUT_S, PRINT_CLICK_RETRIES,
@@ -191,7 +191,19 @@ async def _click_print_button(page) -> str:
 
 
 async def _close_support_popup(page):
-    """지원금 팝업 닫기."""
+    """지원금 팝업(+ ClipReport WZ0203 모달) 닫기.
+
+    다운로드 후 두 모달이 열린 채 남아 다음 수임처 진행을 방해하므로 확실히 닫는다.
+    순서: WZ0203(ClipReport 인쇄 모달) 먼저 → 지원금 팝업(WL0502_P02).
+    (라이브 검증: WZ0203 닫기 후 support 팝업 닫기 순으로 동작)
+    """
+    # 1) WZ0203 (ClipReport 인쇄 모달) 닫기
+    await page.evaluate(r"""(id) => {
+        const el = document.getElementById(id);
+        if (el) el.click();
+    }""", REPORT_MODAL_CLOSE_ID)
+    await asyncio.sleep(1)
+    # 2) 지원금 팝업 닫기
     await page.evaluate(r"""(id) => {
         const el = document.getElementById(id);
         if (el) el.click();
@@ -283,6 +295,12 @@ async def download_support_info_printout(
         return {"path": None, "format": None, "print_clicked": True,
                 "count": count, "skipped": False}
     finally:
+        # 다운로드 성공/실패 무관 WZ0203 모달 + 지원금 팝업 확실히 닫기
+        # (남아있으면 다음 수임처 진행 시 꼬임 — 라이브 검증)
+        try:
+            await _close_support_popup(page)
+        except Exception:
+            pass
         try:
             await cdp.detach()
         except Exception:
