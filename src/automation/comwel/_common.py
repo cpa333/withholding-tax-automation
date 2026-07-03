@@ -245,7 +245,28 @@ async def navigate_to_premium_20209(page):
     # 최종 진입 검증
     if await _is_on_20209(page):
         return True
-    log("  ⚠ 20209 화면 진입 실패 (퀵메뉴 + GNB 모두 실패)")
+
+    # 퀵메뉴 + GNB 모두 실패 — 페이지 리로드 후 대시보드 충분히 대기하고 재시도.
+    # (ClipReport 다운로드 등으로 w2 프레임워크 상태가 꼬인 경우 복구)
+    log("  GNB 진입 실패 — 페이지 리로드 후 재시도")
+    try:
+        await page.reload(wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+    except Exception:
+        pass
+    # 대시보드가 완전히 로드될 때까지 대기 (사무대행 팝업 닫기 + 퀵메뉴 대기)
+    await asyncio.sleep(5)
+    await dismiss_dialogs(page)
+    for _ in range(10):
+        if await _click_by_id(page, QUICKMENU_20209_ID):
+            log("  리로드 후 20209 퀵메뉴 클릭 성공")
+            await asyncio.sleep(MENU_NAV_DELAY_S + 1)
+            await dismiss_dialogs(page)
+            if await _is_on_20209(page):
+                return True
+            break
+        await asyncio.sleep(1)
+
+    log("  ⚠ 20209 화면 진입 실패 (퀵메뉴 + GNB + 리로드 모두 실패)")
     return False
 
 

@@ -254,9 +254,11 @@ async def download_support_info_printout(
     await click_employment_tab(page)
 
     # 2) 지원금정보 팝업 오픈
+    #    지원금 버튼 자체가 없는 수임처(지원금 대상 아님)는 스킵(정상 처리).
     if not await open_support_popup(page):
+        log("  지원금 버튼 없음 — 지원금 대상 아님, 스킵 (정상)")
         return {"path": None, "format": None, "print_clicked": False,
-                "count": None, "skipped": False}
+                "count": None, "skipped": True}
 
     # 3) 데이터 건수 확인 — 0건이면 인쇄 생략 (라이브 검증)
     #    0건 수임처는 폴더 생성도 하지 않는다 (빈 폴더 방지).
