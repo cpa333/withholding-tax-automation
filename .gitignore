@@ -57,6 +57,13 @@ auth_session*.json
 *_preview.txt
 *_debug.txt
 
+# 임시 분석 산출물 (LLM 분석용 .txt / 산출물 .xlsx)
+*_analysis.txt
+*_comparison.txt
+formulas_check.txt
+simple_read.txt
+위하고_*.xlsx
+
 # Claude memory
 .claude/
 
