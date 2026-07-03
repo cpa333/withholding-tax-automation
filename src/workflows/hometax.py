@@ -10,7 +10,7 @@ from src.batch.state import StateManager
 
 
 @register(
-    phase_id=9,
+    phase_id=10,
     portal="hometax",
     display_name="홈택스 원천세 신고",
     enabled=False,  # GUI 사이드바 접근 차단(회색 비활성). 워크플로우 자체 동작은 변경 없음.

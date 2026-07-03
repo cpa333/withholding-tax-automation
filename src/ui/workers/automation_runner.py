@@ -746,6 +746,7 @@ class AutomationRunner(AsyncWorker):
         portal_host = {
             "nhis_edi": "edi.nhis",
             "nps_edi": "edi.nps",
+            "comwel_edi": "total.comwel.or.kr",
             "hometax": "hometax.go.kr",
             "wehago": "wehago.com",
         }.get(portal, "")
@@ -831,6 +832,7 @@ class AutomationRunner(AsyncWorker):
         portal_host = {
             "nhis_edi": "edi.nhis",
             "nps_edi": "edi.nps",
+            "comwel_edi": "total.comwel.or.kr",
             "hometax": "hometax.go.kr",
             "wehago": "wehago.com",
         }.get(portal, "")
@@ -918,6 +920,7 @@ class AutomationRunner(AsyncWorker):
         handler = {
             "nhis_edi": self._wait_for_login_nhis,
             "nps_edi": self._wait_for_login_nps,
+            "comwel_edi": self._wait_for_login_comwel,
             "hometax": self._wait_for_login_hometax,
             "wehago": self._wait_for_login_wehago,
         }.get(portal)
@@ -1009,6 +1012,64 @@ class AutomationRunner(AsyncWorker):
         if not await wait_for_nexacro_ready(self._page):
             self.error_occurred.emit("Nexacro 프레임워크 로딩 실패")
             return False
+        return True
+
+    async def _wait_for_login_comwel(self) -> bool:
+        """근로복지공단(고용보험) EDI 로그인 대기.
+
+        NHIS/NPS 와 동일하게 공인(공동)인증서 수동 로그인을 가정한다.
+        근로복지공단 토탈서비스는 로그인 전후로 URL 이 바뀌지 않고
+        (https://total.comwel.or.kr/ 고정) 메인 페이지에 로그인 버튼이
+        있는 구조이므로, URL host 만으로는 로그인 여부를 판별할 수 없다.
+        대신 **로그인 전용 가시 요소**(로그인 버튼 / 게스트 안내)가
+        DOM 에서 사라지면 로그인 완료로 판정한다.
+        (라이브 검증: 로그인 전 btnLogin/guestView 가시 → 로그인 후 사라짐)
+        """
+        self.log_message.emit("[고용보험 EDI] 로그인 대기 중... 공동인증서로 로그인해 주세요.")
+
+        for i in range(180):
+            if self._stop_event.is_set():
+                return False
+            await asyncio.sleep(5)
+            await self._check_browser_alive_soft()
+            try:
+                for pg in self._context.pages:
+                    try:
+                        url = pg.url or ""
+                    except Exception:
+                        continue
+                    if "total.comwel.or.kr" not in url:
+                        continue
+                    # 로그인 전 가시 요소가 아직 보이면 미로그인.
+                    still_pre_login = await pg.evaluate("""() => {
+                        const ids = ['mf_wfm_content_btnLogin', 'mf_wfm_content_guestView'];
+                        for (const id of ids) {
+                            const el = document.getElementById(id);
+                            if (el) {
+                                const r = el.getBoundingClientRect();
+                                if (r.width > 0 && r.height > 0) return true;
+                            }
+                        }
+                        return false;
+                    }""")
+                    if not still_pre_login:
+                        self._page = pg
+                        self.log_message.emit("고용보험 EDI 로그인 확인됨.")
+                        break
+                else:
+                    if i % 6 == 5:
+                        self.log_message.emit(f"  로그인 대기 중... ({(i + 1) * 5}초)")
+                    continue
+                break
+            except _BrowserClosedError:
+                raise
+            except Exception:
+                pass
+        else:
+            self.log_message.emit("고용보험 EDI 로그인 대기 시간 초과")
+            return False
+
+        await self._reconnect_page("comwel_edi")
         return True
 
     async def _wait_for_login_hometax(self) -> bool:

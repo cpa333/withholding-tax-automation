@@ -239,6 +239,7 @@ class MainWindow(QMainWindow):
         import src.workflows.wehago_list_clients  # noqa: F401
         import src.workflows.nhis_edi             # noqa: F401
         import src.workflows.nps_edi              # noqa: F401
+        import src.workflows.comwel_edi           # noqa: F401
         import src.workflows.wehago_swsa          # noqa: F401
         import src.workflows.wehago_salary_pdf    # noqa: F401
         import src.workflows.wehago_swta          # noqa: F401
@@ -280,9 +281,9 @@ class MainWindow(QMainWindow):
         if self._is_list_phase(phase_id) and status == "completed":
             self._load_client_list()
 
-        # SWTA(7번·원천이행상황신고서) 완료/실패 시 — 라디오 ground truth 로 역충전된
+        # SWTA(8번·원천이행상황신고서) 완료/실패 시 — 라디오 ground truth 로 역충전된
         # report_cycle(매월/반기) 값을 수임처 테이블 주기 컬럼에 즉시 반영.
-        if phase_id == 7 and status in ("completed", "failed"):
+        if phase_id == 8 and status in ("completed", "failed"):
             self._load_client_list()
 
     def _on_batch_progress(self, progress: dict):

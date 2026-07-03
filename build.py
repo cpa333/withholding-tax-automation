@@ -161,6 +161,7 @@ def build_pyinstaller(driver_dir):
         "--hidden-import=src.workflows.registry",
         "--hidden-import=src.workflows.nps_edi",
         "--hidden-import=src.workflows.nhis_edi",
+        "--hidden-import=src.workflows.comwel_edi",
         "--hidden-import=src.batch",
         "--hidden-import=src.batch.engine",
         "--hidden-import=src.batch.state",
@@ -172,6 +173,9 @@ def build_pyinstaller(driver_dir):
         "--hidden-import=src.automation.nhis",
         "--hidden-import=src.automation.nhis._common_edi",
         "--hidden-import=src.automation.nhis.nhis_edi_auto_cdp",
+        "--hidden-import=src.automation.comwel",
+        "--hidden-import=src.automation.comwel._common",
+        "--hidden-import=src.automation.comwel.comwel_auto_cdp",
 
         # Playwright Node.js 드라이버 (핵심)
         "--add-data", f"{driver_dir};playwright/driver",
@@ -258,6 +262,8 @@ def verify_bundle():
          lambda: in_pyz("src.automation.nhis.nhis_edi_auto_cdp")),
         ("src.automation.nhis._firm_selector (PYZ)",
          lambda: in_pyz("src.automation.nhis._firm_selector")),
+        ("src.automation.comwel.comwel_auto_cdp (PYZ)",
+         lambda: in_pyz("src.automation.comwel.comwel_auto_cdp")),
         # 네이티브 확장/DLL → _internal 실제 파일 검증
         ("PyMuPDF 네이티브(_mupdf.pyd)",
          lambda: os.path.isfile(os.path.join(internal, "pymupdf", "_mupdf.pyd"))),

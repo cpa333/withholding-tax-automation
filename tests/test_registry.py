@@ -39,6 +39,7 @@ def test_real_eight_phases_registered_in_order():
         import src.workflows.wehago_list_clients  # noqa: F401
         import src.workflows.nhis_edi             # noqa: F401
         import src.workflows.nps_edi              # noqa: F401
+        import src.workflows.comwel_edi           # noqa: F401
         import src.workflows.wehago_swsa          # noqa: F401
         import src.workflows.wehago_salary_pdf    # noqa: F401
         import src.workflows.wehago_swta          # noqa: F401
@@ -48,9 +49,12 @@ def test_real_eight_phases_registered_in_order():
         pytest.skip(f"워크플로우 모듈 import 불가(의존성): {e}")
 
     ids = [p["phase_id"] for p in get_all_phases()]
-    # 병렬 phase(2)는 테스트에서 등록 안 함(main_window 에서만). 8개 워크플로우 = phase_id 1,3..9.
-    assert ids[:8] == [1, 3, 4, 5, 6, 7, 8, 9]
-    for pid in (1, 3, 4, 5, 6, 7, 8, 9):
+    # 병렬 phase(2)는 테스트에서 등록 안 함(main_window 에서만).
+    # 9개 워크플로우 = phase_id 1,3..10. 체계:
+    #   1 수임처리스트 / 3 건강보험 / 4 국민연금 / 5 고용보험 /
+    #   6 급여자료입력 / 7 급여명세PDF / 8 원천이행상황 / 9 원천전자신고 / 10 홈택스
+    assert ids[:9] == [1, 3, 4, 5, 6, 7, 8, 9, 10]
+    for pid in (1, 3, 4, 5, 6, 7, 8, 9, 10):
         assert get_phase_info(pid) is not None
         assert get_workflow(pid) is not None
 
@@ -58,9 +62,10 @@ def test_real_eight_phases_registered_in_order():
     assert get_phase_info(1)["is_list_phase"] is True
     assert get_phase_info(3)["is_list_phase"] is False
     # 병렬 EDI 안정화 후 모든 phase 재활성화 — ui_locked=False
-    for pid in (1, 3, 4, 5, 6, 7, 8, 9):
+    for pid in (1, 3, 4, 5, 6, 7, 8, 9, 10):
         assert get_phase_info(pid)["ui_locked"] is False, f"phase {pid} 활성 기대"
-    assert get_phase_info(8)["needs_password"] is True
+    # 비밀번호 필요: 9(원천전자신고 SWER), 10(홈택스)
     assert get_phase_info(9)["needs_password"] is True
-    for pid in (1, 3, 4, 5, 6, 7):
+    assert get_phase_info(10)["needs_password"] is True
+    for pid in (1, 3, 4, 5, 6, 7, 8):
         assert get_phase_info(pid)["needs_password"] is False

@@ -20,7 +20,7 @@ from src.batch.state import StateManager
 
 
 @register(
-    phase_id=6,
+    phase_id=7,
     portal="wehago",
     display_name="WEHAGO 급여명세 PDF",
     enabled=True,

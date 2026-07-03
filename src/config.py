@@ -35,6 +35,7 @@ PORTAL_URLS = {
     "wehago": "https://www.wehago.com/",
     "nhis_edi": "https://edi.nhis.or.kr/",
     "nps_edi": "https://edi.nps.or.kr/",
+    "comwel_edi": "https://total.comwel.or.kr/",
     "hometax": "https://www.hometax.go.kr/",
 }
 
