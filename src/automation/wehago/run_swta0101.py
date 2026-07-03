@@ -2,6 +2,12 @@
 
 SWTA0101 이동 → 매월/반기 확인 → 사용자 지정 연도/월로 기간 설정 → 조회 → 마감/마감해제.
 
+마감/마감해제 처리 (메뉴 7번):
+  - 미마감(버튼 "마감") → 마감 적용 (클릭 → 2단계 모달 → 검증 로그).
+  - 이미 마감(버튼 "마감해제") → 마감을 자동으로 해제. 확인 모달을 처리한 뒤
+    버튼이 "마감" 으로 전환되었는지 검증한다. 검증에 실패하면 RuntimeError 를
+    발생시켜 어댑터(wehago_swta.py)가 해당 잡을 실패 처리하도록 한다.
+
 기간 설정:
   - 신고주기: DB report_cycle("매월"/"반기") 우선. 비어있으면 위하고 라디오
     (ground truth, 읽기 전용)에서 읽어 결정 → 어댑터가 DB 에 역충전.
@@ -35,6 +41,55 @@ def compute_half_period(now: datetime) -> tuple[int, int, int]:
     if now.month >= 7:
         return now.year, 1, 6
     return now.year - 1, 7, 12
+
+
+async def _read_close_button(page) -> str | None:
+    """마감/마감해제 가시 버튼의 텍스트("마감" / "마감해제")를 읽어 반환.
+
+    WSC_LUXTooltip 래퍼가 있으면 그 안의 버튼을 우선 탐색. 보이지 않는
+    (offsetWidth==0) 버튼은 무시한다. 버튼을 찾지 못하면 None.
+    """
+    return await page.evaluate("""() => {
+        const selectors = [
+            '.WSC_LUXTooltip button.WSC_LUXButton',
+            'button.WSC_LUXButton'
+        ];
+        for (const sel of selectors) {
+            for (const btn of document.querySelectorAll(sel)) {
+                const text = btn.textContent.trim();
+                if ((text === '마감' || text === '마감해제') && btn.offsetWidth > 0) return text;
+            }
+        }
+        return null;
+    }""")
+
+
+async def _click_dialog_confirm(page, max_polls: int = 5, interval: float = 0.5) -> str | None:
+    """열린 모달(._isDialog / .LUX_basic_dialog)에서 확인 버튼을 폴링 클릭.
+
+    클릭 대상 버튼 텍스트: "확인(enter)" 또는 "확인". 보이지 않는 모달/버튼은 무시.
+    클릭에 성공하면 해당 버튼 텍스트를, 아무것도 클릭하지 못하면 None 을 반환.
+    """
+    for _ in range(max_polls):
+        await asyncio.sleep(interval)
+        clicked = await page.evaluate("""() => {
+            const dialogs = document.querySelectorAll('._isDialog, .LUX_basic_dialog');
+            for (const d of dialogs) {
+                const cs = window.getComputedStyle(d);
+                if (cs.display === 'none' || d.offsetWidth < 30) continue;
+                const btns = d.querySelectorAll('button');
+                for (const btn of btns) {
+                    const t = btn.textContent.trim();
+                    if ((t === '확인(enter)' || t === '확인') && btn.offsetWidth > 0) {
+                        btn.click(); return t;
+                    }
+                }
+            }
+            return null;
+        }""")
+        if clicked:
+            return clicked
+    return None
 
 
 async def run_swta0101(page, year: int = None, month: int = None,
@@ -137,19 +192,7 @@ async def run_swta0101(page, year: int = None, month: int = None,
 
     # [5] 마감/마감해제 버튼 처리
     log("[SWTA0101] 마감 상태 확인...")
-    btn_text = await page.evaluate("""() => {
-        const selectors = [
-            '.WSC_LUXTooltip button.WSC_LUXButton',
-            'button.WSC_LUXButton'
-        ];
-        for (const sel of selectors) {
-            for (const btn of document.querySelectorAll(sel)) {
-                const text = btn.textContent.trim();
-                if ((text === '마감' || text === '마감해제') && btn.offsetWidth > 0) return text;
-            }
-        }
-        return null;
-    }""")
+    btn_text = await _read_close_button(page)
 
     if btn_text == "마감":
         log("  마감 버튼 클릭 (마감 적용)...")
@@ -161,69 +204,53 @@ async def run_swta0101(page, year: int = None, month: int = None,
         }""")
 
         # 1) 유의사항 안내 모달 → 확인(enter)
-        for i in range(15):
-            await asyncio.sleep(0.5)
-            clicked = await page.evaluate("""() => {
-                const dialogs = document.querySelectorAll('._isDialog, .LUX_basic_dialog');
-                for (const d of dialogs) {
-                    const cs = window.getComputedStyle(d);
-                    if (cs.display === 'none' || d.offsetWidth < 30) continue;
-                    const btns = d.querySelectorAll('button');
-                    for (const btn of btns) {
-                        const t = btn.textContent.trim();
-                        if ((t === '확인(enter)' || t === '확인') && btn.offsetWidth > 0) {
-                            btn.click(); return t;
-                        }
-                    }
-                }
-                return null;
-            }""")
-            if clicked:
-                log(f"  모달 버튼 클릭: {clicked}")
-                break
+        clicked = await _click_dialog_confirm(page, max_polls=15, interval=0.5)
+        if clicked:
+            log(f"  모달 버튼 클릭: {clicked}")
 
         # 2) "마감 완료!" 후속 모달 → 확인
         await asyncio.sleep(2)
-        for i in range(5):
-            clicked = await page.evaluate("""() => {
-                const dialogs = document.querySelectorAll('._isDialog, .LUX_basic_dialog');
-                for (const d of dialogs) {
-                    const cs = window.getComputedStyle(d);
-                    if (cs.display === 'none' || d.offsetWidth < 30) continue;
-                    const btns = d.querySelectorAll('button');
-                    for (const btn of btns) {
-                        const t = btn.textContent.trim();
-                        if ((t === '확인(enter)' || t === '확인') && btn.offsetWidth > 0) {
-                            btn.click(); return t;
-                        }
-                    }
-                }
-                return null;
-            }""")
-            if clicked:
-                log(f"  후속 모달 버튼 클릭: {clicked}")
-                await asyncio.sleep(1)
-            else:
-                break
+        clicked = await _click_dialog_confirm(page, max_polls=5)
+        if clicked:
+            log(f"  후속 모달 버튼 클릭: {clicked}")
+            await asyncio.sleep(1)
 
         # 마감 후 상태 확인
         await asyncio.sleep(1)
-        new_btn = await page.evaluate("""() => {
-            const selectors = [
-                '.WSC_LUXTooltip button.WSC_LUXButton',
-                'button.WSC_LUXButton'
-            ];
-            for (const sel of selectors) {
-                for (const btn of document.querySelectorAll(sel)) {
-                    const text = btn.textContent.trim();
-                    if ((text === '마감' || text === '마감해제') && btn.offsetWidth > 0) return text;
-                }
-            }
-            return null;
-        }""")
+        new_btn = await _read_close_button(page)
         log(f"  마감 후 버튼 상태: {new_btn}")
     elif btn_text == "마감해제":
-        log("  이미 마감 상태 - 스킵")
+        log("  마감해제 버튼 클릭 (마감 해제 적용)...")
+        await page.evaluate("""() => {
+            const btns = document.querySelectorAll('button.WSC_LUXButton');
+            for (const btn of btns) {
+                if (btn.textContent.trim() === '마감해제' && btn.offsetWidth > 0) { btn.click(); return; }
+            }
+        }""")
+
+        # 마감 적용과 동일한 2단계 모달 패턴으로 확인 처리
+        # 1) 확인 모달 → 확인(enter) / 확인
+        clicked = await _click_dialog_confirm(page, max_polls=15, interval=0.5)
+        if clicked:
+            log(f"  모달 버튼 클릭: {clicked}")
+
+        # 2) 후속 모달 → 확인
+        await asyncio.sleep(2)
+        clicked = await _click_dialog_confirm(page, max_polls=5)
+        if clicked:
+            log(f"  후속 모달 버튼 클릭: {clicked}")
+            await asyncio.sleep(1)
+
+        # 마감해제 검증: 버튼이 "마감해제" → "마감" 으로 전환되어야 함.
+        # 전환되지 않으면 모달이 정상 처리되지 않은 것이므로 잡 실패로 처리한다.
+        await asyncio.sleep(1)
+        new_btn = await _read_close_button(page)
+        if new_btn != "마감":
+            raise RuntimeError(
+                f"마감해제 확인 실패: 버튼이 '{new_btn}' (예상 '마감'). "
+                f"모달이 정상 처리되지 않았을 수 있음."
+            )
+        log(f"  마감해제 완료 후 버튼 상태: {new_btn}")
     else:
         log(f"  마감 버튼 상태: {btn_text}")
 
