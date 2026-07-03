@@ -2,18 +2,21 @@
 
 엑셀 v3 (E100~E102): 고용 탭 → 고용보험료 지원금 정보(사회보험료지원금 조회) → 인쇄하기.
 
-라이브 확인된 흐름:
+라이브 검증된 전체 흐름:
   1. 하단 '고용' 탭(btnTabGy) 클릭
-  2. '사회보험료 지원금정보'(wq_uuid_1191) 버튼 클릭 → WL0502_P02 팝업 오픈
-  3. 팝업 내 '인쇄하기' 버튼(텍스트 매칭 — wq_uuid_XXXX 동적) 클릭
-  4. 새 창(리포트 뷰어)이 열림 → CDP 세션 끊김 주의
+  2. 지원금정보 버튼(텍스트 매칭 — 라벨/동적 id 가변) 클릭 → WL0502_P02 팝업 오픈
+  3. 데이터 건수 확인 — 0건이면 인쇄 생략(정상 처리)
+  4. 팝업 내 '인쇄하기' 버튼(텍스트 매칭) 클릭 → WZ0203 모달 + ifr_Report(ClipReport) 오픈
+  5. ClipReport 리포트 뷰어:
+     a. report_menu_save_button("저장") 클릭 → 파일 형식 다이얼로그
+     b. select_label 에서 "PDF 저장(*.pdf)" 선택
+     c. download_main_option_download_button("저장") 클릭 → PDF 다운로드
 
 주의:
-- '인쇄하기'/'엑셀저장' 버튼 id는 매 렌더링마다 동적(wq_uuid_XXXX)이므로
-  텍스트 매칭 + 팝업(POPUP_SUPPORT_ID) 범위로 클릭해야 한다.
-- 인쇄 버튼 클릭 시 CDP 연결이 끊길 수 있어(새 창 window.open) 호출측에서
-  재연결 로직이 필요할 수 있다. 현재 구현은 인쇄 버튼 클릭까지 담당하며,
-  리포트 뷰어 창에서의 저장/PDF 다운로드는 2차 라이브 튜닝 대상이다.
+- 지원금 버튼 라벨이 사업장에 따라 다름 ("사회보험료 지원금정보" / "고용보험료 지원금 정보")
+  → BTN_SUPPORT_INFO_KEYWORD("지원금") 키워드 매칭.
+- 인쇄/엑셀 버튼 id(wq_uuid_XXXX)는 동적 → 텍스트 매칭.
+- ClipReport 는 ifr_Report 프레임(별도 DOM)으로 접근해야 한다.
 """
 
 import os
@@ -22,9 +25,13 @@ import asyncio
 from src.utils.log import log
 from src.utils.human import human_delay
 from src.automation.comwel._constants import (
-    TAB_EMPLOYMENT_ID, BTN_SUPPORT_INFO_ID,
+    TAB_EMPLOYMENT_ID,
+    BTN_SUPPORT_INFO_KEYWORD,
     POPUP_SUPPORT_ID, POPUP_SUPPORT_CLOSE_ID,
     BTN_PRINT_TEXT, BTN_EXCEL_TEXT,
+    REPORT_IFRAME_NAME, REPORT_BTN_SAVE_ID,
+    REPORT_FORMAT_SELECT_ID, REPORT_FORMAT_PDF_TEXT,
+    REPORT_DOWNLOAD_BTN_ID,
     DOWNLOAD_TIMEOUT_S, PRINT_CLICK_RETRIES,
     POPUP_TIMEOUT_S,
 )
@@ -100,7 +107,20 @@ async def _wait_popup_open(page, popup_id: str, timeout: int = POPUP_TIMEOUT_S) 
 
 
 async def click_employment_tab(page) -> bool:
-    """하단 '고용' 탭 클릭 (엑셀 E100)."""
+    """하단 '고용' 탭 클릭 (엑셀 E100).
+
+    이미 고용 탭이 활성(w2tabcontrol_active)이면 클릭하지 않는다 — 중복 클릭 시
+    산재 탭으로 토글되어 지원금 데이터가 사라지는 문제 방지. (라이브 검증)
+    """
+    already = await page.evaluate(r'''(id) => {
+        const el = document.getElementById(id);
+        if (!el) return false;
+        const li = el.closest("li");
+        return !!(li && /w2tabcontrol_active/.test(li.className || ""));
+    }''', TAB_EMPLOYMENT_ID)
+    if already:
+        log("  '고용' 탭 이미 활성 — 클릭 생략")
+        return True
     clicked = await page.evaluate(r"""(id) => {
         const el = document.getElementById(id);
         if (!el) return false;
@@ -109,22 +129,34 @@ async def click_employment_tab(page) -> bool:
     }""", TAB_EMPLOYMENT_ID)
     if clicked:
         log("  '고용' 탭 클릭")
-        await human_delay(2)
+        await human_delay(3)
     return clicked
 
 
 async def open_support_popup(page) -> bool:
-    """'사회보험료 지원금정보' 버튼 클릭 → WL0502_P02 팝업 오픈 (엑셀 E101)."""
-    clicked = await page.evaluate(r"""(id) => {
-        const el = document.getElementById(id);
-        if (!el) return false;
-        el.click();
-        return true;
-    }""", BTN_SUPPORT_INFO_ID)
-    if not clicked:
-        log(f"  ⚠ '사회보험료 지원금정보' 버튼({BTN_SUPPORT_INFO_ID}) 클릭 실패")
+    """지원금정보 버튼 클릭 → WL0502_P02 팝업 오픈 (엑셀 E101).
+
+    버튼 id(wq_uuid_XXXX)가 동적이고 라벨도 사업장에 따라 다름
+    ("사회보험료 지원금정보" / "고용보험료 지원금 정보") → "지원금" 키워드 포함 +
+    하단 탭 영역(고용 탭 근처, w2trigger)의 input/button 으로 매칭. (라이브 검증)
+    """
+    clicked_id = await page.evaluate(r"""(keyword) => {
+        // 본문(mf_wfm_content) input/button 중 "지원금" 키워드 포함 첫 요소.
+        // 사이드 메뉴(mf_gen_firstGenerator_side)는 제외. 스크롤에 무관.
+        for (const el of document.querySelectorAll("input, button")) {
+            const r = el.getBoundingClientRect();
+            if (r.width === 0) continue;
+            const id = el.id || "";
+            if (!id.startsWith("mf_wfm_content")) continue;
+            const t = (el.textContent || el.value || "").trim();
+            if (t.includes(keyword)) { el.click(); return el.id; }
+        }
+        return null;
+    }""", BTN_SUPPORT_INFO_KEYWORD)
+    if not clicked_id:
+        log(f"  ⚠ '지원금' 버튼을 찾지 못함 (키워드 매칭)")
         return False
-    log("  '사회보험료 지원금정보' 클릭 — 팝업 대기...")
+    log(f"  '지원금' 버튼 클릭 (id={clicked_id}) — 팝업 대기...")
     await asyncio.sleep(3)
     return await _wait_popup_open(page, POPUP_SUPPORT_ID)
 
@@ -169,15 +201,31 @@ async def _close_support_popup(page):
 
 # ─── 메인 다운로드 함수 ─────────────────────────────────────────────────────────
 
+async def _read_support_count(page) -> int | None:
+    """지원금 팝업의 '총 조회건 N건' 읽기. 없으면 None."""
+    return await page.evaluate(r"""(popupId) => {
+        const popup = document.getElementById(popupId);
+        if (!popup) return null;
+        const m = popup.innerText.match(/총\s*조회건\s*(\d+)\s*건/);
+        return m ? parseInt(m[1]) : null;
+    }""", POPUP_SUPPORT_ID)
+
+
 async def download_support_info_printout(
     page, context, save_dir, *, year: int = None, month: int = None,
 ):
     """고용보험료 지원금 정보 인쇄물 다운로드 (엑셀 E100~E102).
 
-    흐름: 고용 탭 → 지원금정보 팝업 → 인쇄하기(새 창 리포트 뷰어).
+    흐름: 고용 탭 → 지원금정보 팝업 → (0건이면 스킵) → 인쇄하기(새 창 리포트 뷰어).
+
+    라이브 검증: 현재 DB 수임처들은 지원금 데이터가 0건인 경우가 많다.
+    0건일 때 인쇄 버튼은 활성(disabled=False)이지만 의미 없는 빈 인쇄물이
+    생성되므로, 0건이면 인쇄를 생략하고 정상(빈 결과)으로 처리한다.
 
     Returns:
-        dict: {"path": 경로|None, "format": "pdf"|"xlsx"|None, "print_clicked": bool}
+        dict: {"path": 경로|None, "format": "pdf"|"xlsx"|None,
+               "print_clicked": bool, "count": int|None,
+               "skipped": bool(0건으로 스킵 여부)}
     """
     period = f"{year}{month:02d}" if year and month else ""
     base_name = f"고용보험료지원금정보_{period}" if period else "고용보험료지원금정보"
@@ -187,32 +235,122 @@ async def download_support_info_printout(
 
     # 2) 지원금정보 팝업 오픈
     if not await open_support_popup(page):
-        return {"path": None, "format": None, "print_clicked": False}
+        return {"path": None, "format": None, "print_clicked": False,
+                "count": None, "skipped": False}
 
-    # 3) 인쇄하기 버튼 클릭 — 새 창(리포트 뷰어)이 열림
+    # 3) 데이터 건수 확인 — 0건이면 인쇄 생략 (라이브 검증)
+    count = await _read_support_count(page)
+    if count is not None and count == 0:
+        log(f"  지원금 데이터 0건 — 인쇄 생략 (정상)")
+        await _close_support_popup(page)
+        return {"path": None, "format": None, "print_clicked": False,
+                "count": 0, "skipped": True}
+    if count and count > 0:
+        log(f"  지원금 데이터 {count}건 — 인쇄 진행")
+
+    # 4) 인쇄하기 버튼 클릭 → WZ0203 모달 + ClipReport(ifr_Report) 오픈
     #    CDP 다운로드 감시를 미리 설정해 두고 클릭.
     before, cdp = await _setup_cdp_download(context, page, save_dir)
     try:
         clicked_id = await _click_print_button(page)
         if not clicked_id:
-            return {"path": None, "format": None, "print_clicked": False}
+            return {"path": None, "format": None, "print_clicked": False,
+                    "count": count, "skipped": False}
 
-        # 새 창/다운로드 대기 — 인쇄 버튼은 새 창 리포트 뷰어를 여므로
-        # 직접 다운로드가 아닐 수 있다. 다운로드 + 새 페이지 둘 다 감시.
-        log("  인쇄물(리포트 뷰어) 대기 중...")
-        downloaded = await _wait_for_download(
-            save_dir, before, DOWNLOAD_TIMEOUT_S, label="고용보험 인쇄물",
-        )
+        # 5) ClipReport 리포트 뷰어에서 PDF 저장 (라이브 검증 흐름)
+        #    ifr_Report 프레임이 로드될 때까지 대기 → 저장 버튼 → 형식 PDF → 다운로드
+        await asyncio.sleep(3)  # ClipReport 로딩 대기
+        downloaded = await _clipreport_save_pdf(page, save_dir, before, base_name)
         if downloaded:
-            final_path, fmt = _rename_download(downloaded, save_dir, base_name)
+            final_path, fmt = downloaded
             log(f"  인쇄물 저장: {os.path.basename(final_path)} (형식: {fmt})")
-            return {"path": final_path, "format": fmt, "print_clicked": True}
+            return {"path": final_path, "format": fmt, "print_clicked": True,
+                    "count": count, "skipped": False}
 
-        # 직접 다운로드 없음 → 리포트 뷰어 새 창에서 별도 저장 필요 (2차 튜닝)
-        log("  ⚠ 직접 다운로드 감지 안 됨 — 리포트 뷰어 새 창에서 저장 필요 (2차 튜닝)")
-        return {"path": None, "format": None, "print_clicked": True}
+        log("  ⚠ ClipReport PDF 저장 실패")
+        return {"path": None, "format": None, "print_clicked": True,
+                "count": count, "skipped": False}
     finally:
         try:
             await cdp.detach()
         except Exception:
             pass
+
+
+async def _clipreport_save_pdf(page, save_dir, before, base_name):
+    """ClipReport 리포트 뷰어(ifr_Report 프레임)에서 PDF 저장 (라이브 검증).
+
+    흐름:
+      1) ifr_Report 프레임 찾기 (ClipReport/reportView)
+      2) report_menu_save_button("저장") 클릭 → 파일 형식 다이얼로그 오픈
+      3) select_label 에서 "PDF 저장(*.pdf)" 선택
+      4) download_main_option_download_button("저장") 클릭 → PDF 다운로드
+
+    Returns:
+        (final_path, format) or None
+    """
+    # ifr_Report 프레임 찾기
+    report_frame = None
+    for _ in range(15):
+        for fr in page.frames:
+            if fr.name == REPORT_IFRAME_NAME or "ClipReport" in fr.url:
+                report_frame = fr
+                break
+        if report_frame:
+            break
+        await asyncio.sleep(1)
+
+    if not report_frame:
+        log("  ⚠ ClipReport 프레임(ifr_Report)을 찾지 못함")
+        return None
+
+    # report_menu_save_button("저장") 클릭 → 형식 다이얼로그 오픈
+    try:
+        saved = await report_frame.evaluate(r'''(id) => {
+            const btn = document.getElementById(id);
+            if (!btn) return false;
+            btn.click();
+            return true;
+        }''', REPORT_BTN_SAVE_ID)
+        if not saved:
+            log(f"  ⚠ '{REPORT_BTN_SAVE_ID}' 버튼을 찾지 못함")
+            return None
+    except Exception as e:
+        log(f"  ⚠ 저장 버튼 클릭 실패: {e}")
+        return None
+    await asyncio.sleep(1)
+
+    # 파일 형식 PDF 선택 + 다운로드 버튼 클릭
+    try:
+        result = await report_frame.evaluate(r'''(args) => {
+            const out = {};
+            // select_label 에서 PDF 옵션 선택
+            const sel = document.getElementById(args.selectId);
+            if (sel) {
+                const pdfOpt = Array.from(sel.options).find(o => /PDF/i.test(o.text));
+                if (pdfOpt) {
+                    sel.value = pdfOpt.value;
+                    sel.dispatchEvent(new Event("change", {bubbles: true}));
+                    out.format = pdfOpt.text;
+                }
+            }
+            // 다운로드 버튼 클릭
+            const dl = document.getElementById(args.downloadBtnId);
+            if (dl) { dl.click(); out.clicked = true; }
+            return out;
+        }''', {"selectId": REPORT_FORMAT_SELECT_ID,
+                "downloadBtnId": REPORT_DOWNLOAD_BTN_ID})
+        if not result.get("clicked"):
+            log("  ⚠ 다운로드 버튼 클릭 실패")
+            return None
+    except Exception as e:
+        log(f"  ⚠ 형식 선택/다운로드 실패: {e}")
+        return None
+
+    # 다운로드 완료 대기
+    downloaded = await _wait_for_download(
+        save_dir, before, DOWNLOAD_TIMEOUT_S, label="고용보험 PDF",
+    )
+    if not downloaded:
+        return None
+    return _rename_download(downloaded, save_dir, base_name)

@@ -484,18 +484,26 @@ NPS/NHIS CLI 진입점이 module-level `sys.stdout.detach()` 재래핑을 해 im
 - **근린건축**: 단건 실행 + 포털 확인으로 판별(단건 OK→간헐, 단건도 실패+미검색→정당).
 - 회귀: pytest 99/99(94+5). 라이브(6월 22개 정상, 행복이지 단건 OK) 확인.
 
-### 15.4 고용보험 EDI(phase 10) — 단독 메뉴, 병렬 편입 TODO
+### 15.4 고용보험 EDI(phase 5) — 단독 메뉴, 병렬 편입 TODO
 
-엑셀 v3(C86~H106)에 정의된 근로복지공단 고용보험 EDI 자동화. 현재 **단독(직렬)
-phase 10**으로 구현되어 있으며, **병렬 phase 2 편입은 아직 미구현(TODO)**.
+엑셀 v3(C86~H106)에 정의된 근로복지공단 고용보험 EDI 자동화. **단독(직렬) phase 5**로
+구현, **라이브 검증 완료**(3개 수임처 연속 테스트 PASS). 병렬 phase 2 편입은 추후.
 
 - **식별자**: `comwel_edi`, 패키지 `src/automation/comwel/`, 어댑터 `src/workflows/comwel_edi.py`
-- **상태**: 프로토타입 — 포털 DOM/셀렉터가 라이브 튜닝 전. 메뉴 이동/인쇄 버튼은
-  텍스트 매칭 추정값(`_click_text_in_menu`).
+- **상태**: 라이브 검증 완료 — ClipReport 리포트 뷰어(`ifr_Report` 프레임)를 통한
+  PDF 다운로드까지 검증. 핵심 셀렉터/흐름:
+  - 로그인 감지: `btnLogin`/`guestView` 가시 요소 사라짐 (URL 고정)
+  - 20209 진입: 메인 대시보드 퀵메뉴
+  - 사업장 전환: 관리번호 입력 → 사업장조회 → WZ0101_P01 팝업 선택
+  - **본 화면 조회(btnSearch) 필수** — 사업장 선택 후 데이터 로드 (라이브 발견)
+  - 고용 탭: `w2tabcontrol_active` 체크 후 클릭 (중복 클릭 방지)
+  - 지원금 팝업: "지원금" 키워드 매칭 (라벨/동적 id 가변)
+  - 인쇄: "인쇄하기" → WZ0203 모달 → ClipReport `report_menu_save_button` → PDF 선택 → 다운로드
+- **주의**: 버튼 id(`wq_uuid_XXXX`)는 동적 → 텍스트/키워드 매칭 사용.
 - **병렬 편입 시 필요 변경**(3-way NPS+NHIS+고용보험):
   - `parallel_cli_worker.py`: `_comwel_port=9225` 할당, `_spawn("comwel", "src.automation.comwel.comwel_auto_cdp", ...)` 추가, `_pump` prefix `[COMWEL]`, `stop()`에 `kill_chrome_by_port(9225)`
-  - `main_window.py:566-567, 728-729`: `parallel_runner.start(..., comwel_port=9225)`
+  - `main_window.py`: `parallel_runner.start(..., comwel_port=9225)`
   - `comwel_auto_cdp.py`의 `--save-site 공단EDI` + `_SAVE_SUBDIR="고용보험"` 경로(이미 CLI에 구현됨)
-  - 3-way 병렬은 2-way 대비 Chrome 프로필/포트 관리 부담 증가 → 단독 안정화 후 진행 권장
+  - 3-way 병렬은 2-way 대비 Chrome 프로필/포트 관리 부담 증가 → 별도 작업 권장
 - **저장 경로**: 단독 `고용보험_{YYYYMM}/{수임처}/` / 병렬(예정) `공단EDI_{YYYYMM}/{수임처}/고용보험/`
 - **관리번호**: 사업자번호+`'0'`(`biz_to_mgmt_no`) — NPS와 동일 규칙, 별도 DB 컬럼 불필요

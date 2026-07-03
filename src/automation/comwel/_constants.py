@@ -30,6 +30,8 @@ QUICKMENU_20209_ID = "mf_wfm_content_gen_firstGenerator_1_quickMenu"
 INPUT_MGMT_NO_ID = "mf_wfm_content_maeGwanriNo"
 # 사업장조회 버튼 (관리번호 입력란 바로 오른쪽 "검색/사업장관리번호 찾기")
 BTN_WORKPLACE_SEARCH_ID = "mf_wfm_content_btnSaeopjangSearch"
+# 본 화면 조회 버튼 — 사업장 선택 후 데이터 로드 (라이브 검증)
+BTN_MAIN_SEARCH_ID = "mf_wfm_content_btnSearch"
 # 부과년도 select
 SELECT_YEAR_ID = "mf_wfm_content_comYear_input_0"
 # 부과월 select
@@ -50,7 +52,14 @@ WORKPLACE_GRID_ROW_CLASS = "grid_body_row"
 # 산재/고용 하단 탭
 TAB_SANJEONG_ID = "mf_wfm_content_tabcont_tab_btnTabSj_tabHTML"   # 산재
 TAB_EMPLOYMENT_ID = "mf_wfm_content_tabcont_tab_btnTabGy_tabHTML"  # 고용
-# 사회보험료 지원금정보 버튼 (고용 탭 하위)
+# 사회보험료 지원금정보 버튼 — id(wq_uuid_XXXX)가 동적이라 텍스트 매칭 사용.
+# 라이브 검증: 사업장/지원금 종류에 따라 버튼 라벨이 다름
+#   - "사회보험료 지원금정보" (0건 사업장에서 관찰)
+#   - "고용보험료 지원금 정보" (데이터 있는 사업장에서 관찰)
+# → "지원금" 키워드 포함 + 하단 탭 영역의 w2trigger input 으로 매칭.
+BTN_SUPPORT_INFO_KEYWORD = "지원금"
+BTN_SUPPORT_INFO_TEXT = "사회보험료 지원금정보"
+# (레거시 고정 id — 더 이상 신뢰 불가, 키워드 매칭 우선)
 BTN_SUPPORT_INFO_ID = "mf_wfm_content_wq_uuid_1191"
 
 # 사회보험료지원금 조회 팝업(WL0502_P02)
@@ -59,6 +68,19 @@ POPUP_SUPPORT_CLOSE_ID = "mf_wfm_content_WL0502_P02_close"
 # 주의: 인쇄하기/엑셀저장 버튼 id(wq_uuid_XXXX)는 동적 → 텍스트 매칭 사용
 BTN_PRINT_TEXT = "인쇄하기"      # 엑셀 E102
 BTN_EXCEL_TEXT = "엑셀저장"
+
+# ─── ClipReport 리포트 뷰어 (인쇄하기 → WZ0203 모달 내 ifr_Report) ────────────
+# 인쇄하기 클릭 시 WZ0203 모달이 열리고 그 안에 ifr_Report(ClipReport)가 로드됨.
+# 파일 저장 흐름(라이브 검증):
+#   1) report_menu_save_button("저장") 클릭 → 파일 형식 다이얼로그 오픈
+#   2) select_label 에서 형식(PDF) 선택
+#   3) download_main_option_download_button("저장") 클릭 → 실제 다운로드
+REPORT_IFRAME_NAME = "ifr_Report"          # ClipReport iframe name
+REPORT_MODAL_ID = "mf_wfm_content_WL0502_P02_wframe_WZ0203"
+REPORT_BTN_SAVE_ID = "report_menu_save_button"            # 리포트 뷰어 "저장"
+REPORT_FORMAT_SELECT_ID = "select_label"                  # 파일 형식 select
+REPORT_FORMAT_PDF_TEXT = "PDF 저장(*.pdf)"                # PDF 옵션 텍스트
+REPORT_DOWNLOAD_BTN_ID = "download_main_option_download_button"  # 형식 다이얼로그 "저장"
 
 # ─── 로그인/팝업 id (라이브 검증) ───────────────────────────────────────────────
 

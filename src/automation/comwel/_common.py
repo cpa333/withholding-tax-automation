@@ -32,7 +32,7 @@ from src.automation.comwel._constants import (
     COMWEL_URL, COMWEL_MAIN,
     MENU_INFO_INQUIRY_ID, MENU_PREMIUM_INQUIRY_ID, MENU_PREMIUM_20209_ID,
     QUICKMENU_20209_ID,
-    INPUT_MGMT_NO_ID, BTN_WORKPLACE_SEARCH_ID,
+    INPUT_MGMT_NO_ID, BTN_WORKPLACE_SEARCH_ID, BTN_MAIN_SEARCH_ID,
     SELECT_YEAR_ID, SELECT_MONTH_ID,
     POPUP_WORKPLACE_ID, POPUP_WORKPLACE_CLOSE_ID,
     POPUP_WORKPLACE_MGMT_NO_ID, POPUP_WORKPLACE_SEARCH_BTN_ID,
@@ -277,3 +277,25 @@ async def set_period(page, year: int, month: int) -> bool:
         log(f"  ⚠ 연월 설정 실패: year={result.get('year')!r} month={result.get('month')!r}")
         return False
     return True
+
+
+async def search_main(page) -> bool:
+    """본 화면 '조회' 버튼(btnSearch) 클릭 — 사업장 선택 후 데이터 로드 (라이브 검증).
+
+    사업장을 선택만 하면 데이터가 로드되지 않고, 본 화면의 '조회' 버튼을
+    눌러야 부과내역/지원금 데이터가 화면에 반영된다.
+    """
+    clicked = await page.evaluate(r"""(id) => {
+        const el = document.getElementById(id);
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0) return false;
+        el.click();
+        return true;
+    }""", BTN_MAIN_SEARCH_ID)
+    if clicked:
+        log("[COMWEL] 본 화면 조회(btnSearch) 클릭 — 데이터 로드 대기")
+        await asyncio.sleep(5)
+        return True
+    log(f"  ⚠ 본 화면 조회 버튼({BTN_MAIN_SEARCH_ID})을 찾지 못함")
+    return False

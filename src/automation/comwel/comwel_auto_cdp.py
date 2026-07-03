@@ -39,7 +39,7 @@ from datetime import datetime as _dt
 from src.automation.comwel._common import (
     log, COMWEL_URL, connect_page, wait_for_login,
     switch_workplace, select_workplace, reset_workplace_page,
-    navigate_to_premium_20209, set_period, dismiss_dialogs,
+    navigate_to_premium_20209, set_period, search_main, dismiss_dialogs,
     PAGE_LOAD_TIMEOUT_MS,
 )
 from src.automation.comwel._download import download_support_info_printout
@@ -80,7 +80,7 @@ async def run_single_workplace(page, context, workplace_name, *,
                                management_number=""):
     """단일 사업장 인쇄물 다운로드 워크플로우 (라이브 검증 흐름).
 
-    흐름: 20209 진입 → 연월 설정 → 사업장 전환 → 고용탭/지원금/인쇄.
+    흐름: 20209 진입 → 연월 설정 → 사업장 전환 → 본화면조회 → 고용탭/지원금/인쇄.
     """
     log(f"  저장 폴더 준비: {_SAVE_SITE}")
     firm_dir = make_save_dir(_SAVE_SITE, workplace_name,
@@ -99,7 +99,10 @@ async def run_single_workplace(page, context, workplace_name, *,
         log(f"  사업장 전환 실패: '{workplace_name}'")
         return False
 
-    # 3) 고용 탭 → 지원금정보 → 인쇄
+    # 3) 본 화면 조회(btnSearch) — 데이터 로드 (라이브 검증)
+    await search_main(page)
+
+    # 4) 고용 탭 → 지원금정보 → 인쇄
     result = await download_support_info_printout(
         page, context, firm_dir, year=year, month=month,
     )

@@ -29,8 +29,9 @@ class ComwelEdiWorkflow(BaseWorkflow):
         {"name": "navigate_to_20209", "index": 0},
         {"name": "set_period",        "index": 1},
         {"name": "switch_workplace",  "index": 2},
-        {"name": "print_download",    "index": 3},
-        {"name": "cleanup",           "index": 4},
+        {"name": "search_main",       "index": 3},
+        {"name": "print_download",    "index": 4},
+        {"name": "cleanup",           "index": 5},
     ]
 
     async def run_single(
@@ -39,7 +40,7 @@ class ComwelEdiWorkflow(BaseWorkflow):
     ) -> bool:
         from src.automation.comwel._common import (
             navigate_to_premium_20209, set_period,
-            switch_workplace, dismiss_dialogs,
+            switch_workplace, search_main, dismiss_dialogs,
         )
         from src.automation.comwel._download import download_support_info_printout
         from src.utils.human import human_delay
@@ -67,7 +68,6 @@ class ComwelEdiWorkflow(BaseWorkflow):
                     return False
             state.after_step(job_id, "set_period")
 
-        # 사업장 전환 성공 후에만 폴더 생성 (검색 실패 시 빈 폴더 방지)
         # 2) 사업장 전환
         if not state.should_skip_step(job_id, "switch_workplace"):
             state.before_step(job_id, "switch_workplace", 2)
@@ -79,21 +79,34 @@ class ComwelEdiWorkflow(BaseWorkflow):
             await human_delay(2)
             state.after_step(job_id, "switch_workplace")
 
+        # 3) 본 화면 조회(btnSearch) — 사업장 선택 후 데이터 로드 (라이브 검증)
+        if not state.should_skip_step(job_id, "search_main"):
+            state.before_step(job_id, "search_main", 3)
+            ok = await search_main(page)
+            if not ok:
+                state.fail_step(job_id, "search_main", "본 화면 조회 실패")
+                return False
+            state.after_step(job_id, "search_main")
+
+        # 사업장 전환 성공 후에만 폴더 생성 (검색 실패 시 빈 폴더 방지)
         firm_dir = make_save_dir("고용보험", client_name, year=year, month=month)
 
-        # 3) 고용 탭 → 지원금정보 팝업 → 인쇄하기
+        # 4) 고용 탭 → 지원금정보 팝업 → 인쇄하기
         download_ok = True
         if not state.should_skip_step(job_id, "print_download"):
-            state.before_step(job_id, "print_download", 3)
+            state.before_step(job_id, "print_download", 4)
             try:
                 result = await download_support_info_printout(
                     page, context, firm_dir, year=year, month=month,
                 )
                 if result.get("path"):
+                    # 파일 다운로드 성공
+                    state.after_step(job_id, "print_download")
+                elif result.get("skipped"):
+                    # 지원금 데이터 0건 — 인쇄 생략(정상). 라이브 검증.
                     state.after_step(job_id, "print_download")
                 elif result.get("print_clicked"):
                     # 인쇄 버튼은 눌렀으나 파일 저장 미확인(리포트 뷰어 새 창)
-                    # — 2차 라이브 튜닝 대상. 일단 성공으로 처리(버튼 클릭까지 검증됨).
                     state.after_step(job_id, "print_download")
                 else:
                     state.fail_step(job_id, "print_download",
@@ -103,9 +116,9 @@ class ComwelEdiWorkflow(BaseWorkflow):
                 state.fail_step(job_id, "print_download", str(e))
                 download_ok = False
 
-        # 4) 정리 — 성공/실패 무관 항상 실행
+        # 5) 정리 — 성공/실패 무관 항상 실행
         if not state.should_skip_step(job_id, "cleanup"):
-            state.before_step(job_id, "cleanup", 4)
+            state.before_step(job_id, "cleanup", 5)
             await dismiss_dialogs(page)
             state.after_step(job_id, "cleanup")
 
