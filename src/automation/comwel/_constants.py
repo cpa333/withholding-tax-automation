@@ -84,7 +84,11 @@ REPORT_DOWNLOAD_BTN_ID = "download_main_option_download_button"  # 형식 다이
 
 # ─── 로그인/팝업 id (라이브 검증) ───────────────────────────────────────────────
 
-# 로그인 전용 가시 요소 (이들이 사라지면 로그인 완료)
+# 로그인 완료 신호 — 헤더 '로그아웃' 버튼 가시 여부 (라이브 검증).
+# 로그인 전 btnLogin/guestView 는 로그인 페이지(#/)에서 존재조차 안 해 신뢰 불가.
+# header_btn_logout 는 로그인 전에는 비가시, 후에는 가시 → 가장 안정적.
+LOGOUT_BTN_ID = "mf_wfm_header_btn_logout"
+# (레거시 — 더 이상 신뢰 불가)
 PRELOGIN_BTN_LOGIN_ID = "mf_wfm_content_btnLogin"
 PRELOGIN_GUEST_VIEW_ID = "mf_wfm_content_guestView"
 # 로그인 후 사무대행기관 정보 확인 팝업 닫기

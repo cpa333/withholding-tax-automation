@@ -1017,12 +1017,12 @@ class AutomationRunner(AsyncWorker):
     async def _wait_for_login_comwel(self) -> bool:
         """근로복지공단(고용보험) EDI 로그인 대기.
 
-        NPS/NHIS 와 동일한 for-else 패턴 사용. 근로복지공단 토탈서비스는 로그인
-        전후로 URL 이 바뀌지 않으므로(https://total.comwel.or.kr/ 고정), **로그인
-        전용 가시 요소**(btnLogin/guestView)가 DOM 에서 사라지면 로그인 완료로
-        판정한다. NPS 의 'nexacro' URL 체크와 구조가 동일:
-          - comwel 탭 찾기 → 로그인 전 요소 사라졌으면 break(완료)
-          - 아니면 continue(대기) — 외부 루프의 다음 회차로.
+        근로복지공단 토탈서비스는 로그인 전후로 URL 이 바뀌지 않으므로
+        (https://total.comwel.or.kr/ 고정), **헤더의 '로그아웃' 버튼**(
+        mf_wfm_header_btn_logout)이 가시 상태가 되면 로그인 완료로 판정한다.
+        (라이브 검증: 로그인 전엔 logout 비가시/login 가시, 로그인 후엔 반대.
+        로그인 전용 btnLogin/guestView 는 로그인 페이지(#/)에서 존재조차 안 해
+        신뢰 불가 → header_btn_logout 가 가장 안정적 신호.)
         """
         self.log_message.emit("[고용보험 EDI] 로그인 대기 중... 공동인증서로 로그인해 주세요.")
 
@@ -1040,19 +1040,14 @@ class AutomationRunner(AsyncWorker):
                         continue
                     if "total.comwel.or.kr" not in url:
                         continue
-                    # 로그인 전 가시 요소가 사라졌으면 로그인 완료.
-                    still_pre_login = await pg.evaluate("""() => {
-                        const ids = ['mf_wfm_content_btnLogin', 'mf_wfm_content_guestView'];
-                        for (const id of ids) {
-                            const el = document.getElementById(id);
-                            if (el) {
-                                const r = el.getBoundingClientRect();
-                                if (r.width > 0 && r.height > 0) return true;
-                            }
-                        }
-                        return false;
+                    # 헤더 '로그아웃' 버튼이 가시면 로그인 완료.
+                    logged_out = await pg.evaluate("""() => {
+                        const el = document.getElementById('mf_wfm_header_btn_logout');
+                        if (!el) return false;
+                        const r = el.getBoundingClientRect();
+                        return r.width > 0 && r.height > 0;
                     }""")
-                    if not still_pre_login:
+                    if logged_out:
                         logged_in_page = pg
                         break
                 if logged_in_page:

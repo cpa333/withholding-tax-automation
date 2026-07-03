@@ -40,7 +40,7 @@ from src.automation.comwel._constants import (
     TAB_SANJEONG_ID, TAB_EMPLOYMENT_ID, BTN_SUPPORT_INFO_ID,
     POPUP_SUPPORT_ID, POPUP_SUPPORT_CLOSE_ID,
     BTN_PRINT_TEXT, BTN_EXCEL_TEXT,
-    PRELOGIN_BTN_LOGIN_ID, PRELOGIN_GUEST_VIEW_ID,
+    PRELOGIN_BTN_LOGIN_ID, PRELOGIN_GUEST_VIEW_ID, LOGOUT_BTN_ID,
     SAMU_POPUP_CLOSE_ID,
     BTN_INQUIRY,
     LOGIN_TIMEOUT_S, PAGE_LOAD_TIMEOUT_MS, DOWNLOAD_TIMEOUT_S,
@@ -87,25 +87,24 @@ async def connect_page(playwright, *, url: str = CDP_URL):
 async def wait_for_login(page):
     """근로복지공단 EDI 로그인 완료 대기 (수동 공동인증서 로그인).
 
-    URL 이 고정되므로 로그인 전용 가시 요소(btnLogin/guestView)가 DOM 에서
-    사라지면 로그인 완료로 판정. (라이브 검증)
+    근로복지공단 토탈서비스는 로그인 전후로 URL 이 바뀌지 않으므로
+    (https://total.comwel.or.kr/ 고정), **헤더의 '로그아웃' 버튼**(
+    mf_wfm_header_btn_logout)이 가시 상태가 되면 로그인 완료로 판정한다.
+    (라이브 검증: 로그인 전 logout 비가시, 후 가시 → 가장 안정적 신호.
+    기존 btnLogin/guestView 는 로그인 페이지(#/)에서 존재조차 안 해 신뢰 불가.)
     """
-    async def _pre_login_visible(p) -> bool:
+    async def _logged_in(p) -> bool:
         try:
-            return await p.evaluate(r"""(ids) => {
-                for (const id of ids) {
-                    const el = document.getElementById(id);
-                    if (el) {
-                        const r = el.getBoundingClientRect();
-                        if (r.width > 0 && r.height > 0) return true;
-                    }
-                }
-                return false;
-            }""", [PRELOGIN_BTN_LOGIN_ID, PRELOGIN_GUEST_VIEW_ID])
+            return await p.evaluate(r"""(id) => {
+                const el = document.getElementById(id);
+                if (!el) return false;
+                const r = el.getBoundingClientRect();
+                return r.width > 0 && r.height > 0;
+            }""", LOGOUT_BTN_ID)
         except Exception:
-            return True  # evaluate 실패 시 안전하게 대기 유지
+            return False  # evaluate 실패 시 로그인 안 된 것으로 대기 유지
 
-    if not await _pre_login_visible(page):
+    if await _logged_in(page):
         log("이미 로그인되어 있습니다.")
         return True
 
@@ -115,7 +114,7 @@ async def wait_for_login(page):
     for i in range(LOGIN_TIMEOUT_S // 5):
         await asyncio.sleep(5)
         try:
-            if not await _pre_login_visible(page):
+            if await _logged_in(page):
                 log("로그인 확인됨.")
                 return True
         except Exception:
