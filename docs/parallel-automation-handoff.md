@@ -484,26 +484,28 @@ NPS/NHIS CLI 진입점이 module-level `sys.stdout.detach()` 재래핑을 해 im
 - **근린건축**: 단건 실행 + 포털 확인으로 판별(단건 OK→간헐, 단건도 실패+미검색→정당).
 - 회귀: pytest 99/99(94+5). 라이브(6월 22개 정상, 행복이지 단건 OK) 확인.
 
-### 15.4 고용보험 EDI(phase 5) — 단독 메뉴, 병렬 편입 TODO
+### 15.4 고용보험 EDI(phase 5) — 단독 + 병렬 3-way 완료
 
-엑셀 v3(C86~H106)에 정의된 근로복지공단 고용보험 EDI 자동화. **단독(직렬) phase 5**로
-구현, **라이브 검증 완료**(3개 수임처 연속 테스트 PASS). 병렬 phase 2 편입은 추후.
+엑셀 v3(C86~H106)에 정의된 근로복지공단 고용보험 EDI 자동화. **단독(phase 5)** 및
+**병렬(phase 2, 3-way NPS+NHIS+고용보험)** 모두 라이브 검증 완료.
 
 - **식별자**: `comwel_edi`, 패키지 `src/automation/comwel/`, 어댑터 `src/workflows/comwel_edi.py`
 - **상태**: 라이브 검증 완료 — ClipReport 리포트 뷰어(`ifr_Report` 프레임)를 통한
-  PDF 다운로드까지 검증. 핵심 셀렉터/흐름:
-  - 로그인 감지: `btnLogin`/`guestView` 가시 요소 사라짐 (URL 고정)
-  - 20209 진입: 메인 대시보드 퀵메뉴
+  PDF+엑셀 다운로드, 병렬 3-way 동시 실행 모두 검증. 핵심 셀렉터/흐름:
+  - 로그인 감지: `header_btn_logout` 가시 여부 (URL 고정, 라이브 검증)
+  - 20209 진입: 메인 대시보드 퀵메뉴 (대시보드 로딩 대기 30초 폴링)
   - 사업장 전환: 관리번호 입력 → 사업장조회 → WZ0101_P01 팝업 선택
   - **본 화면 조회(btnSearch) 필수** — 사업장 선택 후 데이터 로드 (라이브 발견)
   - 고용 탭: `w2tabcontrol_active` 체크 후 클릭 (중복 클릭 방지)
   - 지원금 팝업: "지원금" 키워드 매칭 (라벨/동적 id 가변)
-  - 인쇄: "인쇄하기" → WZ0203 모달 → ClipReport `report_menu_save_button` → PDF 선택 → 다운로드
+  - 인쇄: "인쇄하기" → WZ0203 모달 → ClipReport 전용 버튼(PDF/엑셀) 직접 다운로드
 - **주의**: 버튼 id(`wq_uuid_XXXX`)는 동적 → 텍스트/키워드 매칭 사용.
-- **병렬 편입 시 필요 변경**(3-way NPS+NHIS+고용보험):
-  - `parallel_cli_worker.py`: `_comwel_port=9225` 할당, `_spawn("comwel", "src.automation.comwel.comwel_auto_cdp", ...)` 추가, `_pump` prefix `[COMWEL]`, `stop()`에 `kill_chrome_by_port(9225)`
-  - `main_window.py`: `parallel_runner.start(..., comwel_port=9225)`
-  - `comwel_auto_cdp.py`의 `--save-site 공단EDI` + `_SAVE_SUBDIR="고용보험"` 경로(이미 CLI에 구현됨)
-  - 3-way 병렬은 2-way 대비 Chrome 프로필/포트 관리 부담 증가 → 별도 작업 권장
-- **저장 경로**: 단독 `고용보험_{YYYYMM}/{수임처}/` / 병렬(예정) `공단EDI_{YYYYMM}/{수임처}/고용보험/`
+- **viewport 필수**: 근로복지공단 반응형 헤더는 viewport 좁으면 GNB 숨김.
+  `--window-size=1920,1080`(Chrome 실행 인자) + `set_viewport_size`(Playwright) 이중 방어.
+- **병렬 편입 완료** (3-way NPS+NHIS+고용보험):
+  - `parallel_cli_worker.py`: `_comwel_port=9225`, `_spawn("comwel", ...)`, `_pump` prefix `[고용]`, `stop()`에 `kill_chrome_by_port(9225)`
+  - `main_window.py`: `parallel_runner.start(..., comwel_port=9225)`, 리포트/라벨 3-way 대응
+  - `_download.py`: `_SAVE_SITE/_SAVE_SUBDIR` 모듈 변수화 → 병렬 시 `공단EDI/.../고용보험/` 하위폴더
+- **저장 경로**: 단독 `고용보험_{YYYYMM}/{수임처}/` / 병렬 `공단EDI_{YYYYMM}/{수임처}/고용보험/`
 - **관리번호**: 사업자번호+`'0'`(`biz_to_mgmt_no`) — NPS와 동일 규칙, 별도 DB 컬럼 불필요
+- **위하고 병합**: Phase 6(급여자료입력)에서 `.xls` 파싱 → 고용보험 컬럼에 `-지원금+환수금` 반영
