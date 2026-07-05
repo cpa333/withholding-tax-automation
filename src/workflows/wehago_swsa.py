@@ -14,7 +14,7 @@ PDF 발급은 Phase 5(WEHAGO 급여명세 PDF)에서 별도 실행.
 import asyncio
 import os
 
-from src.utils.save_path import make_save_dir, get_desktop_path
+from src.utils.save_path import make_save_dir, get_desktop_path, PARALLEL_SAVE_SITE
 from src.utils.human import human_delay
 from src.workflows.registry import register
 from src.workflows.base import BaseWorkflow
@@ -147,7 +147,10 @@ class WehagoSwsaWorkflow(BaseWorkflow):
                         log(f"  고용보험: 지원금 {len(ei_support_data)}명, "
                             f"환수금 {len(ei_collect_data)}명")
             except Exception as e:
-                log(f"  원천데이터 읽기 스킵: {e}")
+                import traceback
+                log(f"  WARN: 원천데이터 읽기 실패 (무시하고 진행): {e}")
+                log(f"        client={client_name} year={year} month={month}")
+                log(f"        {traceback.format_exc().splitlines()[-1]}")
 
             upload_path = convert_for_upload(
                 download_path,
@@ -181,23 +184,54 @@ class WehagoSwsaWorkflow(BaseWorkflow):
     # ── 헬퍼 ───────────────────────────────────────────────────────────
 
     @staticmethod
-    def _locate_raw_data(client_name: str, year, month) -> dict | None:
-        """Phase 2/3 raw data 파일 경로 탐색
+    def _resolve_insurance_dir(desktop, period, folder,
+                               standalone_site, portal_subdir):
+        """보험 원천데이터 디렉토리 경로 리졸브 (단독 우선 → 병렬 폴백).
 
-        Desktop 경로에서 건강보험 PDF, 국민연금 Excel을 찾아 dict로 반환.
+        1) 단독 실행: ~/Desktop/{standalone_site}_{period}/{folder}/
+        2) 병렬 실행: ~/Desktop/{PARALLEL_SAVE_SITE}_{period}/{folder}/{portal_subdir}/
+           (PARALLEL_SAVE_SITE="공단EDI")
+
+        단독 경로를 먼저 보고, 없으면 병렬(공단EDI) 경로로 폴백.
+        각 보험이 독립적으로 호출하므로 단독·병렬 혼용(NHIS는 단독, NPS는 공단EDI 등)도 커버.
+        둘 다 없으면 None 반환.
+        """
+        standalone = os.path.join(desktop, f"{standalone_site}_{period}", folder)
+        if os.path.isdir(standalone):
+            return standalone
+        if portal_subdir:
+            parallel = os.path.join(
+                desktop, f"{PARALLEL_SAVE_SITE}_{period}", folder, portal_subdir)
+            if os.path.isdir(parallel):
+                return parallel
+        return None
+
+    @staticmethod
+    def _locate_raw_data(client_name: str, year, month) -> dict | None:
+        """Phase 2/3/고용보험 raw data 파일 경로 탐색 (단독·병렬 양경로 지원).
+
+        바탕화면에서 건강보험 PDF, 국민연금 Excel, 고용보험 xls를 찾아 dict로 반환.
+        단독 실행 경로({보험}_{period}/{folder}/)를 먼저 보고,
+        없으면 병렬 실행 경로(공단EDI_{period}/{folder}/{포털}/)로 폴백.
         파일이 없으면 해당 키의 값이 None.
 
         Returns:
-            {"nhis_pdf": path|None, "nps_member": path|None,
-             "nps_retro": path|None, "nps_govt": path|None}
+            {"nhis_pdf", "nps_integrated", "nps_member", "nps_retro",
+             "nps_govt", "ei_xls"} 중 찾은 것만 값 채움. 전부 None이면 None.
         """
         import glob
+        from src.automation.wehago._common import log
+
         desktop = get_desktop_path()
         folder = client_name.replace(" ", "_")
         period = f"{year}{int(month):02d}" if year and month else None
 
         if not period:
+            log(f"  [원천데이터 탐색] period 미확정(year={year} month={month}) → 스킵")
             return None
+
+        log(f"  [원천데이터 탐색] period={period} folder={folder}")
+        log(f"    desktop={desktop}")
 
         result = {
             "nhis_pdf": None,
@@ -209,15 +243,21 @@ class WehagoSwsaWorkflow(BaseWorkflow):
         }
 
         # 건강보험 PDF
-        nhis_dir = os.path.join(desktop, f"국민건강보험_{period}", folder)
-        if os.path.isdir(nhis_dir):
+        nhis_dir = WehagoSwsaWorkflow._resolve_insurance_dir(
+            desktop, period, folder,
+            standalone_site="국민건강보험", portal_subdir="국민건강보험")
+        if nhis_dir:
             matches = glob.glob(os.path.join(nhis_dir, "가입자고지내역서_건강_*.pdf"))
             if matches:
                 result["nhis_pdf"] = matches[0]
+        log(f"    NHIS 디렉토리: {nhis_dir or '미발견'}"
+            + (f" → {os.path.basename(result['nhis_pdf'])}" if result["nhis_pdf"] else ""))
 
         # 국민연금 — 통합엑셀(최종결정내역 통합저장) 우선, 없으면 구 3파일 폴백.
-        nps_dir = os.path.join(desktop, f"국민연금_{period}", folder)
-        if os.path.isdir(nps_dir):
+        nps_dir = WehagoSwsaWorkflow._resolve_insurance_dir(
+            desktop, period, folder,
+            standalone_site="국민연금", portal_subdir="국민연금")
+        if nps_dir:
             for f in os.listdir(nps_dir):
                 if "결정내역통보서" in f and f.endswith(".xlsx"):
                     result["nps_integrated"] = os.path.join(nps_dir, f)
@@ -231,16 +271,28 @@ class WehagoSwsaWorkflow(BaseWorkflow):
                         result["nps_retro"] = full
                     elif "국고지원내역_엑셀" in f and f.endswith(".xlsx"):
                         result["nps_govt"] = full
+        nps_kind = ("통합엑셀" if result["nps_integrated"]
+                    else "구3파일" if (result["nps_member"] or result["nps_retro"]
+                                       or result["nps_govt"])
+                    else "")
+        log(f"    NPS 디렉토리: {nps_dir or '미발견'}"
+            + (f" → {nps_kind}" if nps_kind else ""))
 
         # 고용보험(근로복지공단) xls — 고용보험료지원금정보_{period}.xls
-        ei_dir = os.path.join(desktop, f"고용보험_{period}", folder)
-        if os.path.isdir(ei_dir):
+        ei_dir = WehagoSwsaWorkflow._resolve_insurance_dir(
+            desktop, period, folder,
+            standalone_site="고용보험", portal_subdir="고용보험")
+        if ei_dir:
             for f in os.listdir(ei_dir):
                 if "고용보험료지원금정보" in f and f.endswith(".xls"):
                     result["ei_xls"] = os.path.join(ei_dir, f)
                     break
+        log(f"    EI 디렉토리: {ei_dir or '미발견'}"
+            + (f" → {os.path.basename(result['ei_xls'])}" if result["ei_xls"] else ""))
 
         # 하나라도 있으면 dict 반환, 전부 None이면 None 반환
-        if any(result.values()):
+        found = [k for k, v in result.items() if v]
+        log(f"  [원천데이터 탐색] 발견 {len(found)}건: {found or '없음'}")
+        if found:
             return result
         return None

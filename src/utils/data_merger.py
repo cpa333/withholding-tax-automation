@@ -331,4 +331,7 @@ def _apply_ei_row(ws, row: int, col_map: dict,
     if collect_amount is not None:
         adjustment += abs(collect_amount)
 
-    ws.cell(row, ei_col + 1).value = adjustment
+    # 조정분이 0(지원금·환수금 모두 0/None)이면 WEHAGO 자동산정값(기본 0.9%) 보존 —
+    # 덮어쓰지 않는다. 계약("조정분만 반영")에 부합.
+    if adjustment != 0:
+        ws.cell(row, ei_col + 1).value = adjustment

@@ -12,14 +12,16 @@ import threading
 
 from PySide6.QtCore import QThread, Signal
 
+from src.utils.save_path import PARALLEL_SAVE_SITE
+
 # CLI(_emit_summary)가 stdout 으로 찍는 구조화 결과 마커. 이 라인은 log_message 가
 # 아니라 result_summary 로 변환되어 로그 패널에 raw JSON 이 노출되지 않는다.
 # src/automation/nps/nps_auto_cdp.py / nhis/nhis_edi_auto_cdp.py 의 _RESULT_MARKER 와 동일.
 _RESULT_MARKER = "__WTAX_RESULT__"
 
-# 병렬 실행 시 NHIS/NPS 가 같은 최상위 폴더에 저장하도록 두 CLI 에 전달할 저장 폴더명.
-# → ~/Desktop/공단EDI_{YYYYMM}/{수임처}/ 안에 건강보험+국민연금 자료가 함께 들어감.
-PARALLEL_SAVE_SITE = "공단EDI"
+# 병렬 실행 시 NHIS/NPS/고용보험이 같은 최상위 폴더에 저장하도록 두 CLI 에 전달할 저장 폴더명.
+# → ~/Desktop/공단EDI_{YYYYMM}/{수임처}/ 안에 건강보험+국민연금+고용보험 자료가 함께 들어감.
+# (상수는 src.utils.save_path 에서 import — wehago_swsa 경로 폴백과 단일 소스.)
 
 
 class ParallelCliRunner(QThread):

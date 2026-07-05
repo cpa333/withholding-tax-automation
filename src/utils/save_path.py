@@ -14,6 +14,13 @@ from datetime import datetime
 
 APP_SLUG = "원천징수자동화"
 
+# 병렬(공단 EDI 3-way) 실행 시 NPS/NHIS/고용보험이 공유하는 최상위 저장 폴더명.
+# 단독 실행은 각 포털별 최상위("국민연금"/"국민건강보험"/"고용보험")를 쓰지만,
+# 병렬 실행은 이 최상위 하나를 공유하며 포털별 하위폴더(subdir)로 분리한다.
+# src/ui/workers/parallel_cli_worker.py(--save-site 인자)와
+# src/workflows/wehago_swsa.py(_resolve_insurance_dir 폴백)가 공유하는 단일 소스.
+PARALLEL_SAVE_SITE = "공단EDI"
+
 
 def _documents_path() -> str:
     """내 문서 경로 (CSIDL_PERSONAL=5). 실패 시 빈 문자열."""

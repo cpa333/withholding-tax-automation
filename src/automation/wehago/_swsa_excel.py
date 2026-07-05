@@ -115,7 +115,12 @@ def convert_for_upload(download_path, *, nhis_data=None, nps_member_data=None,
     log(f"  변환 완료: {upload_path}")
 
     # ── Raw data 병합 (옵셔널) ──────────────────────────────────
-    if nhis_data or nps_member_data or ei_support_data:
+    # 6개 raw data 중 한 건이라도 있으면 병합 시도 (apply_raw_data 내부 게이트와 동일).
+    # 외부 게이트는 apply_raw_data import/호출 오버헤드를 피하기 위한 early-exit.
+    # ei_collect(환수금-only)·nps_retro(소급분-only)·nps_govt(국고지원-only) 가
+    # 단독으로 주어지는 엣지 케이스도 놓치지 않도록 6인자 모두 검사.
+    if (nhis_data or nps_member_data or nps_retro_data
+            or nps_govt_data or ei_support_data or ei_collect_data):
         try:
             from src.utils.data_merger import apply_raw_data
             merge_result = apply_raw_data(

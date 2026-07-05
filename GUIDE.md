@@ -107,7 +107,7 @@ Nexacro 기반 웹 프레임워크로 일반 DOM click이 동작하지 않음:
 5. 저장 경로: `~/Desktop/국민연금_{YYYYMM}/{수임처명}/`
 6. 파일명: `국민연금보험료_결정내역_{YYYYMM}_{탭명}.pdf` / `.xlsx`
 
-> **공단 EDI 병렬 자동화(2번) 저장 경로:** 병렬 실행 시 세 기관 자료를 **공통 최상위 아래 포털별 하위폴더로 분리** — `~/Desktop/공단EDI_{YYYYMM}/{수임처명}/{국민연금|국민건강보험|고용보험}/`. 세 CLI 에 `--save-site 공단EDI` 를 전달(`parallel_cli_worker.PARALLEL_SAVE_SITE`)하고 `make_save_dir(site, client, …, subdir=_SAVE_SUBDIR)` 로 포털명을 하위폴더로 넘겨 분리. 세 Chrome 이 서로 다른 하위폴더에 써서 listdir/cleanup 파일 레이스를 원천 차단. 단독(NHIS/NPS/고용보험 개별) 실행은 `subdir=None` 으로 기존대로 각 사이트 최상위 폴더 사용.
+> **공단 EDI 병렬 자동화(2번) 저장 경로:** 병렬 실행 시 세 기관 자료를 **공통 최상위 아래 포털별 하위폴더로 분리** — `~/Desktop/공단EDI_{YYYYMM}/{수임처명}/{국민연금|국민건강보험|고용보험}/`. 세 CLI 에 `--save-site 공단EDI` 를 전달(상수 `PARALLEL_SAVE_SITE` 단일 소스 = `src/utils/save_path.py` — `parallel_cli_worker.py`·`wehago_swsa.py` 가 import)하고 `make_save_dir(site, client, …, subdir=_SAVE_SUBDIR)` 로 포털명을 하위폴더로 넘겨 분리. 세 Chrome 이 서로 다른 하위폴더에 써서 listdir/cleanup 파일 레이스를 원천 차단. 단독(NHIS/NPS/고용보험 개별) 실행은 `subdir=None` 으로 기존대로 각 사이트 최상위 폴더 사용. Phase 6(급여자료입력)의 `_locate_raw_data` 는 단독·병렬 양쪽 경로를 모두 리졸브(`_resolve_insurance_dir` 헬퍼) → 어느 쪽으로 다운로드하든 원천데이터 반영(§16 참조).
 
 > **날짜 의존성 (2026-06-12 업데이트):**
 > - GUI에서 선택한 연도/월로 결정내역 그리드의 내용 컬럼(col=3)에서 `{YYYY}.{MM}` 매칭

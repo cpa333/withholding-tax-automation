@@ -509,3 +509,25 @@ NPS/NHIS CLI 진입점이 module-level `sys.stdout.detach()` 재래핑을 해 im
 - **저장 경로**: 단독 `고용보험_{YYYYMM}/{수임처}/` / 병렬 `공단EDI_{YYYYMM}/{수임처}/고용보험/`
 - **관리번호**: 사업자번호+`'0'`(`biz_to_mgmt_no`) — NPS와 동일 규칙, 별도 DB 컬럼 불필요
 - **위하고 병합**: Phase 6(급여자료입력)에서 `.xls` 파싱 → 고용보험 컬럼에 `-지원금+환수금` 반영
+
+## 16. WEHAGO 급여자료입력 원천데이터 미반영 회귀 — 병렬 경로 동기화 (2026-07-05)
+
+병렬(공단EDI)로 다운로드한 뒤 Phase 6(급여자료입력) 실행 시 **NHIS·NPS·고용보험 3종 전부** 엑셀에 반영되지 않는 회귀 수정. §14.1 의 `make_save_dir subdir` 확장과 같은 계보 — **다운로드 저장경로(producer)를 바꿀 때 소비측인 `_locate_raw_data` 동기화를 누락**한 것이 근원.
+
+### 16.1 근원 원인
+`b3f7bad`(고용보험 병합 추가, additive) 직후 `779c248`(공단 EDI 3-way)가 NPS/NHIS/고용보험 다운로드 저장경로를 `~/Desktop/공단EDI_{period}/{수임처}/{국민연금|국민건강보험|고용보험}/` 로 통일. 그러나 **`src/workflows/wehago_swsa.py:_locate_raw_data()`는 단독 경로(`{보험}_{period}/{folder}/`)만 하드코딩**한 채 방치(`779c248`이 `wehago_swsa.py`를 한 줄도 안 건드림). → 병렬로 다운로드한 파일을 전혀 못 찾고 → 6개 raw 데이터 모두 None → `_swsa_excel.py` 병합 게이트 False → `apply_raw_data()` 스킵 → **3종 모두 미반영**.
+
+### 16.2 수정
+- **P0(핵심) `_resolve_insurance_dir` 헬퍼**(`wehago_swsa.py`): 단독 경로를 먼저 보고, 없으면 `공단EDI_{period}/{folder}/{포털}/` 로 폴백. 각 보험이 독립 리졸브 → 단독·병렬·혼용(NHIS 단독 + NPS·EI 병렬) 모두 자연 커버. 파일 매칭 패턴(`결정내역통보서_*.xlsx` / `가입자고지내역서_건강_*.pdf` / `고용보험료지원금정보_*.xls`, NPS 통합엑셀→구3파일 폴백)은 불변.
+- **상수 단일화**: `PARALLEL_SAVE_SITE="공단EDI"` 를 `src/utils/save_path.py` 로 이동(단일 소스). `parallel_cli_worker.py`(CLI `--save-site`)와 `wehago_swsa.py`(폴백 경로)가 import. 리터럴 중복 제거.
+- **P1 병합 게이트 6인자 OR 확장**(`_swsa_excel.py:118`): `ei_collect`(환수금-only)·`nps_retro`(소급분-only)·`nps_govt`(국고지원-only) 가 단독일 때 병합 스킵되던 엣지 버그 수정(`apply_raw_data` 내부 게이트와 동일화).
+- **P2 `_apply_ei_row` 0 보존**(`data_merger.py`): 조정분이 0(support·collect 상쇄 또는 모두 0)이면 WEHAGO 자동산정값(기본 0.9%) 보존 — 셀을 0으로 덮어쓰지 않음.
+- **P3 진단 로깅**(`_locate_raw_data`): `[원천데이터 탐색] period/folder/desktop + 각 디렉토리 발견여부 + 발견 N건` 출력. 회귀 재발 시 로그만으로 (a) period/folder 계산 (b) 어느 디렉토리를 봤는지 (c) 최종 결과 즉시 파악. 예외 삼킴(`run_single` line 149)에도 컨텍스트+traceback 마지막 프레임 추가.
+
+### 16.3 검증
+- pytest 111/111 (기존 105 + 신규 `tests/test_locate_raw_data_paths.py` 6케이스: 단독/병렬/혼용/None/구3파일/period불일치).
+- **E2E**(`scripts/e2e_swsa_merge_verify.py`): 실제 포맷 파일(NHIS PDF·NPS 통합엑셀·고용보험 xls·WEHAGO 2행헤더 엑셀) 합성 → 단독·병렬·혼용 3레이아웃에서 `_locate_raw_data → read_* → convert_for_upload → apply_raw_data` 전체 체인 구동 → 4명×4컬럼(건강/요양/연금/고용) 셀 값 기대치 일치(ALL PASS). P0/P1/P2 모두 시나리오로 검증(박보험 support·collect 상쇄→고용보험 셀 보존으로 P2 확인).
+- ★라이브 스모크(병렬 전체실행 → WEHAGO 급여자료입력)는 사용자 환경에서 추가 확인 권장 — 로그에 `[원천데이터 탐색] 발견 N건` + `[원천데이터 반영] NHIS N명, NPS N명, 고용보험 N명` 라인이 떠야 정상.
+
+### 16.4 ★교훈
+§14.1 과 동일 맥락 — **저장경로 구조(producer) 변경 시 원천데이터 소비측(`_locate_raw_data`) 동기화 필수**. `make_save_dir` 기반이라 site/subdir 인자만 바꾸면 경로가 갈리는데, consumer가 site 리터럴을 하드코딩하면 회귀. 단독·병렬 양쪽을 모두 리졸브하는 헬퍼 + 진단 로깅가 회귀 방어 핵심.
