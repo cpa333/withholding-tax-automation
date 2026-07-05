@@ -44,14 +44,14 @@ class WehagoSwtaWorkflow(BaseWorkflow):
         report_cycle = kwargs.get("report_cycle", "")   # DB 신고주기 (매월/반기/빈)
         client_id = kwargs.get("client_id")              # 역충전(backfill)용
 
-        # ── 반기 월 필터링(1·7월만) ───────────────────────────────────
+        # ── 반기 월 필터링(6·12월만) ───────────────────────────────────
         # DB 에 반기로 확정된 수임처는 비신고월에 WEHAGO 탐색 자체를 스킵(효율).
         # 빈 주기 수임처는 run_swta0101 에서 라디오 확정 후 같은 규칙으로 마감만 스킵
         # (라디오 확정값 역충전은 허용).
         if report_cycle == "반기":
             _target_m = month if month else datetime.now().month
-            if _target_m not in (1, 7):
-                log(f"  [SWTA] 반기 수임처 비신고월({_target_m}월) — 마감 스킵 (반기는 1·7월만)")
+            if _target_m not in (6, 12):
+                log(f"  [SWTA] 반기 수임처 비신고월({_target_m}월) — 마감 스킵 (반기는 6·12월만)")
                 return True
 
         # ── Step 0: WEHAGO 메인 복귀 ──────────────────────────────────

@@ -1,8 +1,8 @@
 """SWTA(원천징수이행상황신고서) 반기/매월 기간 로직 단위 테스트.
 
-compute_half_period: 반기 신고의 (연도, 시작월, 종료월)을 실행일 기준으로 반환.
-  - 7~12월 실행 → 당해 1~6월 (상반기, 7월에 신고)
-  - 1~6월 실행 → 전년 7~12월 (하반기, 1월에 신고)
+compute_half_period: 반기 신고의 (연도, 시작월, 종료월)을 유저 입력월 기준으로 반환.
+  - 6월 입력 → 당해년도 1~6월 (상반기)
+  - 12월 입력 → 당해년도 7~12월 (하반기)
 """
 import asyncio
 import sys
@@ -21,60 +21,51 @@ def _dt(y, m):
     return datetime(y, m, 1)
 
 
-def test_half_period_july_returns_current_year_first_half():
-    # 7월(초) 실행 → 당해 1~6월 (상반기)
-    assert compute_half_period(_dt(2026, 7)) == (2026, 1, 6)
+def test_half_period_june_returns_current_year_first_half():
+    # 6월 입력 → 당해 1~6월 (상반기)
+    assert compute_half_period(_dt(2026, 6)) == (2026, 1, 6)
 
 
-def test_half_period_december_returns_current_year_first_half():
-    # 12월 실행 → 여전히 당해 상반기(가장 최근 완료 반기)
-    assert compute_half_period(_dt(2026, 12)) == (2026, 1, 6)
+def test_half_period_december_returns_current_year_second_half():
+    # 12월 입력 → 당해 7~12월 (하반기)
+    assert compute_half_period(_dt(2026, 12)) == (2026, 7, 12)
 
 
-def test_half_period_january_returns_previous_year_second_half():
-    # 1월(초) 실행 → 전년 7~12월 (하반기)
-    assert compute_half_period(_dt(2026, 1)) == (2025, 7, 12)
+def test_half_period_year_consistency():
+    # 6월/12월 모두 당해 연도(입력 연도)를 신고 대상 연도로 사용
+    assert compute_half_period(_dt(2027, 6))[0] == 2027
+    assert compute_half_period(_dt(2027, 12))[0] == 2027
 
 
-def test_half_period_june_returns_previous_year_second_half():
-    # 6월 실행 → 전년 하반기(가장 최근 완료 반기)
-    assert compute_half_period(_dt(2026, 6)) == (2025, 7, 12)
-
-
-def test_half_period_year_boundary():
-    # 2027년 1월 → 2026년 7~12월
-    assert compute_half_period(_dt(2027, 1)) == (2026, 7, 12)
-
-
-def test_half_period_all_months_consistency():
-    # 상/하반기 경계(6월↔7월) 일관성
-    assert compute_half_period(_dt(2026, 6))[1:] == (7, 12)
-    assert compute_half_period(_dt(2026, 7))[1:] == (1, 6)
+def test_half_period_boundary_consistency():
+    # 상/하반기 경계(6월↔12월) 일관성
+    assert compute_half_period(_dt(2026, 6))[1:] == (1, 6)
+    assert compute_half_period(_dt(2026, 12))[1:] == (7, 12)
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# half_period_target: 반기 대상 시점 + 비신고월(1·7월 외) 스킵 판정
+# half_period_target: 반기 대상 시점 + 비신고월(6·12월 외) 스킵 판정
 #   - GUI year/month 우선, 없으면 현재 시점.
-#   - 반기 신고는 1·7월만 → 그 외 월은 skip=True (마감하지 않음).
+#   - 반기 신고는 6·12월만 → 그 외 월은 skip=True (마감하지 않음).
 # ═══════════════════════════════════════════════════════════════════════
 
-def test_half_target_july_not_skip():
-    # 7월 → 상반기 신고월 → 스킵 아님
-    target, skip = half_period_target(2026, 7)
+def test_half_target_june_not_skip():
+    # 6월 → 상반기 신고월 → 스킵 아님
+    target, skip = half_period_target(2026, 6)
     assert skip is False
-    assert (target.year, target.month) == (2026, 7)
+    assert (target.year, target.month) == (2026, 6)
 
 
-def test_half_target_january_not_skip():
-    # 1월 → 하반기 신고월 → 스킵 아님
-    target, skip = half_period_target(2026, 1)
+def test_half_target_december_not_skip():
+    # 12월 → 하반기 신고월 → 스킵 아님
+    target, skip = half_period_target(2026, 12)
     assert skip is False
-    assert (target.year, target.month) == (2026, 1)
+    assert (target.year, target.month) == (2026, 12)
 
 
 def test_half_target_off_months_skip():
-    # 2~6월, 8~12월은 반기 비신고월 → 스킵
-    for m in (2, 3, 4, 5, 6, 8, 9, 10, 11, 12):
+    # 1~5월, 7~11월은 반기 비신고월 → 스킵
+    for m in (1, 2, 3, 4, 5, 7, 8, 9, 10, 11):
         _, skip = half_period_target(2026, m)
         assert skip is True, f"{m}월은 반기 비신고월이어야 함"
 
@@ -87,17 +78,17 @@ def test_half_target_none_uses_now():
 
 
 def test_half_target_then_compute_matches_first_half():
-    # 7월 선택 → 스킵 아님 → compute_half_period 로 상반기(1~6월) 산출
-    target, skip = half_period_target(2026, 7)
+    # 6월 선택 → 스킵 아님 → compute_half_period 로 상반기(당해 1~6월) 산출
+    target, skip = half_period_target(2026, 6)
     assert skip is False
     assert compute_half_period(target) == (2026, 1, 6)
 
 
 def test_half_target_then_compute_matches_second_half():
-    # 1월 선택 → 스킵 아님 → compute_half_period 로 하반기(전년 7~12월) 산출
-    target, skip = half_period_target(2026, 1)
+    # 12월 선택 → 스킵 아님 → compute_half_period 로 하반기(당해 7~12월) 산출
+    target, skip = half_period_target(2026, 12)
     assert skip is False
-    assert compute_half_period(target) == (2025, 7, 12)
+    assert compute_half_period(target) == (2026, 7, 12)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -158,14 +149,12 @@ def test_period_type_none_when_unknown():
 
 if __name__ == "__main__":
     for fn in (
-        test_half_period_july_returns_current_year_first_half,
-        test_half_period_december_returns_current_year_first_half,
-        test_half_period_january_returns_previous_year_second_half,
-        test_half_period_june_returns_previous_year_second_half,
-        test_half_period_year_boundary,
-        test_half_period_all_months_consistency,
-        test_half_target_july_not_skip,
-        test_half_target_january_not_skip,
+        test_half_period_june_returns_current_year_first_half,
+        test_half_period_december_returns_current_year_second_half,
+        test_half_period_year_consistency,
+        test_half_period_boundary_consistency,
+        test_half_target_june_not_skip,
+        test_half_target_december_not_skip,
         test_half_target_off_months_skip,
         test_half_target_none_uses_now,
         test_half_target_then_compute_matches_first_half,

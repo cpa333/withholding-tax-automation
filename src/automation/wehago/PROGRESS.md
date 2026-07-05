@@ -163,7 +163,7 @@ python src/automation/wehago/run_swer0101.py
 - `set_period_fields(page, year, start_month, end_month)`: `#SearchMain` 상단 기간 설정 영역 조작
 - **기간 계산 로직** (DB `report_cycle` 우선, 비어있으면 라디오 ground truth → 어댑터가 DB 역충전):
   - **매월**: GUI 선택 연/월 (미선택 시 직전월 자동 계산)
-  - **반기**: `compute_half_period()` 실행일 기준 — 7~12월 실행→당해 1~6월(상반기) / 1~6월 실행→전년 7~12월(하반기). 반기 신고는 연 2회(7월·1월)
+  - **반기**: `compute_half_period()` 유저 입력월 기준 — 6월 입력→당해 1~6월(상반기) / 12월 입력→당해 7~12월(하반기). 반기 신고는 연 2회이며 6·12월만 실행(그 외 월은 마감 스킵)
 - **페이지 구조** (`#SearchMain > .item[]`):
   | idx | 항목 | 컨트롤 |
   |-----|------|--------|
