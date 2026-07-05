@@ -331,7 +331,7 @@
 12. 유료 오퍼(기간·결과물 3종) + 리드 수집(사례집)
 
 > **오프닝 산출물(초안)**
-> - [`basic_1_script.md`](./basic_1_script.md) — 오프닝 4분 대본 초안(인사 → 4단계 자동화 계단 → 보안/온프레미스 접근법 → 실 사례 진입).
+> - [`basic_1_script.md`](./basic_1_script.md) — 오프닝 풀버전 대본(강사 소개 → AX 화두 2가지 → 에이전트/RAG/하네스 엔지니어링 개념 → 4단계 자동화 계단 → 보안/온프레미스 접근법 → 이우창 회계사로 넘김).
 > - [`opening_slides_template.html`](./opening_slides_template.html) — "왜 AI에게 다 맡기지 않았는가" 오프닝 슬라이드 HTML 데모(Pretendard, 단일 파일). 브라우저 미리보기용.
 
 ## 준비물 3 — 표현 규칙 (신뢰 세이프가드)
