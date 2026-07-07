@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermes Agent — 회계/세무 비서 Slides</title>
+<link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
+<style>
+  :root{
+    --bg:#F5F7FC;
+    --ink:#0F1A2C;
+    --body:#37435C;
+    --muted:#5E6B85;
+    --faint:#98A3B7;
+    --line:rgba(16,26,44,.10);
+    --line2:rgba(16,26,44,.055);
+    --card:#FFFFFF;
+
+    --azure:#2E6BFF;  --azureT:#1F55E6; --azureBg:#EAF1FF;
+    --violet:#7C4DFF; --violetT:#6636EC; --violetBg:#F1EBFF;
+    --amber:#F0A62A;  --amberT:#B0730C; --amberBg:#FDF3DE;
+    --rose:#F0616B;   --roseT:#DC3B47;  --roseBg:#FDECEE;
+    --green:#22A06B;  --greenT:#157A52; --greenBg:#E7F8F0;
+
+    --sh:0 1px 3px rgba(16,24,40,.05), 0 22px 48px -24px rgba(16,24,40,.22);
+    --sh-sm:0 1px 2px rgba(16,24,40,.06), 0 6px 16px -8px rgba(16,24,40,.14);
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%}
+  body{
+    font-family:'Pretendard Variable',Pretendard,-apple-system,'Apple SD Gothic Neo','Malgun Gothic','Segoe UI',sans-serif;
+    background:
+      radial-gradient(1100px 680px at 6% -12%, rgba(46,107,255,.10), transparent 60%),
+      radial-gradient(1000px 720px at 106% 114%, rgba(124,77,255,.09), transparent 58%),
+      var(--bg);
+    color:var(--body);
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+
+  .stage{position:fixed; inset:0}
+  .deck{position:absolute; left:50%; top:50%; width:1280px; height:720px;
+    transform:translate(-50%,-50%); transform-origin:center center}
+  .slide{position:absolute; inset:0; padding:86px 96px 92px;
+    display:flex; flex-direction:column;
+    opacity:0; visibility:hidden; transition:opacity .5s ease; overflow:hidden}
+  .slide.active{opacity:1; visibility:visible}
+  .slide::before{content:''; position:absolute; inset:0; pointer-events:none; opacity:.6;
+    background-image:
+      linear-gradient(rgba(16,26,44,.032) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(16,26,44,.032) 1px, transparent 1px);
+    background-size:56px 56px; mask-image:radial-gradient(120% 100% at 50% 0%, #000 38%, transparent 78%)}
+
+  .eyebrow{display:inline-flex; align-items:center; gap:11px; font-size:16px; font-weight:600;
+    letter-spacing:.01em; color:var(--muted)}
+  .eyebrow .dot{width:8px; height:8px; border-radius:50%; background:var(--azure);
+    box-shadow:0 0 0 4px rgba(46,107,255,.14)}
+  .eyebrow b{color:var(--ink); font-weight:700}
+  .eyebrow .en{color:var(--faint); font-weight:600; font-size:14px; letter-spacing:.08em}
+  .title{font-weight:800; letter-spacing:-.022em; line-height:1.08; color:var(--ink)}
+  .sub{color:var(--muted); font-weight:450}
+  .mark{white-space:nowrap;
+    background:linear-gradient(90deg,var(--azure),var(--violet));
+    -webkit-background-clip:text; background-clip:text; color:transparent}
+  .danger{color:var(--roseT)}
+
+  [data-anim]{opacity:0; transform:translateY(18px)}
+  .slide.active [data-anim]{animation:rise .72s cubic-bezier(.2,.72,.18,1) both;
+    animation-delay:calc(var(--d,0) * .085s)}
+  @keyframes rise{to{opacity:1; transform:none}}
+
+  .cover{justify-content:center}
+  .cover .eyebrow{margin-bottom:30px}
+  .cover h1{font-size:76px; letter-spacing:-.03em; line-height:1.05}
+  .cover h1.long-title{font-size:66px; line-height:1.1}
+  .cover .sub{font-size:24px; margin-top:26px; max-width:960px; line-height:1.5}
+  .cover .sub b{color:var(--ink); font-weight:700}
+  .legend{display:flex; gap:12px; margin-top:52px; align-items:center; flex-wrap:wrap}
+  .pill{display:inline-flex; align-items:center; gap:9px; padding:11px 18px; border-radius:999px;
+    font-size:16px; font-weight:600; color:var(--ink);
+    background:var(--card); border:1px solid var(--line); box-shadow:var(--sh-sm)}
+  .pill i{width:9px; height:9px; border-radius:50%; display:inline-block}
+  .pill.code i{background:var(--azure)}
+  .pill.ai i{background:var(--violet)}
+  .pill.human i{background:var(--amber)}
+  .legend .arw{color:var(--faint); font-weight:500}
+
+  .head{margin-bottom:40px}
+  .head .title{font-size:46px; margin-top:16px}
+  .head .sub{font-size:19px; margin-top:14px}
+  .tight .head{margin-bottom:30px}
+  .compact .head{margin-bottom:24px}
+
+  .duo{display:grid; grid-template-columns:repeat(2,1fr); gap:24px; flex:1; align-items:stretch}
+  .bigcard{position:relative; padding:40px 36px; border-radius:24px; background:var(--card);
+    border:1px solid var(--line); box-shadow:var(--sh); overflow:hidden; display:flex; flex-direction:column}
+  .bigcard::before{content:''; position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(110% 80% at 50% -15%, var(--g,var(--azure)), transparent 62%); opacity:.10}
+  .bigcard .num{font-size:16px; font-weight:850; letter-spacing:.16em; color:var(--ct,var(--azureT))}
+  .bigcard h3{font-size:34px; font-weight:820; line-height:1.14; letter-spacing:-.02em; color:var(--ink); margin-top:20px}
+  .bigcard p{font-size:20px; line-height:1.62; color:var(--body); margin-top:20px}
+  .bigcard .tag{margin-top:auto; color:var(--muted); font-size:15px; line-height:1.5}
+
+  .cards{display:grid; grid-template-columns:repeat(3,1fr); gap:22px; flex:1}
+  .card{position:relative; padding:34px 30px 30px; border-radius:22px;
+    background:var(--card); border:1px solid var(--line); overflow:hidden;
+    box-shadow:var(--sh); display:flex; flex-direction:column}
+  .card::before{content:''; position:absolute; top:0; left:30px; right:30px; height:3px; border-radius:3px;
+    background:linear-gradient(90deg,var(--c,var(--azure)),transparent 88%)}
+  .card .idx{font-size:15px; font-weight:800; letter-spacing:.16em; color:var(--ct,var(--azureT))}
+  .card h3{font-size:27px; font-weight:750; margin-top:18px; letter-spacing:-.01em; color:var(--ink)}
+  .card p{font-size:17.5px; line-height:1.62; color:var(--body); margin-top:14px}
+  .card .tag{margin-top:auto; padding-top:18px; font-size:14.5px; color:var(--faint); line-height:1.45}
+
+  .flow{display:grid; grid-template-columns:1fr 52px 1fr 52px 1fr; align-items:stretch; flex:1; margin-bottom:26px}
+  .role{position:relative; padding:30px 26px; border-radius:22px; overflow:hidden;
+    background:var(--card); border:1px solid var(--line); display:flex; flex-direction:column;
+    box-shadow:var(--sh)}
+  .role::before{content:''; position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(120% 82% at 50% -12%, var(--g), transparent 58%); opacity:.10}
+  .role .lab{display:inline-flex; align-items:center; gap:10px; font-size:15px; font-weight:800; letter-spacing:.10em; color:var(--rcT)}
+  .role .lab i{width:10px;height:10px;border-radius:50%;background:var(--rc)}
+  .role h3{font-size:30px; font-weight:800; margin-top:16px; letter-spacing:-.015em; color:var(--ink)}
+  .role .items{margin-top:14px; font-size:18px; color:var(--body); line-height:1.7}
+  .role .note{margin-top:auto; padding-top:18px; font-size:14.5px; color:var(--muted); line-height:1.45}
+  .arrow{align-self:center; justify-self:center; font-size:30px; color:var(--faint)}
+
+  .steps{display:grid; grid-template-columns:repeat(5,1fr); gap:13px; flex:1; align-items:stretch; margin-bottom:24px}
+  .step{position:relative; padding:25px 18px; border-radius:20px; background:var(--card);
+    border:1px solid var(--line); box-shadow:var(--sh); overflow:hidden; display:flex; flex-direction:column}
+  .step::before{content:''; position:absolute; left:18px; right:18px; top:0; height:3px;
+    border-radius:3px; background:linear-gradient(90deg,var(--c,var(--azure)),transparent)}
+  .step .num{font-size:13px; font-weight:850; letter-spacing:.18em; color:var(--ct,var(--azureT))}
+  .step h3{font-size:22px; line-height:1.18; color:var(--ink); margin-top:18px; font-weight:800; letter-spacing:-.015em}
+  .step p{font-size:15px; line-height:1.5; margin-top:14px; color:var(--body)}
+  .step .tag{margin-top:auto; padding-top:14px; font-size:13px; line-height:1.4; color:var(--faint)}
+
+  .stack{display:grid; grid-template-columns:1fr 1fr; gap:24px; flex:1; margin-bottom:26px}
+  .stack-col{display:flex; flex-direction:column; gap:15px}
+  .strip{position:relative; border-radius:18px; padding:22px 24px; background:var(--card);
+    border:1px solid var(--line); box-shadow:var(--sh-sm); overflow:hidden}
+  .strip::before{content:''; position:absolute; left:0; top:16px; bottom:16px; width:4px; border-radius:4px;
+    background:var(--c,var(--azure))}
+  .strip h3{font-size:22px; font-weight:800; letter-spacing:-.015em; color:var(--ink)}
+  .strip p{font-size:16px; line-height:1.5; color:var(--body); margin-top:8px}
+
+  .diagram{position:relative; flex:1; display:grid; gap:16px; align-items:stretch}
+  .diagram.mail{grid-template-columns:1fr 54px 1fr 54px 1fr 54px 1fr}
+  .diagram.sop{grid-template-columns:1fr 54px 1.12fr 54px 1fr}
+  .diagram.pipeline{grid-template-columns:1fr 54px 1.12fr 54px 1fr}
+  .node{position:relative; min-height:210px; border-radius:22px; padding:28px 24px;
+    background:var(--card); border:1px solid var(--line); box-shadow:var(--sh);
+    display:flex; flex-direction:column; justify-content:center; overflow:hidden}
+  .node::before{content:''; position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(120% 82% at 50% -12%, var(--g,var(--azure)), transparent 58%); opacity:.10}
+  .node .lab{font-size:13px; font-weight:850; letter-spacing:.14em; color:var(--ct,var(--azureT))}
+  .node h3{font-size:28px; line-height:1.18; font-weight:830; letter-spacing:-.018em; color:var(--ink); margin-top:14px}
+  .node p{font-size:16px; line-height:1.52; color:var(--body); margin-top:13px}
+  .node .small{margin-top:16px; padding-top:14px; border-top:1px solid var(--line2); color:var(--faint); font-size:13.5px; line-height:1.42}
+  .join{align-self:center; justify-self:center; width:46px; height:46px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; font-size:25px; color:var(--faint);
+    background:rgba(255,255,255,.58); border:1px solid var(--line); box-shadow:var(--sh-sm)}
+  .node.tall{min-height:290px}
+  .node-list{display:flex; flex-direction:column; gap:10px; margin-top:18px}
+  .node-list span{display:block; padding:11px 12px; border-radius:12px; background:rgba(255,255,255,.74);
+    border:1px solid var(--line2); font-size:14.5px; font-weight:650; color:var(--body); line-height:1.32}
+  .diagram-caption{margin-top:22px}
+
+  .banner{position:relative; border-radius:18px; padding:26px 34px; text-align:center; color:var(--ink);
+    background:linear-gradient(90deg, var(--azureBg), var(--violetBg), var(--amberBg));
+    border:1px solid var(--line); font-size:26px; font-weight:750; letter-spacing:-.01em}
+  .banner b{color:var(--violetT)}
+  .banner.slim{padding:22px 28px; font-size:24px}
+
+  .progress{position:fixed; top:0; left:0; right:0; height:3px; background:rgba(16,26,44,.07); z-index:20}
+  .progress i{display:block; height:100%; width:11.11%;
+    background:linear-gradient(90deg,var(--azure),var(--violet),var(--amber));
+    transition:width .5s cubic-bezier(.2,.7,.2,1)}
+  .chrome{position:fixed; left:0; right:0; bottom:0; z-index:20;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:20px 30px; font-size:14px; color:var(--faint)}
+  .chrome .brand{font-weight:700; color:var(--muted)}
+  .chrome .brand span{color:var(--faint); font-weight:500}
+  .dots{display:flex; gap:10px}
+  .dots b{width:9px; height:9px; border-radius:50%; background:rgba(16,26,44,.16); cursor:pointer; transition:.3s}
+  .dots b.on{background:linear-gradient(90deg,var(--azure),var(--violet)); width:26px; border-radius:6px}
+  .ctl{display:flex; align-items:center; gap:8px}
+  .ctl .count{color:var(--muted); font-variant-numeric:tabular-nums; letter-spacing:.08em; margin:0 6px}
+  .ctl button{width:38px; height:34px; border-radius:9px; cursor:pointer; color:var(--muted);
+    background:var(--card); border:1px solid var(--line); font-size:17px; line-height:1;
+    display:flex; align-items:center; justify-content:center; transition:.2s; box-shadow:var(--sh-sm)}
+  .ctl button:hover{color:var(--ink); border-color:rgba(16,26,44,.2)}
+  .hint{position:fixed; top:18px; right:24px; z-index:20; font-size:12.5px; color:var(--faint);
+    transition:opacity .6s}
+  .hint kbd{font-family:inherit; color:var(--muted); background:var(--card); border:1px solid var(--line);
+    border-radius:6px; padding:2px 7px; font-size:11.5px; box-shadow:var(--sh-sm)}
+
+  @media print{
+    @page{size:1280px 720px; margin:0}
+    body{overflow:visible; background:var(--bg)}
+    .progress,.chrome,.hint{display:none!important}
+    .stage{position:static}
+    .deck{position:static; transform:none!important; width:1280px; height:auto}
+    .slide{position:relative; inset:auto; width:1280px; height:720px; opacity:1!important;
+      visibility:visible!important; page-break-after:always; break-after:page}
+    [data-anim]{opacity:1!important; transform:none!important; animation:none!important}
+  }
+</style>
+</head>
+<body>
+  <div class="progress"><i id="bar"></i></div>
+  <div class="hint" id="hint"><kbd>←</kbd> <kbd>→</kbd> 이동 · <kbd>F</kbd> 전체화면</div>
+
+  <div class="stage">
+    <div class="deck" id="deck">
+
+      <!-- 1 · cover -->
+      <section class="slide cover active">
+        <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span><b>Hermes Agent</b><span class="en">· BASIC 2</span></div>
+        <h1 class="title long-title" data-anim style="--d:1">나만의<br><span class="mark">회계/세무 비서 만들기</span></h1>
+        <p class="sub" data-anim style="--d:2">"그래서 뭘 할 수 있는데?"라는 질문에 —<br><b>메일 답변 초안</b>, <b>SOP 온보딩</b>, <b>맥락 데이터 축적</b>으로 답합니다.</p>
+        <div class="legend" data-anim style="--d:3">
+          <span class="pill code"><i></i>업무 맥락</span>
+          <span class="arw">→</span>
+          <span class="pill ai"><i></i>Hermes Agent</span>
+          <span class="arw">→</span>
+          <span class="pill human"><i></i>사람 컨펌</span>
+        </div>
+      </section>
+
+      <!-- 2 · use cases -->
+      <section class="slide tight">
+        <div class="head">
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>01 — 사용 장면 <span class="en">USE CASES</span></div>
+          <h2 class="title" data-anim style="--d:1">회계 AX 관점에서 <span class="mark">두 가지로 시작합니다</span></h2>
+          <p class="sub" data-anim style="--d:2">거창한 AI 비서가 아니라, 매일 반복되는 질문과 온보딩부터 맡깁니다.</p>
+        </div>
+        <div class="duo">
+          <div class="bigcard" data-anim style="--d:3; --g:var(--violet); --ct:var(--violetT)">
+            <div class="num">USE CASE 01</div>
+            <h3>세무 질의<br>메일 초안</h3>
+            <p>세법·시행령 자료를 근거로<br>수임처 질의에 대한 답변 초안을 만듭니다.</p>
+            <div class="tag">자동 발송이 아니라, 사람이 검토한 뒤 보냅니다.</div>
+          </div>
+          <div class="bigcard" data-anim style="--d:4; --g:var(--azure); --ct:var(--azureT)">
+            <div class="num">USE CASE 02</div>
+            <h3>신입 직원<br>SOP 가이드봇</h3>
+            <p>슬랙에서 업무 절차를 묻고,<br>단계별로 배우는 온보딩 매뉴얼을 만듭니다.</p>
+            <div class="tag">회계사가 매번 같은 설명을 반복하지 않게 합니다.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3 · tax reply workflow -->
+      <section class="slide compact">
+        <div class="head">
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>02 — 세무 질의 <span class="en">MAIL DRAFT</span></div>
+          <h2 class="title" data-anim style="--d:1">메일이 오면, <span class="mark">근거 있는 초안</span>까지 갑니다</h2>
+          <p class="sub" data-anim style="--d:2">NotebookLM·법령 자료·메일을 연결해 답변 초안을 만들고, 최종 발송은 사람이 결정합니다.</p>
+        </div>
+        <div class="steps">
+          <div class="step" data-anim style="--d:3; --c:var(--azure); --ct:var(--azureT)">
+            <div class="num">01</div>
+            <h3>수임처<br>질의 도착</h3>
+            <p>네이버 메일이나 Gmail로 세무 질문이 들어옵니다.</p>
+            <div class="tag">질문 원문을 업무 흐름에 태웁니다.</div>
+          </div>
+          <div class="step" data-anim style="--d:4; --c:var(--violet); --ct:var(--violetT)">
+            <div class="num">02</div>
+            <h3>세법·시행령<br>근거 검색</h3>
+            <p>NotebookLM에 넣어둔 자료 안에서 관련 근거를 찾습니다.</p>
+            <div class="tag">RAG 구조로 답변 범위를 좁힙니다.</div>
+          </div>
+          <div class="step" data-anim style="--d:5; --c:var(--green); --ct:var(--greenT)">
+            <div class="num">03</div>
+            <h3>답변 초안<br>작성</h3>
+            <p>근거 조항과 설명을 갖춘 회신 초안을 만듭니다.</p>
+            <div class="tag">말투와 포맷도 고정할 수 있습니다.</div>
+          </div>
+          <div class="step" data-anim style="--d:6; --c:var(--amber); --ct:var(--amberT)">
+            <div class="num">04</div>
+            <h3>사람이<br>검토</h3>
+            <p>회계사 또는 담당자가 사실관계와 결론을 확인합니다.</p>
+            <div class="tag">책임은 사람에게 남깁니다.</div>
+          </div>
+          <div class="step" data-anim style="--d:7; --c:var(--rose); --ct:var(--roseT)">
+            <div class="num">05</div>
+            <h3>메일<br>답장</h3>
+            <p>검토 후에만 최종 회신으로 보냅니다.</p>
+            <div class="tag">완전 자동 발송은 기본값이 아닙니다.</div>
+          </div>
+        </div>
+        <div class="banner slim" data-anim style="--d:8">AI가 답을 <b>보내는</b> 게 아니라, 사람이 보낼 답의 <b>초안을 만든다</b></div>
+      </section>
+
+      <!-- 4 · tax rag architecture -->
+      <section class="slide compact">
+        <div class="head">
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>02-1 — 구조 <span class="en">RAG ARCHITECTURE</span></div>
+          <h2 class="title" data-anim style="--d:1">세무 질의 메일은 <span class="mark">이 구조로 흐릅니다</span></h2>
+          <p class="sub" data-anim style="--d:2">메일, 법령 지식베이스, Hermes Agent, 사람 검토를 분리해야 자동 발송 리스크를 줄일 수 있습니다.</p>
+        </div>
+        <div class="diagram mail">
+          <div class="node" data-anim style="--d:3; --g:var(--azure); --ct:var(--azureT)">
+            <div class="lab">INPUT</div>
+            <h3>수임처<br>질의 메일</h3>
+            <p>네이버 메일·Gmail로 들어온 질문을 업무 흐름에 올립니다.</p>
+            <div class="small">원문, 첨부, 수임처 맥락</div>
+          </div>
+          <div class="join" data-anim style="--d:4">→</div>
+          <div class="node" data-anim style="--d:5; --g:var(--violet); --ct:var(--violetT)">
+            <div class="lab">KNOWLEDGE</div>
+            <h3>NotebookLM<br>법령 자료</h3>
+            <p>세법·시행령·내부 기준 안에서 관련 근거를 찾습니다.</p>
+            <div class="small">RAG로 답변 범위를 제한</div>
+          </div>
+          <div class="join" data-anim style="--d:6">→</div>
+          <div class="node" data-anim style="--d:7; --g:var(--green); --ct:var(--greenT)">
+            <div class="lab">DRAFT</div>
+            <h3>Hermes Agent<br>답변 초안</h3>
+            <p>근거와 설명, 메일 형식을 갖춘 초안을 작성합니다.</p>
+            <div class="small">결론은 초안 상태로 유지</div>
+          </div>
+          <div class="join" data-anim style="--d:8">→</div>
+          <div class="node" data-anim style="--d:9; --g:var(--amber); --ct:var(--amberT)">
+            <div class="lab">APPROVAL</div>
+            <h3>사람 검토 후<br>발송</h3>
+            <p>회계사 또는 담당자가 사실관계와 표현을 확인합니다.</p>
+            <div class="small">최종 책임은 사람에게 남김</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5 · onboarding bot -->
+      <section class="slide compact">
+        <div class="head">
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>03 — 온보딩 <span class="en">SOP GUIDE</span></div>
+          <h2 class="title" data-anim style="--d:1">신입 직원은 <span class="mark">SOP를 물어보며</span> 배웁니다</h2>
+          <p class="sub" data-anim style="--d:2">회계사가 옆에서 계속 설명하는 대신, 슬랙 안에서 업무 매뉴얼을 단계적으로 익히게 합니다.</p>
+        </div>
+        <div class="flow">
+          <div class="role" data-anim style="--d:3; --rc:var(--azure); --rcT:var(--azureT); --g:var(--azure)">
+            <div class="lab"><i></i>직원</div>
+            <h3>업무 중 질문</h3>
+            <div class="items">처리 순서<br>필요 자료<br>주의사항</div>
+            <div class="note">막힐 때마다 슬랙에서 바로 묻습니다.</div>
+          </div>
+          <div class="arrow" data-anim style="--d:4">→</div>
+          <div class="role" data-anim style="--d:5; --rc:var(--violet); --rcT:var(--violetT); --g:var(--violet)">
+            <div class="lab"><i></i>Hermes</div>
+            <h3>SOP로 답변</h3>
+            <div class="items">매뉴얼 검색<br>단계별 안내<br>관련 문서 링크</div>
+            <div class="note">업무 단계를 하나씩 따라가며 학습합니다.</div>
+          </div>
+          <div class="arrow" data-anim style="--d:6">→</div>
+          <div class="role" data-anim style="--d:7; --rc:var(--amber); --rcT:var(--amberT); --g:var(--amber)">
+            <div class="lab"><i></i>회계사</div>
+            <h3>예외만 검토</h3>
+            <div class="items">특이 케이스<br>최종 판단<br>매뉴얼 개선</div>
+            <div class="note">반복 설명은 줄이고 판단에 집중합니다.</div>
+          </div>
+        </div>
+        <div class="banner" data-anim style="--d:8">온보딩은 교육 자료가 아니라 <b>매일 쓰는 업무 인터페이스</b>가 됩니다</div>
+      </section>
+
+      <!-- 6 · sop architecture -->
+      <section class="slide compact">
+        <div class="head">
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>03-1 — 구조 <span class="en">SOP ARCHITECTURE</span></div>
+          <h2 class="title" data-anim style="--d:1">온보딩 봇은 <span class="mark">질문 창구와 매뉴얼</span>을 연결합니다</h2>
+          <p class="sub" data-anim style="--d:2">반복 질문은 Hermes가 먼저 받고, 예외와 판단이 필요한 부분만 사람에게 올라오게 설계합니다.</p>
+        </div>
+        <div class="diagram sop">
+          <div class="node tall" data-anim style="--d:3; --g:var(--azure); --ct:var(--azureT)">
+            <div class="lab">CHANNEL</div>
+            <h3>Slack<br>질문 창구</h3>
+            <p>신입 직원이 업무 중 막히는 지점을 바로 질문합니다.</p>
+            <div class="node-list">
+              <span>처리 순서</span>
+              <span>필요 자료</span>
+              <span>주의사항</span>
+            </div>
+          </div>
+          <div class="join" data-anim style="--d:4">→</div>
+          <div class="node tall" data-anim style="--d:5; --g:var(--violet); --ct:var(--violetT)">
+            <div class="lab">AGENT</div>
+            <h3>Hermes Agent<br>SOP 응답</h3>
+            <p>매뉴얼과 기존 사례를 찾아 단계별 안내로 바꿉니다.</p>
+            <div class="node-list">
+              <span>단계별 답변</span>
+              <span>관련 문서 링크</span>
+              <span>체크리스트 안내</span>
+            </div>
+          </div>
+          <div class="join" data-anim style="--d:6">→</div>
+          <div class="node tall" data-anim style="--d:7; --g:var(--amber); --ct:var(--amberT)">
+            <div class="lab">ESCALATION</div>
+            <h3>회계사<br>예외 검토</h3>
+            <p>특이 케이스와 최종 판단은 사람에게 올라옵니다.</p>
+            <div class="node-list">
+              <span>예외 처리</span>
+              <span>최종 판단</span>
+              <span>SOP 개선</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 7 · data pipeline -->
+      <section class="slide">
+        <div class="head">
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>04 — 축적 <span class="en">CONTEXT DATA</span></div>
+          <h2 class="title" data-anim style="--d:1">진짜 자산은 <span class="mark">맥락 데이터</span>입니다</h2>
+          <p class="sub" data-anim style="--d:2">AX에서 가장 자주 막히는 지점은 도구가 아니라, 회사의 업무 맥락이 데이터로 남아 있지 않다는 점입니다.</p>
+        </div>
+        <div class="cards">
+          <div class="card" data-anim style="--d:3; --c:var(--azure); --ct:var(--azureT)">
+            <div class="idx">01</div><h3>Hermes Agent</h3>
+            <p>질문·답변·처리 흐름이<br>매일의 업무 기록으로 남습니다.</p>
+            <div class="tag">업무 대화가 흩어지지 않습니다.</div>
+          </div>
+          <div class="card" data-anim style="--d:4; --c:var(--violet); --ct:var(--violetT)">
+            <div class="idx">02</div><h3>Notion</h3>
+            <p>SOP와 의사결정 기준이<br>계속 업데이트됩니다.</p>
+            <div class="tag">매뉴얼이 문서 창고가 아니라 운영 기준이 됩니다.</div>
+          </div>
+          <div class="card" data-anim style="--d:5; --c:var(--amber); --ct:var(--amberT)">
+            <div class="idx">03</div><h3>Google Drive</h3>
+            <p>파일·템플릿·증빙이<br>업무 맥락과 연결됩니다.</p>
+            <div class="tag">자료 위치와 사용 이유가 함께 남습니다.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 8 · context data architecture -->
+      <section class="slide compact">
+        <div class="head">
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>04-1 — 구조 <span class="en">DATA PIPELINE</span></div>
+          <h2 class="title" data-anim style="--d:1">매일의 업무가 <span class="mark">맥락 데이터</span>로 쌓입니다</h2>
+          <p class="sub" data-anim style="--d:2">사람이 따로 옮겨 적는 구조가 아니라, 업무 채널에서 생긴 대화와 문서가 다시 AI가 참고할 자산으로 돌아옵니다.</p>
+        </div>
+        <div class="diagram pipeline">
+          <div class="node tall" data-anim style="--d:3; --g:var(--azure); --ct:var(--azureT)">
+            <div class="lab">DAILY WORK</div>
+            <h3>매일의<br>업무 채널</h3>
+            <p>메일, Slack, 문서, 드라이브에서 질문과 처리 결과가 생깁니다.</p>
+            <div class="node-list">
+              <span>수임처 질의</span>
+              <span>직원 질문</span>
+              <span>업무 산출물</span>
+            </div>
+          </div>
+          <div class="join" data-anim style="--d:4">→</div>
+          <div class="node tall" data-anim style="--d:5; --g:var(--violet); --ct:var(--violetT)">
+            <div class="lab">ROUTER</div>
+            <h3>Hermes Agent<br>맥락 연결</h3>
+            <p>업무 대화와 파일을 적절한 지식 저장소와 연결합니다.</p>
+            <div class="node-list">
+              <span>질문 분류</span>
+              <span>자료 연결</span>
+              <span>다음 응답에 재사용</span>
+            </div>
+          </div>
+          <div class="join" data-anim style="--d:6">→</div>
+          <div class="node tall" data-anim style="--d:7; --g:var(--green); --ct:var(--greenT)">
+            <div class="lab">MEMORY</div>
+            <h3>Notion<br>Google Drive</h3>
+            <p>SOP, 의사결정 기준, 템플릿, 증빙이 업무 맥락과 함께 남습니다.</p>
+            <div class="node-list">
+              <span>SOP·체크리스트</span>
+              <span>템플릿·증빙</span>
+              <span>회사별 기준</span>
+            </div>
+          </div>
+        </div>
+        <div class="diagram-caption banner slim" data-anim style="--d:8">AX의 출발점은 도구 하나가 아니라 <b>다음 답변에 쓸 맥락을 남기는 구조</b>입니다</div>
+      </section>
+
+      <!-- 9 · conclusion -->
+      <section class="slide compact">
+        <div class="head">
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>05 — 결론 <span class="en">OPERATING MODEL</span></div>
+          <h2 class="title" data-anim style="--d:1">사람이 옮기는 게 아니라, <span class="mark">업무가 쌓이게</span> 만듭니다</h2>
+          <p class="sub" data-anim style="--d:2">기존 운영방식을 완전히 갈아엎는 것이 아니라, 매일의 커뮤니케이션이 데이터 파이프라인을 타게 만듭니다.</p>
+        </div>
+        <div class="stack">
+          <div class="bigcard" data-anim style="--d:3; --g:var(--green); --ct:var(--greenT)">
+            <div class="num">BEFORE</div>
+            <h3>사람이 기억하고<br>사람이 옮긴다</h3>
+            <p>메일, 슬랙, 드라이브, 개인 노하우가 흩어져 있으면 AI가 참고할 회사 맥락이 없습니다.</p>
+            <div class="tag">AX가 막히는 이유는 도구 부족보다 맥락 데이터 부족입니다.</div>
+          </div>
+          <div class="stack-col">
+            <div class="strip" data-anim style="--d:4; --c:var(--azure)">
+              <h3>업무는 기존 방식으로 진행</h3>
+              <p>메일, 슬랙, 문서, 드라이브를 그대로 씁니다.</p>
+            </div>
+            <div class="strip" data-anim style="--d:5; --c:var(--violet)">
+              <h3>Hermes가 흐름을 연결</h3>
+              <p>질문과 답변, 문서, SOP가 하나의 맥락으로 묶입니다.</p>
+            </div>
+            <div class="strip" data-anim style="--d:6; --c:var(--amber)">
+              <h3>회계사는 판단에 집중</h3>
+              <p>반복 설명과 검색은 줄이고 예외와 최종 판단을 맡습니다.</p>
+            </div>
+          </div>
+        </div>
+        <div class="banner slim" data-anim style="--d:7">기존 운영방식 위에서도 <b>AX의 기반</b>을 만들 수 있습니다</div>
+      </section>
+
+    </div>
+  </div>
+
+  <div class="chrome">
+    <div class="brand">Hermes Agent <span>· Basic 2</span></div>
+    <div class="dots" id="dots"></div>
+    <div class="ctl">
+      <button id="prev" aria-label="이전">‹</button>
+      <span class="count" id="count">01 / 09</span>
+      <button id="next" aria-label="다음">›</button>
+      <button id="fs" aria-label="전체화면">⤢</button>
+    </div>
+  </div>
+
+<script>
+  const slides=[...document.querySelectorAll('.slide')];
+  const deck=document.getElementById('deck');
+  const bar=document.getElementById('bar');
+  const count=document.getElementById('count');
+  const dotsWrap=document.getElementById('dots');
+  const N=slides.length;
+  let i=0;
+
+  slides.forEach((_,k)=>{
+    const b=document.createElement('b');
+    b.addEventListener('click',()=>go(k));
+    dotsWrap.appendChild(b);
+  });
+  const dots=[...dotsWrap.children];
+  const pad=n=>String(n).padStart(2,'0');
+
+  function go(n){
+    i=Math.max(0,Math.min(N-1,n));
+    slides.forEach((s,k)=>s.classList.toggle('active',k===i));
+    dots.forEach((d,k)=>d.classList.toggle('on',k===i));
+    bar.style.width=((i+1)/N*100)+'%';
+    count.textContent=pad(i+1)+' / '+pad(N);
+    history.replaceState(null,'','#'+(i+1));
+  }
+
+  function fit(){
+    const s=Math.min(innerWidth/1280, innerHeight/720);
+    deck.style.transform=`translate(-50%,-50%) scale(${s})`;
+  }
+  addEventListener('resize',fit);
+
+  addEventListener('keydown',e=>{
+    if(['ArrowRight','PageDown',' ','Spacebar'].includes(e.key)){e.preventDefault(); go(i+1);}
+    else if(['ArrowLeft','PageUp'].includes(e.key)){e.preventDefault(); go(i-1);}
+    else if(e.key==='Home'){go(0);} else if(e.key==='End'){go(N-1);}
+    else if(e.key==='f'||e.key==='F'){toggleFs();}
+  });
+  document.getElementById('prev').onclick=()=>go(i-1);
+  document.getElementById('next').onclick=()=>go(i+1);
+  document.getElementById('fs').onclick=toggleFs;
+  function toggleFs(){ if(!document.fullscreenElement){document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen();} else {document.exitFullscreen&&document.exitFullscreen();} }
+
+  let sx=0;
+  addEventListener('touchstart',e=>sx=e.touches[0].clientX,{passive:true});
+  addEventListener('touchend',e=>{const dx=e.changedTouches[0].clientX-sx; if(Math.abs(dx)>50) go(i+(dx<0?1:-1));},{passive:true});
+
+  setTimeout(()=>{const h=document.getElementById('hint'); if(h) h.style.opacity=0;},4200);
+
+  const start=parseInt((location.hash||'').replace('#',''));
+  fit();
+  go((start>=1&&start<=N)?start-1:0);
+</script>
+</body>
+</html>
