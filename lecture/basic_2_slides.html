@@ -257,7 +257,7 @@
         <div class="head">
           <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>02 — 세무 질의 <span class="en">MAIL DRAFT</span></div>
           <h2 class="title" data-anim style="--d:1">메일이 오면, <span class="mark">근거 있는 초안</span>까지 갑니다</h2>
-          <p class="sub" data-anim style="--d:2">NotebookLM·법령 자료·메일을 연결해 답변 초안을 만들고, 최종 발송은 사람이 결정합니다.</p>
+          <p class="sub" data-anim style="--d:2">메일과 Hermes Agent 내부 RAG 법령 지식베이스를 연결해 답변 초안을 만들고, 최종 발송은 사람이 결정합니다.</p>
         </div>
         <div class="steps">
           <div class="step" data-anim style="--d:3; --c:var(--azure); --ct:var(--azureT)">
@@ -269,8 +269,8 @@
           <div class="step" data-anim style="--d:4; --c:var(--violet); --ct:var(--violetT)">
             <div class="num">02</div>
             <h3>세법·시행령<br>근거 검색</h3>
-            <p>NotebookLM에 넣어둔 자료 안에서 관련 근거를 찾습니다.</p>
-            <div class="tag">RAG 구조로 답변 범위를 좁힙니다.</div>
+            <p>Hermes Agent 안의 RAG 지식베이스에서 관련 근거를 찾습니다.</p>
+            <div class="tag">법령 자료 기반으로 답변 범위를 좁힙니다.</div>
           </div>
           <div class="step" data-anim style="--d:5; --c:var(--green); --ct:var(--greenT)">
             <div class="num">03</div>
@@ -310,10 +310,10 @@
           </div>
           <div class="join" data-anim style="--d:4">→</div>
           <div class="node" data-anim style="--d:5; --g:var(--violet); --ct:var(--violetT)">
-            <div class="lab">KNOWLEDGE</div>
-            <h3>NotebookLM<br>법령 자료</h3>
-            <p>세법·시행령·내부 기준 안에서 관련 근거를 찾습니다.</p>
-            <div class="small">RAG로 답변 범위를 제한</div>
+            <div class="lab">INTERNAL RAG</div>
+            <h3>Hermes Agent<br>법령 RAG</h3>
+            <p>세법·시행령·내부 기준을 검색해 관련 근거를 찾습니다.</p>
+            <div class="small">Hermes 내부 RAG로 답변 범위 제한</div>
           </div>
           <div class="join" data-anim style="--d:6">→</div>
           <div class="node" data-anim style="--d:7; --g:var(--green); --ct:var(--greenT)">

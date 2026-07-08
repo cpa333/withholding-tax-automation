@@ -166,6 +166,94 @@
   .banner b{color:var(--violetT)}
   .banner.slim{padding:22px 28px; font-size:24px}
 
+  .speaker-slide{padding-top:72px; padding-bottom:78px}
+  .speaker-slide .head{margin-bottom:20px}
+  .speaker-slide .head .title{font-size:44px}
+  .speaker-layout{display:grid; grid-template-columns:350px 1fr; gap:24px; flex:1; min-height:0}
+  .speaker-photo-panel{position:relative; padding:16px; border-radius:24px; background:var(--card);
+    border:1px solid var(--line); box-shadow:var(--sh); overflow:hidden; display:flex; flex-direction:column}
+  .speaker-photo-panel::before{content:''; position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(92% 72% at 50% -12%, rgba(46,107,255,.16), transparent 64%)}
+  .speaker-photo{position:relative; width:100%; height:306px; border-radius:18px; object-fit:cover;
+    object-position:center 24%; border:1px solid rgba(16,26,44,.08); background:#F4F0EE}
+  .speaker-caption{position:relative; display:flex; align-items:flex-end; justify-content:space-between;
+    gap:14px; padding:18px 6px 2px}
+  .speaker-caption strong{font-size:34px; line-height:1; letter-spacing:-.02em; color:var(--ink)}
+  .speaker-caption span{display:inline-flex; align-items:center; min-height:34px; padding:8px 13px;
+    border-radius:999px; background:var(--azureBg); border:1px solid rgba(46,107,255,.18);
+    color:var(--azureT); font-size:15px; line-height:1; font-weight:800; white-space:nowrap}
+  .speaker-info{display:grid; grid-template-rows:auto 1fr; gap:16px; min-width:0; min-height:0}
+  .speaker-main{position:relative; padding:22px 28px; border-radius:22px;
+    background:linear-gradient(120deg,rgba(46,107,255,.08),rgba(124,77,255,.07)),var(--card);
+    border:1px solid var(--line); box-shadow:var(--sh); overflow:hidden}
+  .speaker-label,.credential .k,.speaker-connect .k{font-size:13px; font-weight:850; letter-spacing:.16em}
+  .speaker-label{color:var(--violetT)}
+  .speaker-main h3{font-size:29px; line-height:1.16; letter-spacing:-.018em; color:var(--ink); margin-top:8px}
+  .speaker-main p{font-size:16.8px; line-height:1.48; color:var(--body); margin-top:9px}
+  .speaker-detail-grid{display:grid; grid-template-columns:1fr 228px; gap:16px; min-height:0}
+  .speaker-credentials{display:grid; grid-template-rows:1fr 1fr; gap:12px; min-height:0}
+  .credential{position:relative; min-height:0; padding:18px 20px 17px; border-radius:18px;
+    background:var(--card); border:1px solid var(--line); box-shadow:var(--sh-sm); overflow:hidden}
+  .credential::before{content:''; position:absolute; top:0; left:22px; right:22px; height:3px; border-radius:3px;
+    background:linear-gradient(90deg,var(--c,var(--azure)),transparent)}
+  .credential .k{color:var(--ct,var(--azureT))}
+  .credential strong{display:block; color:var(--ink); font-size:23px; line-height:1.1; letter-spacing:-.015em; margin-top:10px}
+  .credential span{display:block; color:var(--muted); font-size:15px; line-height:1.36; margin-top:7px}
+  .speaker-connect{display:flex; flex-direction:column; justify-content:center; align-items:center; gap:12px;
+    min-height:0; padding:18px 18px; border-radius:18px; text-align:center;
+    background:linear-gradient(180deg,var(--azureBg),var(--violetBg));
+    border:1px solid var(--line); box-shadow:var(--sh-sm)}
+  .speaker-connect img{width:112px; height:112px; border-radius:14px; background:#fff;
+    border:6px solid #fff; box-shadow:0 10px 24px -16px rgba(16,24,40,.5)}
+  .speaker-connect .k{color:var(--azureT)}
+  .speaker-connect strong{display:block; color:var(--ink); font-size:22px; line-height:1.15; letter-spacing:-.012em; margin-top:6px}
+  .speaker-connect span{display:block; color:var(--body); font-size:15px; line-height:1.38; margin-top:6px}
+
+  .glossary-slide .head{margin-bottom:26px}
+  .glossary-slide .head .title{font-size:45px}
+  .term-cloud{position:relative; flex:1; min-height:0; margin-bottom:0;
+    border-radius:22px; background:rgba(255,255,255,.72); border:1px solid var(--line);
+    box-shadow:var(--sh); overflow:hidden}
+  .term-cloud::before{content:''; position:absolute; inset:0; pointer-events:none;
+    background:
+      linear-gradient(rgba(46,107,255,.055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(124,77,255,.052) 1px, transparent 1px);
+    background-size:44px 44px; opacity:.66}
+  .term{position:absolute; z-index:1; display:inline-flex; align-items:center; justify-content:center;
+    min-height:48px; padding:13px 20px; border-radius:16px; background:var(--card);
+    border:1px solid rgba(16,26,44,.11); box-shadow:var(--sh-sm);
+    color:var(--ink); font-weight:800; line-height:1.1; white-space:nowrap;
+    opacity:0; transform:translateY(12px) scale(.96)}
+  .term::before{content:''; width:9px; height:9px; border-radius:50%; margin-right:10px;
+    background:var(--tc,var(--azure)); box-shadow:0 0 0 5px rgba(46,107,255,.12)}
+  .term.xl{font-size:31px; padding:17px 25px; min-height:62px}
+  .term.lg{font-size:25px; padding:15px 23px; min-height:56px}
+  .term.md{font-size:21px}
+  .term.sm{font-size:18px; padding:12px 18px; min-height:44px}
+  .slide.active.glossary-slide .term{animation:term-pop .34s cubic-bezier(.18,.78,.2,1.12) both;
+    animation-delay:calc(.30s + var(--t,0) * .035s)}
+  .glossary-slide .term:nth-child(1){--t:3}
+  .glossary-slide .term:nth-child(2){--t:0}
+  .glossary-slide .term:nth-child(3){--t:8}
+  .glossary-slide .term:nth-child(4){--t:5}
+  .glossary-slide .term:nth-child(5){--t:10}
+  .glossary-slide .term:nth-child(6){--t:2}
+  .glossary-slide .term:nth-child(7){--t:7}
+  .glossary-slide .term:nth-child(8){--t:11}
+  .glossary-slide .term:nth-child(9){--t:1}
+  .glossary-slide .term:nth-child(10){--t:6}
+  .glossary-slide .term:nth-child(11){--t:12}
+  .glossary-slide .term:nth-child(12){--t:14}
+  .glossary-slide .term:nth-child(13){--t:4}
+  .glossary-slide .term:nth-child(14){--t:9}
+  .glossary-slide .term:nth-child(15){--t:13}
+  .glossary-slide .term:nth-child(16){--t:15}
+  @keyframes term-pop{
+    0%{opacity:0; transform:translateY(12px) scale(.96)}
+    72%{opacity:1; transform:translateY(-2px) scale(1.015)}
+    100%{opacity:1; transform:none}
+  }
+
   .security{display:grid; grid-template-columns:1fr 1fr; gap:24px; flex:1; margin-bottom:26px}
   .security .bigcard h3{font-size:32px}
   .bullets{display:flex; flex-direction:column; gap:12px; margin-top:22px}
@@ -182,7 +270,7 @@
     font-size:15px; line-height:1.35; font-weight:600}
 
   .progress{position:fixed; top:0; left:0; right:0; height:3px; background:rgba(16,26,44,.07); z-index:20}
-  .progress i{display:block; height:100%; width:10%;
+  .progress i{display:block; height:100%; width:8.33%;
     background:linear-gradient(90deg,var(--azure),var(--violet),var(--amber));
     transition:width .5s cubic-bezier(.2,.7,.2,1)}
   .chrome{position:fixed; left:0; right:0; bottom:0; z-index:20;
@@ -213,7 +301,7 @@
     .deck{position:static; transform:none!important; width:1280px; height:auto}
     .slide{position:relative; inset:auto; width:1280px; height:720px; opacity:1!important;
       visibility:visible!important; page-break-after:always; break-after:page}
-    [data-anim]{opacity:1!important; transform:none!important; animation:none!important}
+    [data-anim],.glossary-slide .term{opacity:1!important; transform:none!important; animation:none!important}
   }
 </style>
 </head>
@@ -238,10 +326,57 @@
         </div>
       </section>
 
-      <!-- 2 · speaker context -->
+      <!-- 2 · instructor profile -->
+      <section class="slide speaker-slide compact">
+        <div class="head">
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>01 — 강사 소개 <span class="en">INSTRUCTOR</span></div>
+          <h2 class="title" data-anim style="--d:1">오늘 강의를 함께할 <span class="mark">이시용</span>입니다</h2>
+          <p class="sub" data-anim style="--d:2">회계·재무의 판단 언어와 AI 업무 도구 제작 흐름을 함께 다룹니다.</p>
+        </div>
+        <div class="speaker-layout">
+          <div class="speaker-photo-panel" data-anim style="--d:3">
+            <img class="speaker-photo" src="assets/instructor_lee_seeyong.png" alt="강사 이시용 프로필 사진">
+            <div class="speaker-caption">
+              <strong>이시용</strong>
+              <span>thePersons CEO</span>
+            </div>
+          </div>
+          <div class="speaker-info">
+            <div class="speaker-main" data-anim style="--d:4">
+              <div class="speaker-label">INSTRUCTOR PROFILE</div>
+              <h3>AI를 업무 도구로 바꾸는 관점</h3>
+              <p>도구 사용법보다 먼저 업무 목적과 판단 기준을 정리하고, 현업자가 직접 검증할 수 있는 자동화 흐름을 설계합니다.</p>
+            </div>
+            <div class="speaker-detail-grid">
+              <div class="speaker-credentials">
+                <div class="credential" data-anim style="--d:5; --c:var(--azure); --ct:var(--azureT)">
+                  <div class="k">ROLE</div>
+                  <strong>thePersons CEO</strong>
+                  <span>AI 전환과 업무 자동화 교육·컨설팅</span>
+                </div>
+                <div class="credential" data-anim style="--d:6; --c:var(--amber); --ct:var(--amberT)">
+                  <div class="k">CREDENTIAL</div>
+                  <strong>CFA charterholder</strong>
+                  <span>재무·투자 관점으로 기술 적용을 설명</span>
+                </div>
+              </div>
+              <div class="speaker-connect" data-anim style="--d:7">
+                <img src="assets/instructor_linkedin_qr.png" alt="이시용 강사 LinkedIn QR 코드">
+                <div>
+                  <div class="k">LINKEDIN</div>
+                  <strong>LinkedIn에서 연결</strong>
+                  <span>QR을 스캔하면 강사 프로필로 이동합니다.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3 · speaker context -->
       <section class="slide">
         <div class="head">
-          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>01 — 관점 <span class="en">POSITION</span></div>
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>02 — 관점 <span class="en">POSITION</span></div>
           <h2 class="title" data-anim style="--d:1">비전공자도 <span class="mark">업무 도구를 만들 수 있는</span> 시대</h2>
           <p class="sub" data-anim style="--d:2">강사의 경험은 "개발자처럼 되자"가 아니라 "업무 생산성을 직접 설계하자"에 가깝습니다.</p>
         </div>
@@ -264,10 +399,10 @@
         </div>
       </section>
 
-      <!-- 3 · two AX questions -->
+      <!-- 4 · two AX questions -->
       <section class="slide tight">
         <div class="head">
-          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>02 — 출발점 <span class="en">STARTING POINT</span></div>
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>03 — 출발점 <span class="en">STARTING POINT</span></div>
           <h2 class="title" data-anim style="--d:1">현장에서 반복되는 <span class="mark">두 가지 질문</span></h2>
           <p class="sub" data-anim style="--d:2">AX는 기술 도입 이전에 "무엇을 바꿀지"와 "무엇을 먹일지"를 정하는 일입니다.</p>
         </div>
@@ -287,10 +422,37 @@
         </div>
       </section>
 
-      <!-- 4 · agent concept -->
+      <!-- 5 · terminology overload -->
+      <section class="slide glossary-slide compact">
+        <div class="head">
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>04 — 용어 지도 <span class="en">GLOSSARY</span></div>
+          <h2 class="title" data-anim style="--d:1">어려운 AI 용어가 <span class="mark">매일 생겨나는 시대</span></h2>
+          <p class="sub" data-anim style="--d:2">처음에는 용어를 모르는 것이 문제가 아니라, 무엇이 중요한지 구분하기 어려운 것이 문제입니다.</p>
+        </div>
+        <div class="term-cloud" data-anim style="--d:3">
+          <span class="term xl" style="--tc:var(--violet); left:248px; top:24px">에이전트</span>
+          <span class="term lg" style="--tc:var(--azure); left:54px; top:48px">MCP</span>
+          <span class="term sm" style="--tc:var(--amber); right:66px; top:34px">Plug-in</span>
+          <span class="term md" style="--tc:var(--green); left:482px; top:36px">임베딩</span>
+          <span class="term sm" style="--tc:var(--rose); left:666px; top:38px">프롬프트 엔지니어링</span>
+          <span class="term lg" style="--tc:var(--green); left:152px; top:122px">RAG</span>
+          <span class="term md" style="--tc:var(--rose); left:390px; top:124px">하네스 엔지니어링</span>
+          <span class="term sm" style="--tc:var(--azure); left:724px; top:122px">벡터 DB</span>
+          <span class="term md" style="--tc:var(--violet); left:46px; top:210px">Human-in-the-loop</span>
+          <span class="term lg" style="--tc:var(--azure); left:374px; top:216px">바이브코딩</span>
+          <span class="term sm" style="--tc:var(--rose); left:646px; top:220px">가드레일</span>
+          <span class="term sm" style="--tc:var(--amber); left:826px; top:222px">스킬</span>
+          <span class="term sm" style="--tc:var(--violet); left:72px; bottom:30px">파인튜닝</span>
+          <span class="term sm" style="--tc:var(--amber); left:254px; bottom:30px">평가(Evals)</span>
+          <span class="term md" style="--tc:var(--green); left:498px; bottom:24px">컨텍스트 윈도우</span>
+          <span class="term sm" style="--tc:var(--azure); right:48px; bottom:30px">오케스트레이션</span>
+        </div>
+      </section>
+
+      <!-- 6 · agent concept -->
       <section class="slide compact">
         <div class="head">
-          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>03 — 개념 <span class="en">AGENT</span></div>
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>05 — 개념 <span class="en">AGENT</span></div>
           <h2 class="title" data-anim style="--d:1">에이전트는 <span class="mark">AI의 손과 발</span>입니다</h2>
           <p class="sub" data-anim style="--d:2">LLM이 말하는 두뇌라면, 에이전트는 실제 도구를 움직이는 실행 계층입니다.</p>
         </div>
@@ -316,10 +478,10 @@
         </div>
       </section>
 
-      <!-- 5 · coding agents -->
+      <!-- 7 · coding agents -->
       <section class="slide">
         <div class="head">
-          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>04 — 확산 <span class="en">VIBE CODING</span></div>
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>06 — 확산 <span class="en">VIBE CODING</span></div>
           <h2 class="title" data-anim style="--d:1">가장 먼저 커진 에이전트는 <span class="mark">코딩 에이전트</span>였습니다</h2>
           <p class="sub" data-anim style="--d:2">개발자는 반복 작업이 많고, 결과를 파일로 바로 검증할 수 있었기 때문입니다.</p>
         </div>
@@ -342,10 +504,10 @@
         </div>
       </section>
 
-      <!-- 6 · agent risk -->
+      <!-- 8 · agent risk -->
       <section class="slide">
         <div class="head">
-          <div class="eyebrow" data-anim style="--d:0"><span class="dot" style="background:var(--rose);box-shadow:0 0 0 4px rgba(240,97,107,.14)"></span>05 — 문제 <span class="en">RISK</span></div>
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot" style="background:var(--rose);box-shadow:0 0 0 4px rgba(240,97,107,.14)"></span>07 — 문제 <span class="en">RISK</span></div>
           <h2 class="title" data-anim style="--d:1">손과 발이 생기면, <span class="danger">리스크도 실행됩니다</span></h2>
           <p class="sub" data-anim style="--d:2">예약·쇼핑·업무 자동화처럼 실행 범위가 넓어질수록 통제 장치가 필요합니다.</p>
         </div>
@@ -354,25 +516,25 @@
           <div class="cmp" data-anim style="--d:4">
             <div class="req"><span class="k">01</span>실행 범위 확대</div>
             <div class="bolt">!</div>
-            <div class="llm"><h4><em>예상 밖 행동</em></h4><p>예약·구매·수정처럼 실제 결과를 남길 수 있다</p></div>
+            <div class="llm"><h4><em>중대한 실행 실수</em></h4><p>결제·삭제·전송처럼 되돌리기 어려운 행동을 잘못 실행할 수 있다</p></div>
           </div>
           <div class="cmp" data-anim style="--d:5">
             <div class="req"><span class="k">02</span>긴 작업 지시</div>
             <div class="bolt">!</div>
-            <div class="llm"><h4><em>토큰·비용</em></h4><p>작업 시간이 길어질수록 비용이 빠르게 커진다</p></div>
+            <div class="llm"><h4><em>토큰·비용·컨텍스트 리미트</em></h4><p>작업이 길어질수록 비용이 커지고 앞선 맥락을 놓칠 수 있다</p></div>
           </div>
           <div class="cmp" data-anim style="--d:6">
             <div class="req"><span class="k">03</span>확률적 판단</div>
             <div class="bolt">!</div>
-            <div class="llm"><h4><em>오판 가능성</em></h4><p>그럴듯하지만 잘못된 행동으로 이어질 수 있다</p></div>
+            <div class="llm"><h4><em>할루시네이션</em></h4><p>없는 사실·근거를 그럴듯하게 말해 판단 자체를 흔들 수 있다</p></div>
           </div>
         </div>
       </section>
 
-      <!-- 7 · RAG and harness -->
+      <!-- 9 · RAG and harness -->
       <section class="slide compact">
         <div class="head">
-          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>06 — 통제 <span class="en">CONTROL</span></div>
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>08 — 통제 <span class="en">CONTROL</span></div>
           <h2 class="title" data-anim style="--d:1">그래서 <span class="mark">뇌와 손발을 나눠</span> 제어합니다</h2>
           <p class="sub" data-anim style="--d:2">실무형 AI는 똑똑함보다 통제 가능성이 더 중요합니다.</p>
         </div>
@@ -401,10 +563,10 @@
         <div class="banner" data-anim style="--d:8">RAG는 <b>근거</b>를 묶고, 하네스는 <b>행동</b>을 묶습니다</div>
       </section>
 
-      <!-- 8 · AI use stages -->
+      <!-- 10 · AI use stages -->
       <section class="slide compact">
         <div class="head">
-          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>07 — 적용 단계 <span class="en">WORKFLOW</span></div>
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>09 — 적용 단계 <span class="en">WORKFLOW</span></div>
           <h2 class="title" data-anim style="--d:1">업무에 AI를 쓰는 <span class="mark">네 단계</span></h2>
           <p class="sub" data-anim style="--d:2">마지막 단계가 매력적이지만, 모든 업무가 거기까지 갈 필요는 없습니다.</p>
         </div>
@@ -437,10 +599,10 @@
         <div class="banner slim" data-anim style="--d:7">우리는 <b>도구 사용법</b>보다 먼저, <b>달성할 목적</b>을 정해야 합니다</div>
       </section>
 
-      <!-- 9 · security domains -->
+      <!-- 11 · security domains -->
       <section class="slide compact">
         <div class="head">
-          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>08 — 보안 <span class="en">SECURITY</span></div>
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>10 — 보안 <span class="en">SECURITY</span></div>
           <h2 class="title" data-anim style="--d:1">보안은 <span class="mark">적용 영역</span>에 따라 다르게 봅니다</h2>
           <p class="sub" data-anim style="--d:2">AI 워크플로우는 단순 노동 자동화와 의사결정 보조도구로 나눠 생각할 수 있습니다.</p>
         </div>
@@ -467,10 +629,10 @@
         <div class="banner slim" data-anim style="--d:5">보안 위험은 <b>AI를 쓰느냐</b>보다 <b>무슨 정보를 주느냐</b>에서 갈립니다</div>
       </section>
 
-      <!-- 10 · on-prem tradeoff -->
+      <!-- 12 · on-prem tradeoff -->
       <section class="slide compact">
         <div class="head">
-          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>09 — 선택지 <span class="en">TRADE-OFF</span></div>
+          <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span>11 — 선택지 <span class="en">TRADE-OFF</span></div>
           <h2 class="title" data-anim style="--d:1">내부 서버가 답일 때와 <span class="mark">아닐 때</span></h2>
           <p class="sub" data-anim style="--d:2">온프레미스는 강력한 선택지지만, 투자 대비 효과를 반드시 계산해야 합니다.</p>
         </div>
@@ -509,7 +671,7 @@
     <div class="dots" id="dots"></div>
     <div class="ctl">
       <button id="prev" aria-label="이전">‹</button>
-      <span class="count" id="count">01 / 10</span>
+      <span class="count" id="count">01 / 12</span>
       <button id="next" aria-label="다음">›</button>
       <button id="fs" aria-label="전체화면">⤢</button>
     </div>
