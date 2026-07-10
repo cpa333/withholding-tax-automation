@@ -55,6 +55,7 @@ auth_session*.json
 # Screenshots / debug captures
 *.png
 !lecture/assets/instructor_*.png
+!lecture/assets/hermes_agent_*.png
 *_preview.txt
 *_debug.txt
 
