@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>회계사를 위한 AI — 후속 과정 수요조사</title>
+<link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
+<style>
+  :root{
+    --bg:#F5F7FC;
+    --ink:#0F1A2C;
+    --body:#37435C;
+    --muted:#5E6B85;
+    --faint:#98A3B7;
+    --line:rgba(16,26,44,.10);
+    --line2:rgba(16,26,44,.055);
+    --card:#FFFFFF;
+
+    --azure:#2E6BFF;  --azureT:#1F55E6; --azureBg:#EAF1FF;
+    --violet:#7C4DFF; --violetT:#6636EC; --violetBg:#F1EBFF;
+    --amber:#F0A62A;  --amberT:#B0730C; --amberBg:#FDF3DE;
+    --rose:#F0616B;   --roseT:#DC3B47;  --roseBg:#FDECEE;
+    --green:#22A06B;  --greenT:#157A52; --greenBg:#E7F8F0;
+
+    --sh:0 1px 3px rgba(16,24,40,.05), 0 22px 48px -24px rgba(16,24,40,.22);
+    --sh-sm:0 1px 2px rgba(16,24,40,.06), 0 6px 16px -8px rgba(16,24,40,.14);
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%}
+  body{
+    font-family:'Pretendard Variable',Pretendard,-apple-system,'Apple SD Gothic Neo','Malgun Gothic','Segoe UI',sans-serif;
+    background:
+      radial-gradient(1100px 680px at 6% -12%, rgba(46,107,255,.10), transparent 60%),
+      radial-gradient(1000px 720px at 106% 114%, rgba(124,77,255,.09), transparent 58%),
+      var(--bg);
+    color:var(--body);
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+
+  .stage{position:fixed; inset:0}
+  .deck{position:absolute; left:50%; top:50%; width:1280px; height:720px;
+    transform:translate(-50%,-50%); transform-origin:center center}
+  .slide{position:absolute; inset:0; padding:72px 96px 78px; display:flex; flex-direction:column; overflow:hidden}
+  .slide::before{content:''; position:absolute; inset:0; pointer-events:none; opacity:.6;
+    background-image:
+      linear-gradient(rgba(16,26,44,.032) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(16,26,44,.032) 1px, transparent 1px);
+    background-size:56px 56px; mask-image:radial-gradient(120% 100% at 50% 0%, #000 38%, transparent 78%)}
+
+  .eyebrow{position:relative; display:inline-flex; align-items:center; gap:11px; font-size:16px; font-weight:600;
+    letter-spacing:.01em; color:var(--muted)}
+  .eyebrow .dot{width:8px; height:8px; border-radius:50%; background:var(--azure);
+    box-shadow:0 0 0 4px rgba(46,107,255,.14)}
+  .eyebrow b{color:var(--ink); font-weight:700}
+  .eyebrow .en{color:var(--faint); font-weight:600; font-size:14px; letter-spacing:.08em}
+
+  .title{position:relative; margin-top:18px; max-width:1050px; color:var(--ink);
+    font-size:52px; font-weight:830; line-height:1.08; letter-spacing:-.024em}
+  .mark{white-space:nowrap;
+    background:linear-gradient(90deg,var(--azure),var(--violet));
+    -webkit-background-clip:text; background-clip:text; color:transparent}
+  .sub{position:relative; margin-top:16px; max-width:980px; color:var(--muted);
+    font-size:22px; line-height:1.48; font-weight:500}
+  .sub b{color:var(--ink); font-weight:760}
+
+  [data-anim]{opacity:0; transform:translateY(18px)}
+  .slide [data-anim]{animation:rise .68s cubic-bezier(.2,.72,.18,1) both;
+    animation-delay:calc(var(--d,0) * .075s)}
+  @keyframes rise{to{opacity:1; transform:none}}
+
+  .survey-panel{position:relative; margin-top:34px; padding:24px 24px 32px; border-radius:24px;
+    background:rgba(255,255,255,.74); border:1px solid var(--line); box-shadow:var(--sh);
+    overflow:hidden}
+  .survey-panel::before{content:''; position:absolute; inset:0; pointer-events:none; opacity:.64;
+    background:
+      linear-gradient(rgba(46,107,255,.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(124,77,255,.045) 1px, transparent 1px);
+    background-size:44px 44px}
+  .options{position:relative; display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  .option{min-height:66px; display:flex; align-items:center; gap:16px; padding:18px 20px;
+    border-radius:18px; background:var(--card); border:1px solid var(--line);
+    box-shadow:var(--sh-sm); color:var(--ink); font-size:21px; line-height:1.22; font-weight:750;
+    letter-spacing:-.012em}
+  .option .key{color:color-mix(in srgb,var(--c) 70%,#fff); font-weight:850}
+  .option:nth-child(1){--c:var(--azure); --bgc:var(--azureBg)}
+  .option:nth-child(2){--c:var(--violet); --bgc:var(--violetBg)}
+  .option:nth-child(3){--c:var(--green); --bgc:var(--greenBg)}
+  .option:nth-child(4){--c:var(--amber); --bgc:var(--amberBg)}
+  .option:nth-child(5){--c:var(--rose); --bgc:var(--roseBg)}
+  .option:nth-child(6){--c:var(--azure); --bgc:var(--azureBg)}
+  .option:nth-child(7){--c:var(--violet); --bgc:var(--violetBg)}
+  .box{width:28px; height:28px; flex:0 0 auto; border-radius:8px; border:2px solid color-mix(in srgb,var(--c) 58%,#fff);
+    background:var(--bgc); display:flex; align-items:center; justify-content:center;
+    box-shadow:inset 0 0 0 4px #fff}
+  .option.wide{grid-column:1 / -1}
+
+  .footer-note{position:relative; margin-top:18px; display:flex; align-items:center; justify-content:space-between;
+    gap:20px; color:var(--muted); font-size:15px; font-weight:650}
+  .footer-note .chip{display:inline-flex; align-items:center; gap:9px; padding:10px 14px; border-radius:999px;
+    background:var(--card); border:1px solid var(--line); box-shadow:var(--sh-sm); color:var(--ink)}
+  .footer-note .chip i{width:9px; height:9px; border-radius:50%; background:linear-gradient(90deg,var(--azure),var(--violet))}
+
+  .chrome{position:fixed; left:0; right:0; bottom:0; z-index:20;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:20px 30px; font-size:14px; color:var(--faint)}
+  .chrome .brand{font-weight:700; color:var(--muted)}
+  .chrome .brand span{color:var(--faint); font-weight:500}
+  .chrome .count{color:var(--muted); font-variant-numeric:tabular-nums; letter-spacing:.08em}
+
+  @media print{
+    @page{size:1280px 720px; margin:0}
+    body{overflow:visible; background:var(--bg)}
+    .chrome{display:none!important}
+    .stage{position:static}
+    .deck{position:static; transform:none!important; width:1280px; height:auto}
+    .slide{position:relative; inset:auto; width:1280px; height:720px; page-break-after:always; break-after:page}
+    [data-anim]{opacity:1!important; transform:none!important; animation:none!important}
+  }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="deck" id="deck">
+      <section class="slide">
+        <div class="eyebrow" data-anim style="--d:0"><span class="dot"></span><b>회계사를 위한 AI</b><span class="en">· FOLLOW-UP SURVEY</span></div>
+        <h1 class="title" data-anim style="--d:1">후속 과정으로 관심 있는 주제를 <span class="mark">모두 선택해주세요</span></h1>
+        <p class="sub" data-anim style="--d:2">수요가 많은 과정부터 먼저 오픈하고, <b>선택하신 주제 기준</b>으로 우선 안내드립니다.</p>
+
+        <div class="survey-panel" data-anim style="--d:3">
+          <div class="options">
+            <div class="option"><span class="box" aria-hidden="true"></span><span><span class="key">원천세 EDI</span> 브라우저 자동화 워크샵</span></div>
+            <div class="option"><span class="box" aria-hidden="true"></span><span><span class="key">감사 절차 툴</span> 바이브 코딩</span></div>
+            <div class="option"><span class="box" aria-hidden="true"></span><span><span class="key">Valuation 툴</span> 바이브 코딩</span></div>
+            <div class="option"><span class="box" aria-hidden="true"></span><span><span class="key">헤르메스 에이전트</span> 활용 및 구축</span></div>
+            <div class="option"><span class="box" aria-hidden="true"></span><span>Claude Code 및 <span class="key">바이브코딩</span> 기초</span></div>
+            <div class="option"><span class="box" aria-hidden="true"></span><span>우리 회사/팀 맞춤 <span class="key">커스터마이징 워크샵 및 컨설팅</span></span></div>
+            <div class="option wide"><span class="box" aria-hidden="true"></span><span>가벼운 <span class="key">커피챗</span>을 하고 싶어요</span></div>
+          </div>
+        </div>
+
+        <div class="footer-note" data-anim style="--d:4">
+          <span class="chip"><i></i>중복 선택 가능</span>
+          <span>답변은 후속 과정 오픈 순서와 우선 안내 기준으로만 사용됩니다.</span>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div class="chrome">
+    <div class="brand">회계사를 위한 AI <span>· Follow-up Survey</span></div>
+    <div class="count">01 / 01</div>
+  </div>
+
+<script>
+  const deck=document.getElementById('deck');
+  function fit(){
+    const s=Math.min(innerWidth/1280, innerHeight/720);
+    deck.style.transform=`translate(-50%,-50%) scale(${s})`;
+  }
+  addEventListener('resize',fit);
+  fit();
+</script>
+</body>
+</html>
