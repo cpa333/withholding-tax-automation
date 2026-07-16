@@ -431,6 +431,24 @@ python gui_main.py
 python main.py
 ```
 
+### 환경설정 / 환경변수
+
+**느린 네트워크 모드 (권장 — 프로그램 내 설정)**: 메뉴바 **설정 → 느린 네트워크 모드** 체크박스.
+- 동일 **설치파일 하나**로 모든 법인에 배포 — 느린 WiFi/회선 법인은 사용자가 직접 체크박스 ON.
+- WEHAGO 자동화의 네트워크 대기·타임아웃을 약 2.5배 연장(`NET_DELAY_MULT=2.5`). 기본 OFF(1.0×)라 **다른 법인엔 영향 없음**.
+- `APP_DATA_DIR/app_settings.json`에 저장(`src/utils/settings_store.py`) → 재실행해도 유지. `human.set_slow_network()`로 **런타임 즉시 적용(재시작 불필요)**.
+
+| 변수 | 용도 |
+|------|------|
+| `WTAX_SLOW_NETWORK=1` | **백업용**(CLI/headless 전용). GUI 없이 실행 시에만 사용 — 본래는 위 '설정 → 느린 네트워크 모드' 체크박스로 제어. 앱 실행 시 GUI 저장값이 이 env 초기값을 override. |
+| `WTAX_NO_DELAY=1` | 디버그 전용 — `human_delay`/`human_break`(anti-detect 인위 지연)만 0화. **라이브 배치 금지**. 폴링 interval/타임아웃/WEHAGO 고정 대기엔 무영향. |
+| `WTAX_CDP_PORT` | Chrome CDP 포트 (기본 9223). 병렬 EDI 런처가 9224/9225 사용. |
+| `WTAX_DEBUG_SWTA` | SWTA 신고주기 라디오 DOM 진단 덤프(`swta_radio_debug.txt`). |
+
+### UI 테마 (다크 모드 대응)
+
+`gui_main.py`의 `_apply_light_palette()`가 QApplication에 **라이트 팔레트를 강제** 적용한다. `app.setStyle("Fusion")`만 쓰고 팔레트를 안 넣으면, Windows 다크 모드에서 Fusion이 다크 팔레트를 상속해 QMessageBox·다이얼로그·메뉴바·콤보박스 팝업이 "검정 바탕 + 검정 글자"로 안 보인다. `style.qss`의 라이트 룰(QMenuBar/QMenu/QDialog/QMessageBox/QComboBox/QToolTip)과 이중 방어. 새 다이얼로그/위젯은 시스템 팔레트에 의존하지 말 것(자동 커버됨). 로그 패널 다크 콘솔(#1e1e1e/#d4d4d4)은 의도적.
+
 ### EXE 빌드 + 인스톨러
 
 ```bash

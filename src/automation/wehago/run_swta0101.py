@@ -34,6 +34,7 @@ from src.automation.wehago._common import (
     log, dismiss_dialogs, goto_menu_page, get_report_period_type,
     set_period_fields, compute_target_period, click_menu,
 )
+from src.utils.human import net_mult
 
 
 def compute_half_period(now: datetime) -> tuple[int, int, int]:
@@ -91,7 +92,7 @@ async def _click_dialog_confirm(page, max_polls: int = 5, interval: float = 0.5)
     클릭에 성공하면 해당 버튼 텍스트를, 아무것도 클릭하지 못하면 None 을 반환.
     """
     for _ in range(max_polls):
-        await asyncio.sleep(interval)
+        await asyncio.sleep(net_mult(interval))
         clicked = await page.evaluate("""() => {
             const dialogs = document.querySelectorAll('._isDialog, .LUX_basic_dialog');
             for (const d of dialogs) {
@@ -130,7 +131,7 @@ async def _click_search_and_dismiss(page) -> None:
         }
         return false;
     }""")
-    await asyncio.sleep(5)
+    await asyncio.sleep(net_mult(5.0))
     # 조회 직후 정보성 모달(저장된 내용 / 이전에 신고한 신고서 등) 공통 1차 닫기.
     await dismiss_dialogs(page)
 
@@ -156,7 +157,7 @@ async def _click_search_and_dismiss(page) -> None:
         }""")
         if loaded:
             log("  정보성 모달(저장된 내용/이전 신고서 등) → 확인")
-            await asyncio.sleep(2)
+            await asyncio.sleep(net_mult(2.0))
         else:
             break
 
@@ -212,7 +213,7 @@ async def _wait_close_button(page, rounds: int = 8, interval: float = 0.5) -> st
         if btn_text:
             return btn_text
         await dismiss_dialogs(page)
-        await asyncio.sleep(interval)
+        await asyncio.sleep(net_mult(interval))
     return None
 
 
@@ -235,13 +236,13 @@ async def run_swta0101(page, year: int = None, month: int = None,
     # [0] SPA 라우팅 초기화: SWSA0101 사이드바 클릭
     log("[SWTA0101] 급여자료입력(SWSA0101) 사이드바 클릭 (SPA 라우팅 초기화)...")
     await click_menu(page, "SWSA0101")
-    await asyncio.sleep(3)
+    await asyncio.sleep(net_mult(3.0))
     await dismiss_dialogs(page)
 
     # [1] SWTA0101 이동
     log("[SWTA0101] 원천징수이행상황신고서 이동...")
     await goto_menu_page(page, "SWTA0101")
-    await asyncio.sleep(3)
+    await asyncio.sleep(net_mult(3.0))
     await dismiss_dialogs(page)
 
     # [2] 신고주기 결정: DB report_cycle 우선. 비어있으면 위하고 라디오(ground truth).

@@ -15,6 +15,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from src.utils.chrome_cdp import CDP_URL
 from src.utils.log import log
 from src.config import WEHAGO_URL, WEHAGO_TAXAGENT_URL
+from src.utils.human import net_mult
 
 
 async def _safe_evaluate(page, expression, *args, timeout=10):
@@ -381,8 +382,8 @@ async def goto_menu_page(page, menu_id):
         log(f"  URL 교체 실패: {menu_id}")
         return False
     log(f"  메뉴 이동: {menu_id}")
-    await page.goto(new_url, wait_until="domcontentloaded", timeout=30000)
-    await asyncio.sleep(2)
+    await page.goto(new_url, wait_until="domcontentloaded", timeout=int(net_mult(30000)))
+    await asyncio.sleep(net_mult(2.0))
     log(f"  이동 완료: {await page.title()}")
     return True
 
@@ -393,7 +394,7 @@ async def click_menu(page, menu_id):
         const link = document.querySelector('a#' + menuId + '.text_link');
         if (link) link.click();
     }""", menu_id)
-    await asyncio.sleep(3)
+    await asyncio.sleep(net_mult(3.0))
     log(f"  메뉴 이동 완료: {await page.title()}")
 
 
@@ -404,8 +405,9 @@ async def wait_for_login(page):
     이후 15초 간격으로 DOM 확인 + 45초마다 새로고침.
     총 최대 15분 대기.
     """
-    await page.goto(WEHAGO_URL + "#/main", wait_until="domcontentloaded")
-    await asyncio.sleep(3)
+    await page.goto(WEHAGO_URL + "#/main", wait_until="domcontentloaded",
+                    timeout=int(net_mult(30000)))
+    await asyncio.sleep(net_mult(3.0))
 
     if await page.locator("#company_").count() > 0 or await page.locator("text=나의 수임처").count() > 0:
         log("이미 로그인되어 있습니다.")
@@ -584,7 +586,7 @@ async def goto_client_management(page):
         return False
 
     log(f"  '수임처관리' 클릭 성공 ({clicked}) → 로딩 대기...")
-    await asyncio.sleep(3)
+    await asyncio.sleep(net_mult(3.0))
 
     # 이동 후 확인
     after_info = await page.evaluate("""() => ({
@@ -656,7 +658,7 @@ async def search_clients_by_name(page, name: str):
     try:
         await page.wait_for_selector(
             'xpath=//*[@id="mainCard"]/div[2]/div/div[1]/div/span/input',
-            timeout=10000,
+            timeout=int(net_mult(10000)),
         )
         log("  검색 입력란 로딩 확인")
     except Exception:
@@ -697,7 +699,7 @@ async def search_clients_by_name(page, name: str):
         log("  조회 버튼 클릭 건너뜀 — Enter 검색 결과로 진행")
 
     # 결과 로딩 대기
-    await asyncio.sleep(1)
+    await asyncio.sleep(net_mult(1.0))
 
 
 async def get_clients_with_biz_from_taxagent(page):
@@ -865,10 +867,10 @@ async def goto_salary_page(page, company_name):
         return False
 
     log(f"  SmartA 급여 URL: {url}")
-    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    await page.goto(url, wait_until="domcontentloaded", timeout=int(net_mult(30000)))
 
     for i in range(15):
-        await asyncio.sleep(2)
+        await asyncio.sleep(net_mult(2.0))
         if await page.locator("a.text_link").count() > 0:
             break
     else:
@@ -1168,13 +1170,15 @@ async def get_report_period_type(page, settle_seconds: float = 5.0,
     """
     # 1) 라디오 렌더 대기 (미로드 시 None)
     try:
-        await page.wait_for_selector('input.LSinput[type=radio]', timeout=10000)
+        await page.wait_for_selector('input.LSinput[type=radio]', timeout=int(net_mult(10000)))
     except Exception:
         log("    [신고주기] 라디오 미발견(페이지 미로드) → 판별 불가")
         return None
 
     # 2) 정착 창 동안 폴링: '반기'가 관측되면 즉시 확정
-    rounds = max(1, int(round(settle_seconds / max(interval, 0.05))))
+    # 느린 네트워크에서 반기 라디오가 늦게 로드되면 매월로 오판하는 회귀 방지:
+    # 정착 창(settle_seconds)을 NET_DELAY_MULT 배로 연장.
+    rounds = max(1, int(round(net_mult(settle_seconds) / max(interval, 0.05))))
     last = None
     for i in range(rounds):
         st = await _read_period_radio_state(page)
@@ -1419,9 +1423,9 @@ async def ensure_wehago_main(page):
         await page.goto(
             WEHAGO_URL + "#/main",
             wait_until="domcontentloaded",
-            timeout=30000,
+            timeout=int(net_mult(30000)),
         )
-        await asyncio.sleep(3)
+        await asyncio.sleep(net_mult(3.0))
         await ensure_full_tab(page)
         await dismiss_dialogs(page)
         await dismiss_ai_briefing_popup(page)
@@ -1429,7 +1433,7 @@ async def ensure_wehago_main(page):
         # SmartA(원천징수이행상황신고서 등)에서 메인으로 복귀 시 카드 로드가 지연되면
         # 이후 검색/진입이 빈 결과로 실패하므로 카드가 나타날 때까지 기다린다.
         try:
-            await page.wait_for_selector('[id^="company_"]', timeout=15000)
+            await page.wait_for_selector('[id^="company_"]', timeout=int(net_mult(15000)))
         except Exception:
             log("  WARNING: 메인 수임처 카드가 로드되지 않음 (이후 진입 실패 가능)")
 
@@ -1458,10 +1462,10 @@ async def search_company_by_biz(page, biz_number: str) -> str | None:
         # 않고 항상 첫 카드만 반환하는 버그가 있었다. 실사 확인: keyboard.type + Enter 만이
         # 메인 카드를 해당 사업자번호로 필터링한다 (가상스크롤 20개 밖 수임처도 노출).
         await page.keyboard.type(biz_number, delay=50)
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(net_mult(0.5))
         await page.keyboard.press("Enter")
         log("  사업자번호 입력 + Enter 검색")
-        await asyncio.sleep(3)
+        await asyncio.sleep(net_mult(3.0))
     except Exception as e:
         log(f"  검색 입력 실패: {e}")
         return None
@@ -1532,10 +1536,10 @@ async def navigate_to_swsa0101(page, year: int = None, month: int = None) -> boo
     current_url = page.url
     if "SWSA0101" not in current_url:
         await click_menu(page, "SWSA0101")
-        await asyncio.sleep(3)
+        await asyncio.sleep(net_mult(3.0))
         if "SWSA0101" not in page.url:
             await goto_menu_page(page, "SWSA0101")
-            await asyncio.sleep(3)
+            await asyncio.sleep(net_mult(3.0))
     await dismiss_dialogs(page)
 
     # 간이세액 개정 안내 모달 닫기

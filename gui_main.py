@@ -51,6 +51,36 @@ def _create_single_instance_mutex():
         pass
 
 
+def _apply_light_palette(app):
+    """Windows 다크 모드에서 Fusion 기본 팔레트가 다크가 되어 QMessageBox/
+    QDialog/QComboBox 팝업/QToolTip 등이 '검정 바탕 + 검정 글자'로 안 보이는
+    것을 방지. 명시적 라이트 팔레트를 강제 적용한다 (style.qss 라이트 테마와 일치).
+    메뉴바처럼 위젯별로 고치는 게 아니라 근본(palette)에서 해결."""
+    from PySide6.QtGui import QPalette, QColor
+    LIGHT_BG = QColor("#ffffff")
+    LIGHT_BTN = QColor("#f5f5f5")
+    DARK_TEXT = QColor("#1a1a1a")
+    GRAY_TEXT = QColor("#999999")
+    p = QPalette()
+    p.setColor(QPalette.Window, LIGHT_BG)
+    p.setColor(QPalette.WindowText, DARK_TEXT)
+    p.setColor(QPalette.Base, LIGHT_BG)
+    p.setColor(QPalette.AlternateBase, QColor("#fafafa"))
+    p.setColor(QPalette.Text, DARK_TEXT)
+    p.setColor(QPalette.Button, LIGHT_BTN)
+    p.setColor(QPalette.ButtonText, DARK_TEXT)
+    p.setColor(QPalette.ToolTipBase, QColor("#1e1e1e"))
+    p.setColor(QPalette.ToolTipText, QColor("#ffffff"))
+    p.setColor(QPalette.Highlight, QColor("#d0e4f7"))
+    p.setColor(QPalette.HighlightedText, DARK_TEXT)
+    p.setColor(QPalette.PlaceholderText, GRAY_TEXT)
+    # 비활성(disabled) 텍스트도 다크 잔재가 없도록 회색 통일
+    p.setColor(QPalette.Disabled, QPalette.WindowText, GRAY_TEXT)
+    p.setColor(QPalette.Disabled, QPalette.Text, GRAY_TEXT)
+    p.setColor(QPalette.Disabled, QPalette.ButtonText, GRAY_TEXT)
+    app.setPalette(p)
+
+
 def _dispatch_cli_subprocess() -> bool:
     """병렬 자동화 subprocess 디스패치 (--wtax-cli).
 
@@ -124,6 +154,7 @@ def main():
     app.setApplicationName("원천징수 자동화")
     app.setApplicationVersion(__version__)
     app.setStyle("Fusion")
+    _apply_light_palette(app)  # 다크 모드 대비 — 라이트 팔레트 강제
 
     # 스타일시트 로드
     qss_path = resource_path(os.path.join("src", "ui", "resources", "style.qss"))

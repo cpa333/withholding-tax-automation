@@ -90,6 +90,11 @@ class MainWindow(QMainWindow):
         # 도움말 메뉴 (업데이트 확인 / 정보)
         self._create_help_menu()
 
+        # 설정: 느린 네트워크 모드 — 저장된 값 적용 + 설정 메뉴 구성
+        self._slow_network_on = False
+        self._apply_slow_network_setting()
+        self._create_settings_menu()
+
         # 시작 직후 자동 업데이트 확인 (무알림; dev 모드/스로틀 시 조기 반환)
         QTimer.singleShot(2500, self._auto_check_for_update)
 
@@ -864,6 +869,48 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         act_about = menu.addAction("정보")
         act_about.triggered.connect(self._show_about)
+
+    def _apply_slow_network_setting(self):
+        """시작 시 저장된 느린 네트워크 설정을 human 모듈에 반영 (런타임 즉시 적용).
+
+        WTAX_SLOW_NETWORK env(초기값)를 GUI 저장값으로 override.
+        로드 실패해도 앱 시작은 계속되도록 예외 무시.
+        """
+        try:
+            from src.utils import settings_store
+            from src.utils.human import set_slow_network
+            self._slow_network_on = settings_store.get_slow_network()
+            set_slow_network(self._slow_network_on)
+        except Exception:
+            self._slow_network_on = False
+
+    def _create_settings_menu(self):
+        """상단 '설정' 메뉴: 느린 네트워크 모드 (체크박스, 즉시 적용).
+
+        동일 설치파일로 모든 법인에 배포 — 느린 WiFi 법인은 사용자가 이 옵션을 켠다.
+        WEHAGO 자동화 대기/타임아웃만 약 2.5배 연장, 다른 항목엔 영향 없음.
+        """
+        menu = self.menuBar().addMenu("설정")
+        act = menu.addAction("느린 네트워크 모드 (WEHAGO 대기/타임아웃 연장)")
+        act.setCheckable(True)
+        act.setChecked(self._slow_network_on)
+        act.setToolTip(
+            "Wi-Fi/회선이 느린 환경에서 WEHAGO 자동화의 대기·타임아웃을 약 2.5배 연장합니다.\n"
+            "즉시 적용됩니다. 공단EDI/홈택스 등 다른 항목에는 영향이 없습니다."
+        )
+        act.toggled.connect(self._on_toggle_slow_network)
+
+    def _on_toggle_slow_network(self, checked: bool):
+        from src.utils import settings_store
+        from src.utils.human import set_slow_network
+        set_slow_network(bool(checked))
+        settings_store.set_slow_network_flag(bool(checked))
+        self._slow_network_on = bool(checked)
+        if checked:
+            msg = "느린 네트워크 모드 ON — WEHAGO 대기/타임아웃 약 2.5배 연장 (즉시 적용)"
+        else:
+            msg = "느린 네트워크 모드 OFF — WEHAGO 기본 속도 (즉시 적용)"
+        self.statusBar().showMessage(msg, 6000)
 
     def _show_about(self):
         QMessageBox.information(

@@ -52,6 +52,9 @@ auth_session.json
 auth_session*.json
 *_session.json
 
+# 사용자 환경설정 (런타임 로컬 상태 — 느린네트워크 토글 등. dev에선 repo 루트에 생성)
+app_settings.json
+
 # Screenshots / debug captures
 *.png
 !lecture/assets/instructor_*.png

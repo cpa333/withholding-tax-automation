@@ -18,6 +18,7 @@ from src.automation.wehago._swsa_constants import (
     SAVE_DIALOG_CLASS,
     DEFAULT_PRINT_FORMAT,
 )
+from src.utils.human import net_mult
 
 if sys.platform == "win32":
     from pywinauto import Desktop as WinDesktop
@@ -43,7 +44,7 @@ async def open_print_dialog(page):
 
     log("[PDF] PrintDialog 대기...")
     for i in range(15):
-        await asyncio.sleep(2)
+        await asyncio.sleep(net_mult(2.0))
         if _print_dialog_exists():
             log("  PrintDialog 열림 확인")
             return True
@@ -122,7 +123,7 @@ def _select_print_format(target_text):
         if name == target_text:
             item.click_input()
             log(f"  인쇄형태 선택: {name}")
-            time.sleep(2)
+            time.sleep(net_mult(2.0))
             return True
     # 부분 일치 차선
     for item in items:
@@ -130,7 +131,7 @@ def _select_print_format(target_text):
         if target_text in name:
             item.click_input()
             log(f"  인쇄형태 선택: {name}")
-            time.sleep(2)
+            time.sleep(net_mult(2.0))
             return True
 
     log(f"  인쇄형태 '{target_text}' 항목을 찾지 못함")
@@ -143,7 +144,7 @@ def _click_save_pdf():
     btn = dlg.child_window(auto_id='btnSavePDF', control_type='Button')
     btn.click_input()
     log("  PDF 저장 버튼 클릭")
-    time.sleep(3)
+    time.sleep(net_mult(3.0))
 
 
 def _handle_save_dialog(save_path):
@@ -157,7 +158,7 @@ def _handle_save_dialog(save_path):
 
     save_btn = dlg.child_window(title='저장(&S)', class_name='Button')
     save_btn.click_input()
-    time.sleep(3)
+    time.sleep(net_mult(3.0))
 
     if os.path.exists(save_path) and os.path.getsize(save_path) > 0:
         log(f"  PDF 저장 완료: {save_path} ({os.path.getsize(save_path):,} bytes)")

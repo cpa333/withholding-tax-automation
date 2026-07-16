@@ -22,6 +22,7 @@ from src.automation.wehago._common import (
     click_menu,
 )
 from src.automation.wehago._nts import select_nts_folder
+from src.utils.human import net_mult
 
 
 async def set_password_and_submit(page, password):
@@ -89,7 +90,7 @@ async def set_password_and_submit(page, password):
                 }
             }
         }""")
-        await asyncio.sleep(3)
+        await asyncio.sleep(net_mult(3.0))
 
         # 비밀번호 규칙 경고
         pwd_warning = await page.evaluate("""() => {
@@ -153,13 +154,13 @@ async def run_swer0101(page, password, nts_folder="원천징수전자신고",
     # [0] SPA 라우팅 초기화: SWSA0101 사이드바 클릭
     log("[SWER0101] 급여자료입력(SWSA0101) 사이드바 클릭 (SPA 라우팅 초기화)...")
     await click_menu(page, "SWSA0101")
-    await asyncio.sleep(3)
+    await asyncio.sleep(net_mult(3.0))
     await dismiss_dialogs(page)
 
     # [1] SWER0101 이동 (URL 해시 교체)
     log("[SWER0101] 원천징수전자신고 이동...")
     await goto_menu_page(page, "SWER0101")
-    await asyncio.sleep(3)
+    await asyncio.sleep(net_mult(3.0))
 
     # 모달 닫기 (제출자등록 안내 등)
     log("[SWER0101] 모달 확인...")
@@ -213,10 +214,10 @@ async def run_swer0101(page, password, nts_folder="원천징수전자신고",
             }
         }
     }""")
-    await asyncio.sleep(2)
+    await asyncio.sleep(net_mult(2.0))
     confirmed = await click_codehelp_confirm(page)
     log(f"  코드도움: {confirmed}")
-    await asyncio.sleep(2)
+    await asyncio.sleep(net_mult(2.0))
 
     # [4] 제작(F4) 버튼 클릭 — Playwright real click (JS click skips disabled buttons)
     log("[SWER0101] 제작(F4) 클릭...")
@@ -244,8 +245,9 @@ async def run_swer0101(page, password, nts_folder="원천징수전자신고",
     # [5] 모달 대기: 참고사항 vs 비밀번호
     log("[SWER0101] 모달 대기...")
     modal_found = False
-    for i in range(20):
-        await asyncio.sleep(1)
+    _f4_polls = 20
+    for i in range(_f4_polls):
+        await asyncio.sleep(net_mult(1.0))
         found = await page.evaluate("""() => {
             const dialogs = document.querySelectorAll('._isDialog');
             for (const d of dialogs) {
@@ -266,12 +268,19 @@ async def run_swer0101(page, password, nts_folder="원천징수전자신고",
                 await dismiss_dialogs(page)
 
     if not modal_found:
-        log("  ERROR: No modal detected!")
-        return
+        # 느린 네트워크에서 F4 후 모달이 늦게 떠 폴링 예산을 초과한 경우,
+        # 조용히 return 하면 어댑터가 성공으로 오인(잘못된 전자신고 파일 누락)하므로
+        # loud 실패로 처리한다(wehago_swer.py try/except → fail_step).
+        raise RuntimeError(
+            "[SWER0101] 제작(F4) 후 변환파일 비밀번호/참고사항 모달이 "
+            f"{_f4_polls}회 폴링 내 미출현 — 네트워크 지연 또는 F4 처리 실패 의심. "
+            "잡을 실패로 처리합니다."
+        )
 
     # 비밀번호 모달 ready 대기
-    for i in range(15):
-        await asyncio.sleep(1)
+    _pwd_polls = 15
+    for i in range(_pwd_polls):
+        await asyncio.sleep(net_mult(1.0))
         if await page.evaluate("""() => {
             const dialogs = document.querySelectorAll('._isDialog');
             for (const d of dialogs) {
@@ -283,17 +292,24 @@ async def run_swer0101(page, password, nts_folder="원천징수전자신고",
             log(f"  [{i+1}s] 비밀번호 modal ready")
             break
     else:
-        log("  ERROR: 비밀번호 modal not found!")
-        return
+        # 모달 ready 미달 시 loud 실패(조용한 성공 처리 방지).
+        raise RuntimeError(
+            "[SWER0101] 변환파일 비밀번호 모달이 ready 상태에 도달하지 않음 "
+            f"({_pwd_polls}회 폴링 초과) — 네트워크 지연 의심. 잡을 실패로 처리합니다."
+        )
 
-    await asyncio.sleep(2)
+    await asyncio.sleep(net_mult(2.0))
 
     # [6] 비밀번호 입력 + 전자신고 파일 제작
     log("[SWER0101] 비밀번호 입력 + 전자신고 파일 제작...")
     success = await set_password_and_submit(page, password)
     if not success:
-        log("\nFAILED: 비밀번호 제출 실패")
-        return
+        # 비밀번호 제출 실패(규칙 미충족/처리 실패)도 loud 실패로 처리 —
+        # 조용히 return 시 어댑터가 성공으로 오인(전자신고 파일 미산출 누락).
+        raise RuntimeError(
+            "[SWER0101] 변환파일 비밀번호 제출 실패(3회 재시도 후 실패) — "
+            "비밀번호 규칙 미충족 또는 처리 실패. 잡을 실패로 처리합니다."
+        )
 
     # [7] WehagoNTS 폴더 선택 + 파일 저장
     log("[SWER0101] WehagoNTS 폴더 선택...")
