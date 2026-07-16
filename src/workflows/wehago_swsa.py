@@ -7,9 +7,10 @@ PDF 발급은 Phase 5(WEHAGO 급여명세 PDF)에서 별도 실행.
   0. WEHAGO 메인 복귀
   1. 수임처 급여 페이지 진입
   2. SWSA0101 메뉴 이동 + 드롭다운 설정
-  3. 엑셀 다운로드
-  4. 업로드 양식 변환 (raw data 병합 포함)
-  5. 엑셀 업로드
+  3. 사원 전체 재계산 (고용보험 재계산) — 엑셀 다운로드 직전
+  4. 엑셀 다운로드
+  5. 업로드 양식 변환 (raw data 병합 포함)
+  6. 엑셀 업로드
 """
 import asyncio
 import os
@@ -32,9 +33,10 @@ class WehagoSwsaWorkflow(BaseWorkflow):
         {"name": "navigate_to_wehago_main", "index": 0},
         {"name": "goto_salary_page",        "index": 1},
         {"name": "navigate_to_swsa0101",    "index": 2},
-        {"name": "download_excel",          "index": 3},
-        {"name": "convert_excel",           "index": 4},
-        {"name": "upload_excel",            "index": 5},
+        {"name": "recalculate",             "index": 3},
+        {"name": "download_excel",          "index": 4},
+        {"name": "convert_excel",           "index": 5},
+        {"name": "upload_excel",            "index": 6},
     ]
 
     async def run_single(
@@ -46,7 +48,7 @@ class WehagoSwsaWorkflow(BaseWorkflow):
             navigate_to_swsa0101, log,
         )
         from src.automation.wehago.run_swsa0101 import (
-            download_excel, convert_for_upload, upload_excel,
+            download_excel, convert_for_upload, upload_excel, recalculate_salary,
         )
 
         year = kwargs.get("year")
@@ -87,9 +89,18 @@ class WehagoSwsaWorkflow(BaseWorkflow):
                 return False
             state.after_step(job_id, "navigate_to_swsa0101")
 
-        # ── Step 3: 엑셀 다운로드 ─────────────────────────────────────
+        # ── Step 3: 사원 재계산 (다운로드 직전) — 해상도 무관, 라이브 검증
+        recalc_category = kwargs.get("recalculate_category", "고용보험 재계산")
+        if kwargs.get("recalculate", True) and not state.should_skip_step(job_id, "recalculate"):
+            state.before_step(job_id, "recalculate", 3)
+            ok_recalc = await recalculate_salary(page, category=recalc_category)
+            if not ok_recalc:
+                log(f"  ⚠ 재계산 실패 — 엑셀 다운로드로 계속 진행")
+            state.after_step(job_id, "recalculate")
+
+        # ── Step 4: 엑셀 다운로드 ─────────────────────────────────────
         if not state.should_skip_step(job_id, "download_excel"):
-            state.before_step(job_id, "download_excel", 3)
+            state.before_step(job_id, "download_excel", 4)
             download_path = await download_excel(page, save_dir)
             state.after_step(job_id, "download_excel", {"path": download_path})
         else:
@@ -100,9 +111,9 @@ class WehagoSwsaWorkflow(BaseWorkflow):
             state.fail_step(job_id, "download_excel", "다운로드 파일 없음")
             return False
 
-        # ── Step 4: 업로드 양식 변환 (raw data 병합 포함) ───────────────
+        # ── Step 5: 업로드 양식 변환 (raw data 병합 포함) ───────────────
         if not state.should_skip_step(job_id, "convert_excel"):
-            state.before_step(job_id, "convert_excel", 4)
+            state.before_step(job_id, "convert_excel", 5)
 
             # Phase 2/3/5 raw data 파일 탐색 및 파싱
             nhis_data = None
@@ -170,9 +181,9 @@ class WehagoSwsaWorkflow(BaseWorkflow):
             state.fail_step(job_id, "convert_excel", "변환 파일 없음")
             return False
 
-        # ── Step 5: 엑셀 업로드 ───────────────────────────────────────
+        # ── Step 6: 엑셀 업로드 ───────────────────────────────────────
         if not state.should_skip_step(job_id, "upload_excel"):
-            state.before_step(job_id, "upload_excel", 5)
+            state.before_step(job_id, "upload_excel", 6)
             success = await upload_excel(page, upload_path, dry_run=dry_run)
             if not success:
                 state.fail_step(job_id, "upload_excel", "업로드 실패")

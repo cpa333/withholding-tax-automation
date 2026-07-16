@@ -27,7 +27,7 @@ from src.automation.wehago._swsa_constants import (
     _READ_SWSA_YM_JS, _READ_CALENDAR_YEAR_JS, _REACT_SET_CALENDAR_YEAR_JS,
 )
 from src.automation.wehago._swsa_excel import (
-    download_excel, convert_for_upload, upload_excel,
+    download_excel, convert_for_upload, upload_excel, recalculate_salary,
     _handle_code_link_modal, _handle_jegasan_modal,
 )
 from src.automation.wehago._swsa_calendar import set_swsa_ym
@@ -38,8 +38,11 @@ from src.automation.wehago._swsa_pdf import download_pdf
 # 메인 플로우
 # ═══════════════════════════════════════════════════════════════════════
 
-async def run_swsa0101(page, save_dir, *, dry_run=True, year=None, month=None):
+async def run_swsa0101(page, save_dir, *, dry_run=True, year=None, month=None,
+                      recalculate=True, recalculate_category="고용보험 재계산"):
     """급여자료입력 전체 자동화
+
+    흐름: 메뉴 이동 → (재계산) → 엑셀 다운로드 → 업로드 양식 변환 → 엑셀 업로드 → PDF.
 
     Args:
         page: SmartA 급여 페이지에 위치한 Playwright page
@@ -47,6 +50,8 @@ async def run_swsa0101(page, save_dir, *, dry_run=True, year=None, month=None):
         dry_run: True면 업로드 후 취소(테스트), False면 확인(실운영)
         year: 귀속연도 (None이면 이전 달 자동 계산)
         month: 귀속월 (None이면 이전 달 자동 계산)
+        recalculate: True면 엑셀 다운로드 직전 사원 전체 재계산 수행 (라이브 검증)
+        recalculate_category: 재계산 항목 (기본 '고용보험 재계산')
     """
     from src.automation.wehago._common import (
         navigate_to_swsa0101, compute_target_period,
@@ -62,6 +67,13 @@ async def run_swsa0101(page, save_dir, *, dry_run=True, year=None, month=None):
     if not ok:
         log("[SWSA0101] 이동/설정 실패")
         return
+
+    # [2] 사원 전체 재계산 (다운로드 직전) — 해상도 무관, 라이브 검증
+    if recalculate:
+        log(f"[SWSA0101] 사원 재계산 ({recalculate_category})...")
+        ok_recalc = await recalculate_salary(page, category=recalculate_category)
+        if not ok_recalc:
+            log("  ⚠ 재계산 실패 — 엑셀 다운로드로 계속 진행")
 
     # [4] 엑셀 다운로드
     log("[SWSA0101] 엑셀 다운로드...")

@@ -11,9 +11,124 @@ from src.automation.wehago._common import (
     log, dismiss_dialogs, click_menu,
     open_collect_menu, close_collect_menu, click_menu_item, _click_modal_text,
 )
+from src.utils.human import net_mult
 
 if sys.platform == "win32":
     import openpyxl
+
+
+async def recalculate_salary(page, *, category="고용보험 재계산"):
+    """급여자료입력 화면에서 사원 전체 재계산 (엑셀 다운로드 직전 실행).
+
+    WEHAGO SmartA SWSA0101 의 '재계산' 기능: 사원 전체 선택 → 재계산 버튼 →
+    지정 항목(기본 '고용보험 재계산') 체크 → 확인(2회: 항목→전체사원) → 결과 모달 닫기.
+    라이브 검증(2026-07-16, 리드플렉스).
+
+    ★ 해상도 무관 (다른 PC 모니터와 무관):
+      - 전체 선택은 RealGrid JS API (Grids.getActiveGrid().checkAll(true)) 사용 — 좌표 없음.
+        Left_grid 포커스는 Playwright locator('#Left_grid canvas') 클릭(요소 live geometry).
+      - LUX 버튼/체크박스/확인은 real mouse click(getBoundingClientRect 중심) — JS .click() 무반응.
+
+    Args:
+        category: 재계산 항목 텍스트. 해당 행의 체크를 on.
+    Returns:
+        bool: 재계산 시퀀스 완료 여부. 결과가 "재계산할 사원 없음"이어도 흐름 완료시 True.
+    """
+    import json as _json
+
+    async def _rclick(js):
+        box = await page.evaluate(js)
+        if box and box.get("x") is not None:
+            await page.mouse.click(box["x"], box["y"])
+            return True
+        return False
+
+    # 1) 사원 전체 선택 (해상도 무관)
+    log("[재계산] 사원 전체 선택...")
+    await page.evaluate(
+        r"() => { const g = window.Grids && window.Grids.getActiveGrid && window.Grids.getActiveGrid();"
+        r" if (g && g.checkAll) g.checkAll(false); }"
+    )
+    try:
+        await page.locator("#Left_grid canvas").first.click(timeout=net_mult(5000))
+    except Exception as e:
+        log(f"  ⚠ Left_grid 포커스 클릭 실패(무시): {e}")
+    await asyncio.sleep(0.5)
+    sel = await page.evaluate(
+        r"() => { const g = window.Grids && window.Grids.getActiveGrid && window.Grids.getActiveGrid();"
+        r" if (!g || !g.checkAll) return null; g.checkAll(true);"
+        r" return { total: g.getItemCount ? g.getItemCount() : -1,"
+        r"          checked: g.getCheckedRows ? g.getCheckedRows().length : -1 }; }"
+    )
+    log(f"  전체 선택: {sel}")
+
+    # 2) 재계산 버튼 (#saosnb 내 WSC_LUXButton "재계산")
+    log("[재계산] 재계산 버튼 클릭...")
+    ok = await _rclick(
+        r"() => { const root = document.getElementById('saosnb'); if (!root) return null;"
+        r" const btn = Array.from(root.querySelectorAll('button')).find(x => {"
+        r" const r = x.getBoundingClientRect(); return r.width > 0 && /재계산/.test(x.textContent || ''); });"
+        r" if (!btn) return null; const r = btn.getBoundingClientRect();"
+        r" return { x: r.x + r.width/2, y: r.y + r.height/2 }; }"
+    )
+    if not ok:
+        log("  ⚠ 재계산 버튼 없음 — 재계산 스킵")
+        return False
+    await asyncio.sleep(net_mult(3))
+
+    # 3) 재계산 항목 체크 (해당 행 real click)
+    cat_literal = _json.dumps(category)
+    log(f"[재계산] 항목 체크: {category}")
+    await _rclick(
+        r"() => { const label = " + cat_literal + r"; const root = document.getElementById('saosnb') || document;"
+        r" const cands = Array.from(root.querySelectorAll('tr, label, .LUXcomp_checkbox, li, td'));"
+        r" const target = cands.find(e => { const r = e.getBoundingClientRect();"
+        r" return r.width > 0 && r.height > 0 && (e.textContent || '').includes(label); });"
+        r" if (!target) return null;"
+        r" const cb = target.querySelector('.LUXcomp_checkbox, label, input[type=checkbox], [class*=heckbox]') || target;"
+        r" const r = cb.getBoundingClientRect(); return { x: r.x + r.width/2, y: r.y + r.height/2 }; }"
+    )
+    await asyncio.sleep(net_mult(1))
+
+    # 4) 1차 확인 (보이는 확인 버튼)
+    log("[재계산] 1차 확인...")
+    await _rclick(
+        r"() => { const root = document.getElementById('saosnb');"
+        r" const b = Array.from(root.querySelectorAll('button, input[type=button]')).find(el => {"
+        r" const r = el.getBoundingClientRect(); return r.width > 0 && (el.textContent || '').trim() === '확인'; });"
+        r" if (!b) return null; const r = b.getBoundingClientRect();"
+        r" return { x: r.x + r.width/2, y: r.y + r.height/2 }; }"
+    )
+    await asyncio.sleep(net_mult(3))
+
+    # 5) 2차(최종) 확인 — "전체사원의 자료를 재계산" 다이얼로그
+    log("[재계산] 최종 확인(전체사원 재계산)...")
+    await _rclick(
+        r"() => { const dlgs = Array.from(document.querySelectorAll('._isDialog, .WSC_LUXDraggableDialog'));"
+        r" const d = dlgs.find(x => /전체사원의 자료를 재계산/.test(x.textContent || ''));"
+        r" if (!d) return null; const b = Array.from(d.querySelectorAll('button, input[type=button]')).find(el => {"
+        r" const r = el.getBoundingClientRect(); return r.width > 0 && (el.textContent || '').trim() === '확인'; });"
+        r" if (!b) return null; const r = b.getBoundingClientRect();"
+        r" return { x: r.x + r.width/2, y: r.y + r.height/2 }; }"
+    )
+
+    # 6) 결과 모달 — #confirm 이 나타나면 닫기 (최대 15s 폴링)
+    log("[재계산] 결과 모달 대기/처리...")
+    dismissed = False
+    for _ in range(15):
+        cf = await page.evaluate(
+            r"() => { const b = document.getElementById('confirm'); if (!b) return null;"
+            r" const r = b.getBoundingClientRect(); if (r.width === 0) return null;"
+            r" return { x: r.x + r.width/2, y: r.y + r.height/2 }; }"
+        )
+        if cf:
+            await page.mouse.click(cf["x"], cf["y"])
+            dismissed = True
+            break
+        await asyncio.sleep(1)
+    await dismiss_dialogs(page)  # 잔여 모달 정리
+    log(f"  결과 모달 dismissed={dismissed}")
+    return True
 
 
 async def download_excel(page, save_dir="."):
@@ -34,7 +149,7 @@ async def download_excel(page, save_dir="."):
     log("[엑셀 다운로드] 엑셀 내려받기 클릭...")
     await click_menu_item(page, "엑셀 내려받기")
 
-    download = await asyncio.wait_for(download_future, timeout=15)
+    download = await asyncio.wait_for(download_future, timeout=net_mult(15))
     fname = download.suggested_filename
     save_path = os.path.join(save_dir, fname)
     await download.save_as(save_path)
@@ -318,7 +433,7 @@ async def upload_excel(page, file_path, dry_run=True):
     if item_rect:
         log(f"  항목 위치: ({round(item_rect['x'])}, {round(item_rect['y'])})")
         try:
-            async with page.expect_file_chooser(timeout=15000) as fc_info:
+            async with page.expect_file_chooser(timeout=int(net_mult(15000))) as fc_info:
                 await page.mouse.click(item_rect['x'], item_rect['y'])
             file_chooser = await fc_info.value
             log(f"  파일 선택: {file_path}")
@@ -331,7 +446,7 @@ async def upload_excel(page, file_path, dry_run=True):
     if not file_set:
         log("[엑셀 업로드] JS evaluate 클릭으로 재시도...")
         try:
-            async with page.expect_file_chooser(timeout=15000) as fc_info:
+            async with page.expect_file_chooser(timeout=int(net_mult(15000))) as fc_info:
                 await click_menu_item(page, "엑셀 불러오기")
             file_chooser = await fc_info.value
             log(f"  파일 선택: {file_path}")
@@ -344,7 +459,7 @@ async def upload_excel(page, file_path, dry_run=True):
     if not file_set:
         log("[엑셀 업로드] hidden file input 직접 설정...")
         await click_menu_item(page, "엑셀 불러오기")
-        await asyncio.sleep(2)
+        await asyncio.sleep(net_mult(2.0))
         fi_count = await page.evaluate(
             "() => document.querySelectorAll('input[type=\"file\"]').length"
         )
@@ -358,7 +473,7 @@ async def upload_excel(page, file_path, dry_run=True):
             log("  ERROR: file input을 찾지 못해 업로드 불가")
             return False
 
-    await asyncio.sleep(3)
+    await asyncio.sleep(net_mult(3.0))
 
     # 사원코드연결 모달 (파일 선택 직후 등장 가능)
     await _handle_code_link_modal(page)
@@ -400,11 +515,11 @@ async def upload_excel(page, file_path, dry_run=True):
             }
         }
     }""")
-    await asyncio.sleep(2)
+    await asyncio.sleep(net_mult(2.0))
 
     log("[엑셀 업로드] ② 제목설정 확인...")
     await _click_modal_text(page, "엑셀제목", "확인")
-    await asyncio.sleep(2)
+    await asyncio.sleep(net_mult(2.0))
 
     # 확인 버튼
     log("[엑셀 업로드] 확인 버튼 클릭...")
@@ -423,7 +538,7 @@ async def upload_excel(page, file_path, dry_run=True):
             }
         }
     }""")
-    await asyncio.sleep(5)
+    await asyncio.sleep(net_mult(5.0))
 
     # 후속 모달 1: 데이터 저장
     log("[엑셀 업로드] 후속 1/5 → #confirm 확인...")
@@ -431,7 +546,7 @@ async def upload_excel(page, file_path, dry_run=True):
         const btn = document.querySelector('#confirm');
         if (btn) btn.click();
     }""")
-    await asyncio.sleep(3)
+    await asyncio.sleep(net_mult(3.0))
 
     # 제개산 모달 (데이터 저장 후 등장 가능)
     await _handle_jegasan_modal(page)
@@ -439,7 +554,7 @@ async def upload_excel(page, file_path, dry_run=True):
     # 후속 모달 2: 연결되지 않은 사원
     log("[엑셀 업로드] 후속 2/5 → '연결되지 않은 사원' 확인...")
     await _click_modal_text(page, "연결되지 않은 사원", "확인")
-    await asyncio.sleep(3)
+    await asyncio.sleep(net_mult(3.0))
 
     # 제개산 모달 (사원 연결 처리 후 등장 가능)
     await _handle_jegasan_modal(page)
@@ -454,7 +569,7 @@ async def upload_excel(page, file_path, dry_run=True):
     action = "취소" if dry_run else "확인"
     log(f"[엑셀 업로드] 후속 3/5 → '삭제후 업로드' {action}...")
     await _click_modal_text(page, "삭제후 업로드", action)
-    await asyncio.sleep(3)
+    await asyncio.sleep(net_mult(3.0))
 
     # 후속 모달 4: 변환 취소/완료
     if dry_run:
@@ -469,7 +584,7 @@ async def upload_excel(page, file_path, dry_run=True):
             log("[엑셀 업로드] 후속 4/5 → 완료 모달 확인 처리")
         else:
             log("[엑셀 업로드] 후속 4/5 → 완료 모달 없음 (자동 처리됨)")
-    await asyncio.sleep(2)
+    await asyncio.sleep(net_mult(2.0))
 
     # 에러 감지
     has_error = await page.evaluate("""() => {
