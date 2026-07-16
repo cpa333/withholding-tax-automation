@@ -42,11 +42,28 @@
   - `sessionTimer("Y")`: 24분 팝업 타이머 + 30분 로그아웃 타이머 재시작
 - `trigger_session_popup_soon(page, seconds)`: 개발용, 세션 타이머 단축하여 연장 팝업 강제 트리거
 
+### [5] 전자파일 비밀번호 입력
+- `enter_password(ht, password)`: 파일검증 → "이미 검증..." 확인 직후 뜨는
+  WebSquare 팝업(`.w2popup_window` > `input[type=password]`, w2input)에 비밀번호 주입 + '확인'
+- id의 동적 부분(예: `UTERNAAZ65`)에 의존하지 않도록 **"표시 중 팝업 + password input"**으로 식별
+- native setter + input/change/keyup 이벤트로 값 주입 (MagicLine `input_cert_pw`는 미사용 잔재)
+- 확인 후 **팝업이 닫혔는지 검증**해 틀린 비밀번호를 실패로 판정
+- 비밀번호 = 9번(SWER0101) 파일 제작 시 설정한 전자파일(변환파일) 비밀번호
+
+### [6] 제출 (제출하러 가기 → 전자파일 제출하기 → 접수증)
+- `submit_report(ht, dry_run=True)` — 실제 관찰된 전체 흐름:
+  1. '제출하러 가기'(`btn_rigSts`) → 제출 화면
+  2. '전자파일 제출하기'(text 매칭) 클릭
+  3. 안내 모달 **"정상 변환된 신고서를 제출합니다"** → 확인
+  4. 확인 모달 **"신고서를 제출하시겠습니까?"** → 확인
+  5. **원천세 신고서 접수증** 팝업 → 총/정상/오류 건수 로그 + 닫기 → 성공 판정
+- **dry_run=True(GUI 기본): 제출 화면 진입까지만, 실제 제출 안 함**
+- 모달은 `dismiss_modals`(btn_confirm 무차별 클릭) 대신 **`_wait_and_click_popup`(text 정규식 + 버튼 text)**로 정확히 처리
+- 공동인증서 서명 단계 없음(로그인 세션으로 자동 처리). 실제 제출 흐름(제출 → 접수증)까지 동작 확인.
+
 ## 미구현 (TODO)
-- 비밀번호 입력 단계
-- 제출 단계 (이동 → 검증결과확인 → 제출)
-- 일괄접수증 확인
-- 신고내역 조회 (접수증·납부서)
+- 접수증 PDF/인쇄 저장 (팝업에 '인쇄하기' 버튼 있음)
+- 신고내역 조회 (접수증·납부서 다운로드)
 
 ## 주요 함수 레퍼런스
 
@@ -60,6 +77,8 @@
 | `goto_file_convert(ht)` | 파일변환신고 버튼 클릭 + 모달 닫기 |
 | `select_file(ht, file_path)` | hidden input에 파일 설정 (iframe 대기) |
 | `verify_file(ht)` | 파일검증하기 + 후속 모달 자동 처리 |
+| `enter_password(ht, password)` | 전자파일 비밀번호 팝업 입력 + 확인 + 팝업 닫힘 검증 |
+| `submit_report(ht, dry_run)` | 제출하러 가기 → 전자파일 제출하기 (dry_run이면 진입까지만) |
 
 ## 알려진 이슈 & 해결 방법
 

@@ -45,7 +45,9 @@ from src.automation.hometax._session import (
     dismiss_modals,
 )
 from src.automation.hometax._navigation import wait_element
-from src.automation.hometax._upload import select_file, verify_file
+from src.automation.hometax._upload import (
+    select_file, verify_file, enter_password, submit_report,
+)
 
 _session_extend_task = None
 
@@ -89,8 +91,10 @@ async def run(file_path, dry_run=True):
         if dry_run:
             log("\n[dry_run] 검증까지만 완료. 제출은 건너뜀.")
         else:
-            log("\n[실운영] 제출 진행...")
-            # TODO: 비밀번호 입력 → 제출 단계 구현
+            log("\n[실운영] 비밀번호 입력...")
+            # 전자파일 비밀번호는 CLI 인자로 받지 않음 — GUI phase 10(hometax.py)이
+            # enter_password(ht, password) 로 처리. CLI 제출 단계는 아직 미구현(TODO).
+            # TODO: enter_password 연동 + 제출(정상자료확인 → 제출하러 가기) 단계 구현
 
         # 세션 연장 태스크 정리
         if _session_extend_task:

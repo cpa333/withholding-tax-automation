@@ -13,7 +13,7 @@ from src.batch.state import StateManager
     phase_id=10,
     portal="hometax",
     display_name="홈택스 원천세 신고",
-    enabled=False,  # GUI 사이드바 접근 차단(회색 비활성). 워크플로우 자체 동작은 변경 없음.
+    enabled=True,  # GUI 사이드바에서 실행 가능(활성). 워크플로우 자체 동작은 변경 없음.
     needs_password=True,
 )
 class HometaxWorkflow(BaseWorkflow):
@@ -23,6 +23,8 @@ class HometaxWorkflow(BaseWorkflow):
         {"name": "goto_filing", "index": 2},
         {"name": "upload_file", "index": 3},
         {"name": "verify", "index": 4},
+        {"name": "enter_password", "index": 5},
+        {"name": "submit", "index": 6},
     ]
 
     async def run_single(
@@ -96,5 +98,30 @@ class HometaxWorkflow(BaseWorkflow):
                 state.fail_step(job_id, "verify", "파일검증 실패")
                 return False
             state.after_step(job_id, "verify")
+
+        # 파일검증 → '이미 검증...' 확인 직후 뜨는 '비밀번호입력' 팝업 처리.
+        # 전자파일(변환파일) 비밀번호 = 9번(SWER0101)에서 파일 제작 시 설정한 값.
+        if not state.should_skip_step(job_id, "enter_password"):
+            state.before_step(job_id, "enter_password", 5)
+            from src.automation.hometax.hometax_auto_cdp import enter_password
+            password = kwargs.get("password", "")
+            ht = page
+            if not await enter_password(ht, password):
+                state.fail_step(job_id, "enter_password", "전자파일 비밀번호 입력 실패")
+                return False
+            state.after_step(job_id, "enter_password")
+
+        # 제출: 제출하러 가기 → 전자파일 제출하기.
+        # dry_run(GUI 체크박스, 기본 True)이면 제출 화면 진입까지만 하고 실제 제출은 안 함.
+        # dry_run 해제 시에만 실제 신고가 제출된다.
+        if not state.should_skip_step(job_id, "submit"):
+            state.before_step(job_id, "submit", 6)
+            from src.automation.hometax.hometax_auto_cdp import submit_report
+            dry_run = kwargs.get("dry_run", True)
+            ht = page
+            if not await submit_report(ht, dry_run=dry_run):
+                state.fail_step(job_id, "submit", "제출 실패")
+                return False
+            state.after_step(job_id, "submit")
 
         return True
