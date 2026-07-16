@@ -27,6 +27,33 @@
 
 ## 매 릴리스 절차
 
+### 추천: `deploy.sh` 한 번에 (Git Bash)
+
+`deploy.sh` 가 아래 수동 절차(버전 증분·빌드·게시·`version.json` 반영·태그·push·전파 검증)를
+모두 자동화한다. **버전 증분은 Conventional Commits(`feat:`/`fix:`/`BREAKING`) 기반 SemVer 자동.**
+
+```bash
+./deploy.sh --dry-run           # 먼저 계획 확인 (무엇을 할지 출력, 변경 없음)
+./deploy.sh                     # 자동 버전 분석 → 전체 배포
+./deploy.sh --bump minor        # 레벨 강제 (patch|minor|major)
+./deploy.sh --version 1.2.0     # 특정 버전 강제
+./deploy.sh --notes "..."       # 릴리스 노트 override (미지정 시 커밋 요약 자동 생성)
+./deploy.sh --mandatory         # 강제 업데이트 (사용자 건너뛰기 불가)
+./deploy.sh --no-build          # 기존 installer_output 재사용
+./deploy.sh --yes               # 최종 [y/N] 확인 생략 (CI 등)
+./deploy.sh --help
+```
+
+자동 버전 규칙 (마지막 태그 또는 현재 버전 커밋 이후):
+- `feat:` 1개 이상 → **minor** (`1.0.3 → 1.1.0`)
+- `fix:` 등만 → **patch** (`1.0.3 → 1.0.4`)
+- `BREAKING CHANGE:` 또는 `type!:` → **major** (`1.0.3 → 2.0.0`)
+
+> `deploy.sh` 가 채우는 갭(수동 절차에서 놓치기 쉬운 부분): `version.json` 공개 repo 반영 + git tag.
+> release.py `--publish` 는 에셋만 올리고 `version.json` 반영은 안 함 — **이게 없으면 기존 PC가 새 버전을 인식 못함.**
+
+### 수동 절차 (참고용 — deploy.sh 가 자동 수행하는 단계들)
+
 ```bash
 # 1) 버전 올리기
 #    src/version.py → __version__ = "1.0.3"
