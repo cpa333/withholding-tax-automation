@@ -17,6 +17,12 @@
   → BTN_SUPPORT_INFO_KEYWORD("지원금") 키워드 매칭.
 - 인쇄/엑셀 버튼 id(wq_uuid_XXXX)는 동적 → 텍스트 매칭.
 - ClipReport 는 ifr_Report 프레임(별도 DOM)으로 접근해야 한다.
+
+당월보험료 부과내역조회(WL0502_P04, 라이브 검증 2026-07) 추가:
+- 20209 본문의 '당월보험료 부과내역조회(간편조회)' 런처 → WL0502_P04 팝업.
+- 인쇄→ClipReport 흐름은 WL0502_P02(지원금)과 완전 동일 → 팝업 id 를 매개변수화한
+  공유 헬퍼(_click_print_button/_read_support_count/_close_support_popup)로 재사용.
+- 산재/고용 탭별로 파일명을 구분(당월보험료부과내역_{산재|고용}_{YYYYMM}).
 """
 
 import os
@@ -25,11 +31,13 @@ import asyncio
 from src.utils.log import log
 from src.utils.human import human_delay
 from src.automation.comwel._constants import (
-    TAB_EMPLOYMENT_ID,
+    TAB_SANJEONG_ID, TAB_EMPLOYMENT_ID,
     BTN_SUPPORT_INFO_KEYWORD,
-    POPUP_SUPPORT_ID, POPUP_SUPPORT_CLOSE_ID,
+    POPUP_SUPPORT_ID,
+    BTN_PREMIUM_DETAIL_KEYWORD, BTN_PREMIUM_DETAIL_TEXT,
+    POPUP_PREMIUM_DETAIL_ID,
     BTN_PRINT_TEXT, BTN_EXCEL_TEXT,
-    REPORT_IFRAME_NAME, REPORT_BTN_SAVE_ID, REPORT_MODAL_CLOSE_ID,
+    REPORT_IFRAME_NAME, REPORT_BTN_SAVE_ID,
     REPORT_FORMAT_SELECT_ID, REPORT_FORMAT_PDF_TEXT,
     REPORT_DOWNLOAD_BTN_ID,
     REPORT_BTN_PDF_DOWNLOAD_ID, REPORT_BTN_EXCEL_DOWNLOAD_ID,
@@ -116,31 +124,47 @@ async def _wait_popup_open(page, popup_id: str, timeout: int = POPUP_TIMEOUT_S) 
     return False
 
 
-async def click_employment_tab(page) -> bool:
-    """하단 '고용' 탭 클릭 (엑셀 E100).
+async def _click_tab_active_guard(page, tab_id: str, tab_label: str = "") -> bool:
+    """하단 탭 active-guard 클릭 (라이브 검증 원형).
 
-    이미 고용 탭이 활성(w2tabcontrol_active)이면 클릭하지 않는다 — 중복 클릭 시
-    산재 탭으로 토글되어 지원금 데이터가 사라지는 문제 방지. (라이브 검증)
+    이미 활성(w2tabcontrol_active) 탭이면 클릭하지 않는다 — 중복 클릭 시
+    반대 탭으로 토글되어 해당 탭 데이터가 소실되는 문제 방지.
+    산재/고용 양 탭 모두 이 패턴을 공유한다.
     """
     already = await page.evaluate(r'''(id) => {
         const el = document.getElementById(id);
         if (!el) return false;
         const li = el.closest("li");
         return !!(li && /w2tabcontrol_active/.test(li.className || ""));
-    }''', TAB_EMPLOYMENT_ID)
+    }''', tab_id)
+    label = f"'{tab_label}' " if tab_label else ""
     if already:
-        log("  '고용' 탭 이미 활성 — 클릭 생략")
+        log(f"  {label}탭 이미 활성 — 클릭 생략")
         return True
     clicked = await page.evaluate(r"""(id) => {
         const el = document.getElementById(id);
         if (!el) return false;
         el.click();
         return true;
-    }""", TAB_EMPLOYMENT_ID)
+    }""", tab_id)
     if clicked:
-        log("  '고용' 탭 클릭")
+        log(f"  {label}탭 클릭")
         await human_delay(3)
     return clicked
+
+
+async def click_employment_tab(page) -> bool:
+    """하단 '고용' 탭 클릭 (엑셀 E100). active-guard 유지."""
+    return await _click_tab_active_guard(page, TAB_EMPLOYMENT_ID, "고용")
+
+
+async def click_sanjeong_tab(page) -> bool:
+    """하단 '산재' 탭 클릭 (라이브 검증 2026-07).
+
+    20209 조회 후 기본 활성 탭은 산재. active-guard 로 이미 활성이면 클릭 생략 —
+    중복 클릭 시 고용 탭으로 토글되어 산재 데이터가 소실되는 문제 방지.
+    """
+    return await _click_tab_active_guard(page, TAB_SANJEONG_ID, "산재")
 
 
 async def open_support_popup(page) -> bool:
@@ -171,11 +195,12 @@ async def open_support_popup(page) -> bool:
     return await _wait_popup_open(page, POPUP_SUPPORT_ID)
 
 
-async def _click_print_button(page) -> str:
+async def _click_print_button(page, popup_id: str = POPUP_SUPPORT_ID) -> str:
     """팝업 내 '인쇄하기' 버튼 텍스트 매칭 클릭 (엑셀 E102).
 
     wq_uuid_XXXX id 가 동적이라 텍스트로 찾는다. 성공 시 클릭한 버튼 id 반환.
     주의: 클릭 시 새 창(리포트 뷰어)이 열려 CDP 세션이 끊길 수 있다.
+    popup_id 로 전달된 팝업 컨테이너 범위에서만 버튼을 찾는다(WL0502_P02/P04 공통).
     """
     for attempt in range(PRINT_CLICK_RETRIES):
         result = await page.evaluate(r"""(args) => {
@@ -191,46 +216,73 @@ async def _click_print_button(page) -> str:
                 }
             }
             return {ok: false, reason: "버튼 못찾음"};
-        }""", {"popupId": POPUP_SUPPORT_ID, "text": BTN_PRINT_TEXT})
+        }""", {"popupId": popup_id, "text": BTN_PRINT_TEXT})
         if result.get("ok"):
             log(f"  '{BTN_PRINT_TEXT}' 클릭 (id={result.get('id')})")
             return result.get("id", "")
         await asyncio.sleep(1)
-    log(f"  ⚠ '{BTN_PRINT_TEXT}' 버튼을 찾지 못함 (텍스트 매칭)")
+    log(f"  ⚠ '{BTN_PRINT_TEXT}' 버튼을 찾지 못함 (텍스트 매칭, popup={popup_id})")
     return ""
 
 
-async def _close_support_popup(page):
-    """지원금 팝업(+ ClipReport WZ0203 모달) 닫기.
+def _popup_close_id(popup_id: str) -> str:
+    """팝업 id 로부터 팝업 닫기 id derive. 패턴: {popup_id}_close.
 
-    다운로드 후 두 모달이 열린 채 남아 다음 수임처 진행을 방해하므로 확실히 닫는다.
-    순서: WZ0203(ClipReport 인쇄 모달) 먼저 → 지원금 팝업(WL0502_P02).
-    (라이브 검증: WZ0203 닫기 후 support 팝업 닫기 순으로 동작)
+    P02: mf_wfm_content_WL0502_P02 → mf_wfm_content_WL0502_P02_close
+    P04: mf_wfm_content_WL0502_P04 → mf_wfm_content_WL0502_P04_close
+    WL0502 계열 팝업의 닫기 버튼 id 가 이 패턴을 따름(라이브 검증).
     """
+    return f"{popup_id}_close"
+
+
+def _report_modal_close_id(popup_id: str) -> str:
+    """팝업 id 로부터 ClipReport(WZ0203) 모달 닫기 id derive.
+
+    패턴: {popup_id}_wframe_WZ0203_close
+    P02: ...WL0502_P02_wframe_WZ0203_close (== REPORT_MODAL_CLOSE_ID)
+    P04: ...WL0502_P04_wframe_WZ0203_close (== REPORT_MODAL_P04_CLOSE_ID)
+    """
+    return f"{popup_id}_wframe_WZ0203_close"
+
+
+async def _close_support_popup(page, popup_id: str = POPUP_SUPPORT_ID,
+                               report_modal_close_id: str = None):
+    """팝업(+ ClipReport WZ0203 모달) 닫기 — WL0502_P02/P04 공통.
+
+    다운로드 후 두 모달이 열린 채 남아 다음 단계/수임처 진행을 방해하므로
+    확실히 닫는다. 순서: WZ0203(ClipReport 인쇄 모달) 먼저 → 팝업.
+    (라이브 검증: WZ0203 닫기 후 팝업 닫기 순으로 동작)
+
+    report_modal_close_id 미제공 시 popup_id 로부터 derive(DRY). 기본값
+    POPUP_SUPPORT_ID(P02) → 기존 지원금 흐름의 동작/결과 불변.
+    """
+    if report_modal_close_id is None:
+        report_modal_close_id = _report_modal_close_id(popup_id)
+    popup_close = _popup_close_id(popup_id)
     # 1) WZ0203 (ClipReport 인쇄 모달) 닫기
     await page.evaluate(r"""(id) => {
         const el = document.getElementById(id);
         if (el) el.click();
-    }""", REPORT_MODAL_CLOSE_ID)
+    }""", report_modal_close_id)
     await asyncio.sleep(1)
-    # 2) 지원금 팝업 닫기
+    # 2) 팝업 닫기
     await page.evaluate(r"""(id) => {
         const el = document.getElementById(id);
         if (el) el.click();
-    }""", POPUP_SUPPORT_CLOSE_ID)
+    }""", popup_close)
     await asyncio.sleep(1)
 
 
 # ─── 메인 다운로드 함수 ─────────────────────────────────────────────────────────
 
-async def _read_support_count(page) -> int | None:
-    """지원금 팝업의 '총 조회건 N건' 읽기. 없으면 None."""
+async def _read_support_count(page, popup_id: str = POPUP_SUPPORT_ID) -> int | None:
+    """팝업의 '총 조회건 N건' 읽기. 없으면 None. WL0502_P02/P04 공통."""
     return await page.evaluate(r"""(popupId) => {
         const popup = document.getElementById(popupId);
         if (!popup) return null;
         const m = popup.innerText.match(/총\s*조회건\s*(\d+)\s*건/);
         return m ? parseInt(m[1]) : null;
-    }""", POPUP_SUPPORT_ID)
+    }""", popup_id)
 
 
 async def download_support_info_printout(
@@ -401,3 +453,132 @@ async def _clipreport_download_files(page, save_dir, before, base_name):
         results.append(excel)
 
     return results if results else None
+
+
+# ─── 당월보험료 부과내역조회 (WL0502_P04, 라이브 검증 2026-07) ──────────────────
+# 20209 본문의 '당월보험료 부과내역조회(간편조회)' 런처 → WL0502_P04 팝업 → 인쇄.
+# 고용/산재 양 탭에서 동일 런처 버튼(활성 탭의 데이터로 동작). 인쇄→ClipReport
+# 흐름은 WL0502_P02(지원금)과 완전 동일 → 매개변수화된 공유 헬퍼 재사용.
+
+def _premium_detail_base_name(tab: str, year=None, month=None) -> str:
+    """당월보험료 부과내역 파일 base_name 생성(순수 함수, 단위테스트용).
+
+    탭 구분(산재/고용)으로 파일명 충돌 방지. period 미제공 시 접미사 생략.
+    예: ("산재", 2026, 6) → "당월보험료부과내역_산재_202606"
+    """
+    period = f"{year}{month:02d}" if year and month else ""
+    tab_tag = tab or "산재"
+    return (f"당월보험료부과내역_{tab_tag}_{period}"
+            if period else f"당월보험료부과내역_{tab_tag}")
+
+
+async def _open_premium_detail_popup(page) -> bool:
+    """당월보험료 부과내역조회 런처 버튼 클릭 → WL0502_P04 팝업 오픈 (라이브 검증).
+
+    버튼 id(wq_uuid_XXXX, 예: mf_wfm_content_wq_uuid_1759)는 동적 → 텍스트 매칭.
+    부분문자열 "당월보험료 부과내역" 로 매칭(전체 라벨은 "당월보험료 부과내역조회(간편조회)").
+    본문(mf_wfm_content) input/button 범위에서 찾는다. 고용/산재 양 탭에서 동일 버튼.
+    """
+    clicked_id = await page.evaluate(r"""(keyword) => {
+        // 본문(mf_wfm_content) input/button 중 키워드 포함 첫 가시 요소.
+        for (const el of document.querySelectorAll("input, button")) {
+            const r = el.getBoundingClientRect();
+            if (r.width === 0) continue;
+            const id = el.id || "";
+            if (!id.startsWith("mf_wfm_content")) continue;
+            const t = (el.textContent || el.value || "").trim();
+            if (t.includes(keyword)) { el.click(); return el.id; }
+        }
+        return null;
+    }""", BTN_PREMIUM_DETAIL_KEYWORD)
+    if not clicked_id:
+        log(f"  ⚠ '{BTN_PREMIUM_DETAIL_KEYWORD}' 버튼을 찾지 못함 (텍스트 매칭)")
+        return False
+    log(f"  '{BTN_PREMIUM_DETAIL_KEYWORD}' 버튼 클릭 (id={clicked_id}) — 팝업 대기...")
+    await asyncio.sleep(3)
+    return await _wait_popup_open(page, POPUP_PREMIUM_DETAIL_ID)
+
+
+async def download_premium_detail_printout(
+    page, context, client_name, *, tab: str = "산재",
+    year: int = None, month: int = None,
+):
+    """당월보험료 부과내역조회 인쇄물 다운로드 (WL0502_P04, 라이브 검증).
+
+    흐름(활성 탭 기준):
+      당월보험료 부과내역조회 버튼(텍스트 매칭) → WL0502_P04 팝업 →
+      (0건이면 스킵, 폴더 미생성) → 인쇄하기 → ClipReport → PDF+엑셀.
+
+    tab 인자는 파일명 구분용("산재"/"고용") — 호출측이 미리 active-guard 로
+    해당 탭을 활성화해 둔다(산재→고용 전환 시 토글 소실 주의).
+
+    라이브 검증: 산재 건수(리드플렉스 6월)=6건. 0건 수임처 스킵 정상.
+
+    Returns:
+        dict: download_support_info_printout 과 동일 구조
+              {"path", "paths", "format", "formats", "print_clicked",
+               "count", "skipped"}
+    """
+    from src.utils.save_path import make_save_dir
+
+    base_name = _premium_detail_base_name(tab, year, month)
+    tab_tag = tab or "산재"
+
+    # 1) 당월보험료 부과내역조회 팝업 오픈
+    if not await _open_premium_detail_popup(page):
+        log(f"  당월보험료 부과내역 버튼 없음 — 스킵 (정상, tab={tab_tag})")
+        return {"path": None, "format": None, "print_clicked": False,
+                "count": None, "skipped": True}
+
+    # 2) 데이터 건수 — 0건이면 인쇄 생략 + 폴더 미생성 (지원금 흐름과 동일)
+    count = await _read_support_count(page, POPUP_PREMIUM_DETAIL_ID)
+    if count is not None and count == 0:
+        log(f"  당월보험료 부과내역 0건 — 인쇄 생략 (정상, 폴더 미생성, tab={tab_tag})")
+        await _close_support_popup(page, POPUP_PREMIUM_DETAIL_ID)
+        return {"path": None, "format": None, "print_clicked": False,
+                "count": 0, "skipped": True}
+    if count and count > 0:
+        log(f"  당월보험료 부과내역 {count}건 — 인쇄 진행 (tab={tab_tag})")
+
+    # 데이터가 있으므로 여기서 폴더 생성 (0건은 위에서 반환되어 폴더 안 생김).
+    # _SAVE_SITE/_SAVE_SUBDIR: 병렬(공단EDI) 시 comwel_auto_cdp main()에서 오버라이드.
+    save_dir = make_save_dir(_SAVE_SITE, client_name, year=year, month=month,
+                             subdir=_SAVE_SUBDIR)
+
+    # 3) 인쇄하기 버튼 클릭 → WZ0203 모달 + ClipReport(ifr_Report) 오픈
+    #    CDP 다운로드 감지를 미리 설정해 두고 클릭.
+    before, cdp = await _setup_cdp_download(context, page, save_dir)
+    try:
+        clicked_id = await _click_print_button(page, POPUP_PREMIUM_DETAIL_ID)
+        if not clicked_id:
+            return {"path": None, "format": None, "print_clicked": False,
+                    "count": count, "skipped": False}
+
+        # 4) ClipReport 리포트 뷰어에서 PDF + 엑셀 다운로드
+        #    WL0502_P04 도 동일 ifr_Report 흐름 → 공유 헬퍼 재사용.
+        await asyncio.sleep(3)  # ClipReport 로딩 대기
+        files = await _clipreport_download_files(page, save_dir, before, base_name)
+        if files:
+            paths = [f[0] for f in files]
+            for fpath, fmt in files:
+                log(f"  인쇄물 저장: {os.path.basename(fpath)} (형식: {fmt})")
+            return {"path": paths[0] if paths else None,
+                    "paths": paths,
+                    "formats": [f[1] for f in files],
+                    "format": files[0][1] if files else None,
+                    "print_clicked": True, "count": count, "skipped": False}
+
+        log("  ⚠ ClipReport 다운로드 실패 (당월보험료 부과내역)")
+        return {"path": None, "paths": [], "format": None, "formats": [],
+                "print_clicked": True, "count": count, "skipped": False}
+    finally:
+        # 다운로드 성공/실패 무관 WZ0203 모달 + P04 팝업 확실히 닫기
+        # (남아있으면 다음 단계/수임처 진행 시 꼬임 — 라이브 검증).
+        try:
+            await _close_support_popup(page, POPUP_PREMIUM_DETAIL_ID)
+        except Exception:
+            pass
+        try:
+            await cdp.detach()
+        except Exception:
+            pass

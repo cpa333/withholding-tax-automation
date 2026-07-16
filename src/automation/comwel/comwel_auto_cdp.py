@@ -41,7 +41,11 @@ from src.automation.comwel._common import (
     navigate_to_premium_20209, set_period, search_main, dismiss_dialogs,
     PAGE_LOAD_TIMEOUT_MS,
 )
-from src.automation.comwel._download import download_support_info_printout
+from src.automation.comwel._download import (
+    download_support_info_printout,
+    download_premium_detail_printout,
+    click_sanjeong_tab, click_employment_tab,
+)
 
 
 _TRACE_PATH = os.path.join("debug", "comwel_parallel_trace.log")
@@ -70,8 +74,20 @@ def _emit_summary(total, completed, skipped):
 
 def print_header():
     log("=" * 60)
-    log("  근로복지공단(고용보험) EDI 자동화 — 고용보험료 지원금 정보 다운로드")
+    log("  근로복지공단(고용보험) EDI 자동화 — 당월보험료 부과내역 + 지원금 다운로드")
     log("=" * 60)
+
+
+async def _safe_dismiss(page) -> None:
+    """단계 간 팝업/모달 정리(best-effort).
+
+    dismiss_dialogs 가 예외를 던지더라도 다운로드 단계 격리에 영향을 주지 않도록
+    삼킨다. 각 다운로드 함수의 finally 가 WZ0203/P04 팝업을 닫지만, 잔류 가드용.
+    """
+    try:
+        await dismiss_dialogs(page)
+    except Exception:
+        pass
 
 
 async def run_single_workplace(page, context, workplace_name, *,
@@ -79,8 +95,15 @@ async def run_single_workplace(page, context, workplace_name, *,
                                management_number=""):
     """단일 사업장 인쇄물 다운로드 워크플로우 (라이브 검증 흐름).
 
-    흐름: 20209 진입 → 연월 설정 → 사업장 전환 → 본화면조회 → 고용탭/지원금/인쇄.
-    폴더는 download_support_info_printout 내부에서 데이터 있을 때만 생성.
+    사용자 확정 3단계 순서(수임처당):
+      (1) 산재 탭 → 당월보험료 부과내역 PDF+엑셀
+      (2) 고용 탭 → 당월보험료 부과내역 PDF+엑셀
+      (3) 고용 탭 → 고용보험료 지원금 PDF+엑셀 (기존 흐름 그대로)
+
+    각 다운로드는 독립(0건 스킵 허용)이며 예외로 격리된다 — 한 단계에서 예외가
+    발생해도 해당 단계만 건너뛰고 나머지 단계를 계속 시도해 부분 결과를 얻는다.
+    폴더는 각 단계에서 데이터 있을 때만 생성.
+    탭 전환은 active-guard 로 중복 클릭(토글→데이터 소실)을 방지한다.
     """
     # 0) 20209 화면 진입 (첫 수임처이거나 페이지가 대시보드일 때)
     await navigate_to_premium_20209(page)
@@ -98,15 +121,80 @@ async def run_single_workplace(page, context, workplace_name, *,
     # 3) 본 화면 조회(btnSearch) — 데이터 로드 (라이브 검증)
     await search_main(page)
 
-    # 4) 고용 탭 → 지원금정보 → 인쇄 (폴더는 데이터 있을 때만 생성)
-    result = await download_support_info_printout(
-        page, context, workplace_name, year=year, month=month,
-    )
-    await dismiss_dialogs(page)
-    if result.get("path"):
+    results = []        # 3단계 결과 dict
+    any_success = False  # 하나라도 파일 다운로드 성공
+
+    # 각 단계는 try/except 로 격리 — 한 단계 예외 시 해당 단계만 건너뛰고 계속.
+
+    # ── (1/3) 산재 탭 → 당월보험료 부과내역 ──────────────────────────────
+    log("[COMWEL] (1/3) 산재 탭 → 당월보험료 부과내역")
+    r_sj = {"path": None, "print_clicked": False, "count": None, "skipped": False}
+    try:
+        await click_sanjeong_tab(page)
+        r_sj = await download_premium_detail_printout(
+            page, context, workplace_name, tab="산재", year=year, month=month,
+        )
+    except Exception as e:
+        log(f"  ⚠ 산재 당월부과내역 단계 예외 — 이 단계 건너뜀: {e}")
+        r_sj = {"path": None, "paths": [], "format": None, "formats": [],
+                "print_clicked": False, "count": None, "skipped": False,
+                "error": str(e)}
+    await _safe_dismiss(page)
+    results.append(r_sj)
+    if r_sj.get("skipped"):
+        log(f"  '{workplace_name}' 산재 당월부과내역 0건/버튼없음 — 스킵 (정상)")
+    elif r_sj.get("path"):
+        any_success = True
+        log(f"  '{workplace_name}' 산재 당월부과내역 다운로드 완료")
+
+    # ── (2/3) 고용 탭 → 당월보험료 부과내역 ──────────────────────────────
+    log("[COMWEL] (2/3) 고용 탭 → 당월보험료 부과내역")
+    r_gy = {"path": None, "print_clicked": False, "count": None, "skipped": False}
+    try:
+        await click_employment_tab(page)
+        r_gy = await download_premium_detail_printout(
+            page, context, workplace_name, tab="고용", year=year, month=month,
+        )
+    except Exception as e:
+        log(f"  ⚠ 고용 당월부과내역 단계 예외 — 이 단계 건너뜀: {e}")
+        r_gy = {"path": None, "paths": [], "format": None, "formats": [],
+                "print_clicked": False, "count": None, "skipped": False,
+                "error": str(e)}
+    await _safe_dismiss(page)
+    results.append(r_gy)
+    if r_gy.get("skipped"):
+        log(f"  '{workplace_name}' 고용 당월부과내역 0건/버튼없음 — 스킵 (정상)")
+    elif r_gy.get("path"):
+        any_success = True
+        log(f"  '{workplace_name}' 고용 당월부과내역 다운로드 완료")
+
+    # ── (3/3) 고용 탭 → 고용보험료 지원금 (기존 흐름 그대로) ─────────────
+    # 고용 탭은 (2)에서 이미 활성 — download_support_info_printout 내부의
+    # click_employment_tab(active-guard)이 중복 클릭을 방지한다.
+    log("[COMWEL] (3/3) 고용 탭 → 고용보험료 지원금 정보")
+    r_sup = {"path": None, "print_clicked": False, "count": None, "skipped": False}
+    try:
+        r_sup = await download_support_info_printout(
+            page, context, workplace_name, year=year, month=month,
+        )
+    except Exception as e:
+        log(f"  ⚠ 고용보험료 지원금 단계 예외 — 이 단계 건너뜀: {e}")
+        r_sup = {"path": None, "paths": [], "format": None, "formats": [],
+                 "print_clicked": False, "count": None, "skipped": False,
+                 "error": str(e)}
+    await _safe_dismiss(page)
+    results.append(r_sup)
+    if r_sup.get("skipped"):
+        log(f"  '{workplace_name}' 지원금 0건 — 스킵 (정상, 폴더 미생성)")
+    elif r_sup.get("path"):
+        any_success = True
+        log(f"  '{workplace_name}' 지원금 다운로드 완료")
+
+    # 하나라도 다운로드 성공 → 완료. 전부 스킵(0건/버튼없음)도 정상 처리(True).
+    if any_success:
         return True
-    if result.get("skipped"):
-        log(f"  '{workplace_name}' 지원금 0건 — 스킵 (폴더 미생성)")
+    if all(r.get("skipped") for r in results):
+        log(f"  '{workplace_name}' 전 단계 0건/버튼없음 — 스킵 처리 (정상)")
         return True
     log(f"  '{workplace_name}' 인쇄물 다운로드 없음/실패")
     return False
