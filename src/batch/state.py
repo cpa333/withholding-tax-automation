@@ -211,8 +211,10 @@ class StateManager:
 class NoopStateManager:
     """단건 실행용 상태 관리자 (DB 기록 없음)
 
-    모든 메서드가 no-op이며 should_skip_step은 항상 False.
+    메서드가 no-op이며 should_skip_step은 항상 False.
     BatchEngine 없이 단일 수임처만 실행할 때 사용.
+    예외: fail_step은 DB 기록이 없으면 실패 사유가 어디에도 남지 않으므로
+    사유를 log()로 방출한다(선택건 실행 시 GUI 로그 패널에 표시).
     """
 
     def before_step(self, job_id, step_name, step_index=0, step_data=None):
@@ -222,7 +224,9 @@ class NoopStateManager:
         pass
 
     def fail_step(self, job_id, step_name, error_message=""):
-        pass
+        if error_message:
+            from src.utils.log import log
+            log(f"  [단계 실패] {step_name}: {error_message}")
 
     def get_resume_index(self, job_id):
         return 0
