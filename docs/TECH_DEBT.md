@@ -29,7 +29,7 @@
 | `docs/refactoring-handoff.md` | **Wave 3**(engine↔runner 통합 + 크래시복구)·**Wave 4**(메뉴정리) = 본 문서 **TD-02 / TD-05 / TD-13 / TD-04** 와 동일 영역. 세부 계획·골든스냅샷 회귀 기법은 handoff가 원천. |
 | `docs/parallel-automation-handoff.md` | 병렬 안정화·open items. 본 문서 **TD-07 / LV-4 / LV-5** 참조. |
 | `src/automation/wehago/PROGRESS.md` | 도메인 진행 + `## 다음 단계 TODO`(대부분 MVP 시절, 상당수 완료). 미완료만 **LV-5**로 인용. |
-| `src/automation/hometax/PROGRESS.md` | 제출 플로우 완료·라이브 검증(2026-07-17, real click 전환). **Phase 10 `enabled=True`**(이전 문서의 `=False` 기재는 stale). 남은 TODO: 접수증 저장·신고내역 다운로드(Phase 11 연계). |
+| `src/automation/hometax/PROGRESS.md` | 제출 플로우 완료·라이브 검증(2026-07-17, real click 전환 + 실제 제출 E2E·멀티 수임처 루프 3/3, 동일기간 재제출=신고내역 대체). **Phase 10 `enabled=True`**(이전 문서의 `=False` 기재는 stale). 남은 TODO: 접수증 저장·신고내역 다운로드(Phase 11 연계). |
 | `GUIDE.md` (§risk 계열) | 기술 문서 내 임베디드 리스크. 본 문서가 상위 레지스터. |
 
 ---
