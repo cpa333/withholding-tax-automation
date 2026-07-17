@@ -60,10 +60,16 @@
 - **dry_run=True(GUI 기본): 제출 화면 진입까지만, 실제 제출 안 함**
 - 모달은 `dismiss_modals`(btn_confirm 무차별 클릭) 대신 **`_wait_and_click_popup`(text 정규식 + 버튼 text)**로 정확히 처리
 - 공동인증서 서명 단계 없음(로그인 세션으로 자동 처리). 실제 제출 흐름(제출 → 접수증)까지 동작 확인.
+- **real click 필수(2026-07-17 라이브 교훈)**: '전자파일 제출하기'·확인 버튼은 WebSquare `<input type=button>`이라 **JS 합성 click(`b.click()`)을 무시**한다. `_wait_and_click_popup`과 제출 클릭은 element handle 의 **real click**을 사용. JS click 시 '제출신고 파일이 존재하지 않습니다' 오탐 발생.
+- 제출 클릭 직후 **차단 모달('파일이 존재하지 않' 등)을 감지**해 명확히 보고(과거 '모달 찾지 못함' 원인불명 로그 개선).
+
+## 완료/검증 이력
+- **2026-07-17 라이브 검증**: (주)리틀치프코리아(515-86-01709) 2026년 7월분 원천징수이행상황신고서(정기확정) 파일변환신고 **정상 접수 확인** — 접수번호 130-2026-2-…, 접수일시 2026-07-17 17:12. JS click → real click 전환 후 GUI Phase 10 경로로 제출 성공.
 
 ## 미구현 (TODO)
-- 접수증 PDF/인쇄 저장 (팝업에 '인쇄하기' 버튼 있음)
-- 신고내역 조회 (접수증·납부서 다운로드)
+- 접수증 PDF/인쇄 저장 (팝업에 '인쇄하기' 버튼 있음) — Phase 11(신고서류 메일 발송) 설계에 연계
+- 신고내역 조회 (접수증·납부서 다운로드) — Phase 11 설계에 연계
+  - 진입 팁: 메뉴 `fn_topMenuOpen`은 접힌 메뉴에선 동작 안 함 → URL goto(`tm3lIdx=4101030000`)로 직접 로드. 조회 버튼='조회'(`mf_txppWframe_wq_uuid_908`), 세목 셀렉트=`mf_txppWframe_sbx_itrfCd`(원천세).
 
 ## 주요 함수 레퍼런스
 
@@ -89,6 +95,7 @@
 | 알림/확인 모달 중첩 표시 | WebSquare w2popup_window | `btn_confirm` id 포함 INPUT 순차 클릭으로 닫기 |
 | 홈택스 접속 시 ERR_CONNECTION_ABORTED | WEHAGO 탭에서 직접 이동 시 | 새 탭에서 열거나 내부 URL로 이동 |
 | 파일변환신고 버튼 id가 동적으로 변경 | WebSquare 프레임워크 특성 | `[id*="btn_cbcMediRtn"]` 부분 매치 사용 |
+| '전자파일 제출하기' 클릭이 무시됨 ("제출신고 파일이 존재하지 않습니다" 오탐) | WebSquare `<input type=button>`이 JS 합성 click 무시 | `_wait_and_click_popup`·제출 클릭을 **Playwright real click**(element handle)로 전환 (2026-07-17 라이브) |
 
 ## 실행 방법
 ```bash

@@ -48,7 +48,14 @@ async def select_file(ht, file_path):
 
 
 async def verify_file(ht):
-    """파일검증하기 버튼 클릭 후 후속 모달 자동 처리"""
+    """파일검증하기 버튼 클릭 후 후속 모달 자동 처리.
+
+    주의: 변환결과(정상/오류 건수)를 WebSquare 그리드에서 신뢰성 있게 읽지 못해 '검증
+    성공 여부' 자체는 보장하지 못한다. 대신 검증 직후 떠 있는 차단성 모달이 있으면 진단
+    로그로만 남긴다(비치명 — 홈택스 경고/오류 안내가 실제 제출을 막지 않는 경우가 많아
+    여기서 abort 하지 않는다). 변환 실패로 제출 파일이 없는 케이스는 submit_report 의
+    차단 모달 감지에서 최종 걸러진다(2026-07-17 라이브 검증).
+    """
     log("[4] 파일검증하기 클릭...")
     clicked = await ht.evaluate("""() => {
         const btn = document.querySelector('[id*="btn_cenSts"]');
@@ -62,6 +69,17 @@ async def verify_file(ht):
     await asyncio.sleep(3)
     await dismiss_modals(ht)
     await asyncio.sleep(5)
+    # 검증 직후 차단성 모달 진단(비치명)
+    diag = await ht.evaluate(r"""() => {
+        for (const m of document.querySelectorAll('.w2popup_window')) {
+            if (m.offsetParent === null) continue;
+            const t = (m.textContent || '').replace(/\s+/g, ' ').trim();
+            if (/오류|불가|실패|존재하지 않/.test(t)) return t.slice(0, 100);
+        }
+        return null;
+    }""")
+    if diag:
+        log(f"  [진단] 검증 후 모달: {diag} (제출은 계속 시도)")
     log("  파일검증 완료")
     return True
 
@@ -169,25 +187,34 @@ _JS_FIND_SUBMIT_BTN = """() => {
 
 
 async def _wait_and_click_popup(ht, text_regex, btn_text, timeout=15):
-    """text_regex(정규식)를 포함한 '표시 중' WebSquare 팝업에서 btn_text 버튼을 클릭.
+    """text_regex(정규식)를 포함한 '표시 중' WebSquare 팝업의 btn_text 버튼을 **Playwright real click**.
 
     성공 시 True. WebSquare 확인/안내 모달을 text 기준으로 안전하게 처리하기 위한 헬퍼
     (dismiss_modals 는 btn_confirm id 를 무차별 클릭해 잘못된 모달을 닫을 수 있어 사용 안 함).
+
+    주의: WebSquare <input type=button>은 JS 합성 click(b.click())을 무시한다. 과거
+    b.click() 사용 시 '전자파일 제출하기' 가 무시되어 '제출신고 파일이 존재하지 않습니다'
+    오탐이 발생(2026-07-17 라이브). element handle 의 real click 을 사용한다.
     """
     for _ in range(timeout):
-        clicked = await ht.evaluate("""([pat, bt]) => {
+        handle = await ht.evaluate_handle("""([pat, bt]) => {
             const re = new RegExp(pat);
             for (const m of document.querySelectorAll('.w2popup_window')) {
                 if (m.offsetParent === null) continue;
                 if (!re.test(m.textContent || '')) continue;
                 for (const b of m.querySelectorAll('input[type=button], button, a[role=button]')) {
-                    if ((b.value || b.textContent || '').trim() === bt) { b.click(); return true; }
+                    if ((b.value || b.textContent || '').trim() === bt) return b;
                 }
             }
-            return false;
+            return null;
         }""", [text_regex, btn_text])
-        if clicked:
-            return True
+        el = handle.as_element()
+        if el is not None:
+            try:
+                await el.click(timeout=5000)
+                return True
+            except Exception:
+                pass  # 가려짐/애니메이션 등 클릭 실패 → 다음 폴링에서 재시도
         await asyncio.sleep(1)
     return False
 
@@ -249,17 +276,63 @@ async def submit_report(ht, dry_run=True):
         return True
 
     # ── 실제 제출 (dry_run=False) ──────────────────────────────────────────
-    log("[7] 전자파일 제출하기 클릭 (실제 제출)...")
-    await ht.evaluate("""() => {
-        for (const b of document.querySelectorAll('input[type=button], button, a[role=button]')) {
-            const t = (b.value || b.textContent || '').trim();
-            if (t === '전자파일 제출하기') { b.click(); return; }
-        }
-    }""")
+    # '전자파일 제출하기' 버튼은 WebSquare <input type=button> 이라 JS click 이 무시됨 →
+    # element handle real click 필수(2026-07-17 라이브: JS click 시 '파일 없음' 오탐).
+    log("[7] 전자파일 제출하기 클릭 (실제 제출, real click)...")
+    submit_clicked = False
+    for _ in range(10):
+        handle = await ht.evaluate_handle("""() => {
+            for (const b of document.querySelectorAll('input[type=button], button, a[role=button]')) {
+                const t = (b.value || b.textContent || '').trim();
+                if (t === '전자파일 제출하기') {
+                    const r = b.getBoundingClientRect();
+                    const cs = getComputedStyle(b);
+                    if (cs.display !== 'none' && cs.visibility !== 'hidden' && r.width > 0) return b;
+                }
+            }
+            return null;
+        }""")
+        el = handle.as_element()
+        if el is not None:
+            try:
+                await el.click(timeout=5000)
+                submit_clicked = True
+                break
+            except Exception:
+                pass
+        await asyncio.sleep(1)
+    if not submit_clicked:
+        log("  '전자파일 제출하기' 버튼 real click 실패")
+        return False
 
-    # 안내 모달 "정상 변환된 신고서를 제출합니다" → 확인
-    if not await _wait_and_click_popup(ht, "신고서를 제출합니다", "확인"):
+    # 클릭 직후: 정상 안내 모달('...제출합니다') 또는 차단 모달('파일이 존재하지 않' 등) 확인.
+    # 변환 실패/잔버그 시 차단 모달이 뜨므로 명확히 구분해 보고한다(과거 '모달 찾지 못함'
+    # 원인 불명 로그 개선).
+    outcome = None
+    for _ in range(15):
+        outcome = await ht.evaluate(r"""() => {
+            for (const m of document.querySelectorAll('.w2popup_window')) {
+                if (m.offsetParent === null) continue;
+                const t = (m.textContent || '').replace(/\s+/g, ' ').trim();
+                if (/신고서를 제출합니다|변환된 신고서를 제출/.test(t)) return {ok: true};
+                if (/존재하지 않|제출.{0,4}불가|제출할.{0,8}신고서.{0,4}없/.test(t))
+                    return {ok: false, msg: t.slice(0, 120)};
+            }
+            return null;
+        }""")
+        if outcome:
+            break
+        await asyncio.sleep(1)
+    if not outcome:
         log("  제출 안내 모달('...제출합니다')을 찾지 못함")
+        return False
+    if not outcome.get("ok"):
+        log(f"  [제출 차단] {outcome.get('msg')} — 변환결과/데이터 재확인 필요")
+        return False
+
+    # 안내 모달 "정상 변환된 신고서를 제출합니다" → 확인 (real click)
+    if not await _wait_and_click_popup(ht, "신고서를 제출합니다", "확인"):
+        log("  제출 안내 모달('...제출합니다') 확인 버튼 클릭 실패")
         return False
 
     # 확인 모달 "신고서를 제출하시겠습니까?" → 확인
