@@ -113,8 +113,16 @@ def build_pyinstaller(driver_dir):
         "--collect-submodules=playwright",
 
         # playwright-stealth
+        # js/ evasion 스크립트(20개)는 .py 가 아닌 데이터 파일이라 --collect-submodules
+        # 로는 절대 따라오지 않고, playwright_stealth 용 PyInstaller 훅도 없다.
+        # stealth.py 는 모듈 최상위에서 SCRIPTS 딕셔너리를 만들며 그 js 들을 read_text()
+        # 하므로, 누락 시 `from playwright_stealth import Stealth` 자체가
+        # FileNotFoundError 를 낸다. 그런데 src/utils/stealth.py 의 except Exception 이
+        # 이를 삼켜 로그 없이 수동 폴백(navigator.webdriver 한 줄)으로 넘어간다
+        # → 빌드/검증은 통과하는데 설치본에서만 스텔스가 조용히 꺼짐(xlrd 사고와 동형).
         "--hidden-import=playwright_stealth",
         "--collect-submodules=playwright_stealth",
+        "--collect-data=playwright_stealth",
 
         # pywinauto + comtypes
         "--hidden-import=comtypes",
@@ -285,6 +293,13 @@ def verify_bundle():
         ("playwright node 드라이버",
          lambda: os.path.isfile(os.path.join(
              internal, "playwright", "driver", "node.exe"))),
+        # playwright_stealth 의 js/ evasion 스크립트 — 데이터 파일이라 PYZ 검증으로는
+        # 절대 안 잡힌다(.py 만 PYZ 에 있어 in_pyz 는 green 이 뜨는 사각지대).
+        # 반드시 실파일로 확인할 것. 누락 시 설치본에서만 스텔스가 조용히 꺼진다.
+        ("playwright_stealth js evasion 리소스",
+         lambda: os.path.isfile(os.path.join(
+             internal, "playwright_stealth", "js", "evasions",
+             "navigator.webdriver.js"))),
         ("sqlite3 dll",
          lambda: os.path.isfile(os.path.join(internal, "sqlite3.dll"))),
         ("VC 런타임",
