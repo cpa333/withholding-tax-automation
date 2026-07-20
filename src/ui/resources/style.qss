@@ -125,24 +125,32 @@ QStatusBar QLabel {
 }
 
 /* ── 메뉴바 / 메뉴 (시스템 다크 팔레트 방어 — 명시적 라이트) ── */
+/* ===== [임시/배포테스트] 메뉴바 초록색 — 복구 시 이 블록 통째 삭제하고 아래 원본 주석 해제 =====
+   원본:
+     QMenuBar              { background-color: #f5f5f5; color: #1a1a1a; }
+     QMenuBar::item        { color: #1a1a1a; }
+     QMenuBar::item:selected { background-color: #d0e4f7; }
+     QMenuBar::item:pressed  { background-color: #bcd8f0; }
+*/
 QMenuBar {
-    background-color: #f5f5f5;
-    color: #1a1a1a;
-    border-bottom: 1px solid #ddd;
+    background-color: #2e7d32;
+    color: #ffffff;
+    border-bottom: 1px solid #1b5e20;
     padding: 2px;
 }
 QMenuBar::item {
     background-color: transparent;
-    color: #1a1a1a;
+    color: #ffffff;
     padding: 4px 10px;
     border-radius: 3px;
 }
 QMenuBar::item:selected {
-    background-color: #d0e4f7;
+    background-color: #1b5e20;
 }
 QMenuBar::item:pressed {
-    background-color: #bcd8f0;
+    background-color: #14471a;
 }
+/* ===== [임시/배포테스트] 끝 ===== */
 
 QMenu {
     background-color: #ffffff;
