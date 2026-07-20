@@ -390,10 +390,20 @@ def read_employment_xls(xls_path: str) -> tuple[dict[str, int], dict[str, int]]:
           support_data = {근로자명: 실업급여지원금(근로자)}
           collect_data = {근로자명: 실업급여환수금(근로자)}
     """
-    import xlrd
-
     support: dict[str, int] = {}
     collect: dict[str, int] = {}
+
+    # xlrd 는 requirements.txt / build.py --hidden-import 에 선언되어 있다.
+    # 누락 환경에서 ModuleNotFoundError 가 상위 except 로 삼켜져 "고용보험만 조용히
+    # 미반영"되는 사고가 있었으므로, 여기서 원인을 명시하고 빈 결과로 degrade 한다.
+    try:
+        import xlrd
+    except ImportError as e:
+        logger.error(
+            "xlrd 미설치 — 고용보험 실업급여 지원금/환수금 미반영 (%s). "
+            "해결: pip install -r requirements.txt (%s)", e, xls_path,
+        )
+        return support, collect
 
     try:
         wb = xlrd.open_workbook(xls_path)

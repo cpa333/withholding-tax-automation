@@ -153,10 +153,19 @@ class WehagoSwsaWorkflow(BaseWorkflow):
                             nps_govt_data = read_nps_govt_excel(raw["nps_govt"])
                             log(f"  NPS 국고지원내역: {len(nps_govt_data)}명")
                     # 고용보험(근로복지공단) xls — 실업급여 지원금/환수금(근로자)
+                    # 다른 보험 파싱 실패에 휘말리지 않도록 독립 except 로 분리.
                     if raw.get("ei_xls"):
-                        ei_support_data, ei_collect_data = read_employment_xls(raw["ei_xls"])
-                        log(f"  고용보험: 지원금 {len(ei_support_data)}명, "
-                            f"환수금 {len(ei_collect_data)}명")
+                        try:
+                            ei_support_data, ei_collect_data = read_employment_xls(raw["ei_xls"])
+                            log(f"  고용보험: 지원금 {len(ei_support_data)}명, "
+                                f"환수금 {len(ei_collect_data)}명")
+                            if not ei_support_data and not ei_collect_data:
+                                log(f"  WARN: 고용보험 파일은 있으나 추출 0명 — 미반영 "
+                                    f"({os.path.basename(raw['ei_xls'])}). "
+                                    f"공단 양식 변경 또는 xlrd 미설치 가능성.")
+                        except Exception as e:
+                            ei_support_data = ei_collect_data = None
+                            log(f"  WARN: 고용보험 파싱 실패 — 미반영: {type(e).__name__}: {e}")
             except Exception as e:
                 import traceback
                 log(f"  WARN: 원천데이터 읽기 실패 (무시하고 진행): {e}")

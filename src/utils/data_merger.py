@@ -58,6 +58,25 @@ def _normalize(s) -> str:
     return re.sub(r"\s+", "", str(s))
 
 
+def _cell_to_int(val) -> int:
+    """셀 값 → int. 빈값/None/비수치 → 0.
+
+    WEHAGO 다운로드 엑셀은 보험료 셀을 숫자로 내려주지만, 서식/구조에 따라
+    '21,440' 같은 문자열이 오는 경우가 있어 콤마를 제거하고 변환한다.
+    """
+    if val is None:
+        return 0
+    if isinstance(val, (int, float)):
+        return int(val)
+    s = str(val).strip().replace(",", "").replace(" ", "")
+    if not s or s == "-":
+        return 0
+    try:
+        return int(float(s))
+    except (ValueError, TypeError):
+        return 0
+
+
 def _find_column_index(headers: list[str], target_key: str) -> int | None:
     """헤더 리스트에서 target_key의 alias와 매칭되는 컬럼 인덱스(0-based) 반환.
 
@@ -312,13 +331,19 @@ def _apply_ei_row(ws, row: int, col_map: dict,
                   support_amount: int | None,
                   collect_amount: int | None,
                   result: MergeResult):
-    """단일 행에 고용보험(실업급여 지원금/환수금) 데이터 덮어쓰기.
+    """단일 행에 고용보험(실업급여 지원금/환수금) 조정분 반영.
 
-    엑셀 v3 규칙 (라이브 검증):
+    규칙 (2026-07-19 라이브 실측으로 정정):
       - 실업급여지원금(근로자) → 고용보험에서 **차감(-)**
       - 실업급여환수금(근로자) → 고용보험에 **가산(+)**
-      - 기본 0.9% 보험료는 위하고 자동 산정이므로 이 값에 포함하지 않음.
-      최종값 = -abs(지원금) + abs(환수금)
+      - 기준값은 WEHAGO **재계산 결과**(다운로드 엑셀 셀에 이미 들어있음).
+        워크플로우 순서가 재계산 → 다운로드 → 병합 → 업로드 이므로,
+        병합 시점에 셀에는 이미 산정된 보험료가 존재한다.
+      최종값 = 재계산값 - abs(지원금) + abs(환수금)
+
+    이전 구현은 재계산값을 읽지 않고 조정분만 덮어써서(-16,450 등) 산정분이
+    소실됐다. "업로드 후 WEHAGO 가 기본 0.9% 를 자동 산정한다"는 전제가
+    실제 흐름과 달랐던 것이 원인.
     """
     ei_col = col_map.get("고용보험")
     if ei_col is None:
@@ -331,7 +356,11 @@ def _apply_ei_row(ws, row: int, col_map: dict,
     if collect_amount is not None:
         adjustment += abs(collect_amount)
 
-    # 조정분이 0(지원금·환수금 모두 0/None)이면 WEHAGO 자동산정값(기본 0.9%) 보존 —
-    # 덮어쓰지 않는다. 계약("조정분만 반영")에 부합.
-    if adjustment != 0:
-        ws.cell(row, ei_col + 1).value = adjustment
+    # 조정분이 0(지원금·환수금 모두 0/None 또는 상계)이면 재계산값 그대로 보존 —
+    # 불필요한 쓰기를 하지 않는다.
+    if adjustment == 0:
+        return
+
+    cell = ws.cell(row, ei_col + 1)
+    base = _cell_to_int(cell.value)
+    cell.value = base + adjustment

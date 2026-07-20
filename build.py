@@ -130,6 +130,10 @@ def build_pyinstaller(driver_dir):
         # openpyxl
         "--hidden-import=openpyxl",
 
+        # xlrd — 고용보험료지원금정보 .xls(OLE2) 파싱. 함수 내부 import 라 보험으로 명시.
+        # (누락 시 고용보험 실업급여 지원금/환수금이 조용히 미반영됨)
+        "--hidden-import=xlrd",
+
         # PDF 파싱 — 함수 내부 import라 PyInstaller 정적 분석이 못 잡음. 명시 수집 필수.
         # (누락 시 런타임 ModuleNotFoundError: No module named 'pdfplumber')
         "--collect-submodules=pdfplumber",
