@@ -72,8 +72,9 @@ simple_read.txt
 # Office 임시 잠금 파일 (~$...)
 ~$*
 
-# Claude memory
+# AI 코딩 도구 로컬 상태 (세션 계획/캐시 — 커밋 대상 아님)
 .claude/
+.zcode/
 
 # macOS
 .DS_Store

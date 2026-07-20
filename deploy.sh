@@ -27,7 +27,12 @@ RELEASES_OWNER="cobaetoo"
 RELEASES_REPO="withholding-tax-releases"
 VERSION_PY="src/version.py"
 INSTALLER_JSON="installer_output/version.json"
-POLL_MAX_SECONDS=90          # version.json raw URL 캐시 반영 대기
+# version.json raw URL 캐시 반영 대기.
+# raw.githubusercontent.com 은 Cache-Control: max-age=300 이라 최악의 경우(푸시 직전에
+# 캐시가 채워진 경우) 300초를 꽉 채워야 갱신된다. 90s 로는 구조적으로 부족해 오탐이 잦았음
+# (2026-07-20 v1.0.5 배포에서 실제 발생 — 실제 전파는 커밋 +300s 시점).
+POLL_MAX_SECONDS=330
+POLL_INTERVAL_SECONDS=10     # 폴링 간격(로그 노이즈 억제 — 330/10 = 최대 33줄)
 
 # ── 색상 (터미널 비지원 시 자동 비활성) ─────────────────────────────────
 if [[ -t 1 ]]; then
@@ -492,7 +497,8 @@ run_step_verify_propagation() {
         return
     fi
 
-    # raw URL 은 CDN 캐시로 수십 초~1분 지연. version 필드가 바뀔 때까지 폴링.
+    # raw URL 은 CDN 캐시(max-age=300)로 최대 300초 지연. version 필드가 바뀔 때까지 폴링.
+    # 진행 상황 판단용: 응답의 Source-Age 가 300 에 닿으면 그 직후 갱신된다.
     local elapsed=0 remote_version=""
     while (( elapsed < POLL_MAX_SECONDS )); do
         remote_version=$(curl -fsSL "$url" 2>/dev/null \
@@ -504,12 +510,14 @@ run_step_verify_propagation() {
         fi
         printf '  %s대기 중%s ... 원격=%s (목표=%s, %ds)\n' \
             "$C_DIM" "$C_RESET" "${remote_version:-?}" "$NEW_VERSION" "$elapsed"
-        sleep 5
-        elapsed=$((elapsed+5))
+        sleep "$POLL_INTERVAL_SECONDS"
+        elapsed=$((elapsed+POLL_INTERVAL_SECONDS))
     done
 
     warn "전파 확인 시간 초과(${POLL_MAX_SECONDS}s). 원격 version=${remote_version:-?}"
-    warn "GitHub raw 캐시 전파가 더 지연되고 있을 수 있습니다 — 1~2분 후 수동 확인:"
+    warn "CDN 지연이 아니라 실제 반영 실패일 수 있습니다 — raw 가 아닌 API 로 진위 확인:"
+    warn "  gh api repos/$RELEASES_OWNER/$RELEASES_REPO/contents/version.json --jq '.content' | base64 -d"
+    warn "위 결과가 $NEW_VERSION 이면 배포는 정상이고 CDN 캐시만 남은 것입니다. 아니면 [5] 실패:"
     warn "  curl -s $url"
 }
 

@@ -53,14 +53,30 @@ def virustotal_preflight(path: str) -> None:
 
     VT_API_KEY 환경변수 + vt-cli(`vt`) 가 모두 있을 때만 동작(미설정 시 스킵).
     업로드만 수행한다 — 결과는 VT 웹에서 수동 확인 후 탐지 다수(≥10/72) 시 릴리스 중단.
+
+    활성화 방법:
+      1) vt-cli 설치 — https://github.com/VirusTotal/vt-cli/releases (PATH 에 `vt`)
+      2) VT 무료 계정의 API 키를 VT_API_KEY 환경변수로 설정
+    둘 중 하나라도 없으면 조용히 스킵된다(릴리스는 계속 진행 — 차단 게이트 아님).
     """
     api_key = os.environ.get("VT_API_KEY")
-    if not api_key or shutil.which("vt") is None:
-        print("[VT] VirusTotal 게이트 미설정(VT_API_KEY 또는 vt-cli 없음) — 스킵")
+    has_vt = shutil.which("vt") is not None
+    if not api_key or not has_vt:
+        missing = []
+        if not api_key:
+            missing.append("VT_API_KEY 미설정")
+        if not has_vt:
+            missing.append("vt-cli 미설치")
+        print(f"[VT] VirusTotal 게이트 미설정({', '.join(missing)}) — 스킵")
+        print("[VT]   활성화: vt-cli 설치 + VT_API_KEY 설정 (release.py 도크스트링 참조)")
         return
     print(f"[VT] {path} 스캔 업로드 중(수분 소요 가능)...")
+    # vt-cli 는 자체 설정파일(~/.vt.toml) 또는 VTCLI_APIKEY 환경변수에서 키를 읽는다.
+    # VT_API_KEY 만 설정한 상태로는 인증되지 않으므로 여기서 넘겨준다.
+    # (--apikey 인자 대신 환경변수 — argv 는 프로세스 목록에 노출됨)
+    env = {**os.environ, "VTCLI_APIKEY": api_key}
     try:
-        rc = subprocess.run(["vt", "scan", "file", path]).returncode
+        rc = subprocess.run(["vt", "scan", "file", path], env=env).returncode
     except FileNotFoundError:
         print("[VT][WARN] vt-cli 실행 실패 — 스킵")
         return
