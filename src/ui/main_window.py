@@ -59,6 +59,9 @@ class MainWindow(QMainWindow):
         self._download_worker = None
         self._progress_dialog = None
         self._download_canceled = False
+        # 이번 세션에서 '나중에'를 누른 버전 — 무음 재확인 시 재프롬프트 억제
+        # (영구 스킵은 updater prefs 의 skip_version, 이것은 세션 한정)
+        self._deferred_versions: set = set()
 
         self._setup_ui()
         self._load_phases()
@@ -97,6 +100,14 @@ class MainWindow(QMainWindow):
 
         # 시작 직후 자동 업데이트 확인 (무알림; dev 모드/스로틀 시 조기 반환)
         QTimer.singleShot(2500, self._auto_check_for_update)
+
+        # 주기 재확인 — 앱을 켜둔 채 방치해도 당일 내 새 버전 수렴.
+        # 1시간 간격이지만 실제 네트워크 확인은 updater 의 4시간 스로틀이 게이트
+        # (짧은 타이머 + 긴 스로틀 = 절전/재개·타이머 드리프트에 자기치유적).
+        self._update_timer = QTimer(self)
+        self._update_timer.setInterval(60 * 60 * 1000)
+        self._update_timer.timeout.connect(self._auto_check_for_update)
+        self._update_timer.start()
 
         # 주기적 인증 갱신 (4시간마다)
         self._auth_timer = QTimer(self)
@@ -622,6 +633,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self._poll_timer.stop()
         self._auth_timer.stop()
+        self._update_timer.stop()
         # 업데이트 워커 정리
         if self._download_worker:
             self._download_worker.cancel()
@@ -918,12 +930,17 @@ class MainWindow(QMainWindow):
         )
 
     def _auto_check_for_update(self):
-        """시작 직후 자동 확인 — 무알림. dev 모드/스로틀 시 건너뜀."""
+        """자동 확인(시작 2.5초 후 + 1시간 주기) — 무알림. dev/작업 중/스로틀 시 건너뜀."""
         if not getattr(sys, "frozen", False):
+            return
+        # 자동화 진행 중 업데이트 프롬프트→앱 종료는 작업을 죽인다.
+        # 스로틀 슬롯을 소모하기 전에 건너뛰어 다음 시간 타이머에서 재시도.
+        if self._automation_active or self.parallel_runner.is_running():
             return
         if not updater.should_check_today():
             return
         updater.set_last_check()
+        updater.log_event("trigger: auto")
         self._start_update_check(silent=True)
 
     def _manual_check_for_update(self):
@@ -935,12 +952,14 @@ class MainWindow(QMainWindow):
             )
             return
         updater.set_last_check()
+        updater.log_event("trigger: manual")
         self._start_update_check(silent=False)
 
     def _start_update_check(self, *, silent: bool):
         if self._update_in_progress:
             return
         self._update_in_progress = True
+        self._cleanup_worker("_update_worker")
         self._update_worker = UpdateWorker(self)
         self._update_worker.check_done.connect(
             lambda res: self._on_update_check_result(res, silent)
@@ -974,14 +993,18 @@ class MainWindow(QMainWindow):
         version = res.get("version", "")
         mandatory = (action == "mandatory")
 
-        # 자동(무알림) 확인 시, 사용자가 건너뛴 버전이면 조용히 무시 (강제는 예외)
-        if silent and not mandatory and updater.get_skip_version() == version:
+        # 자동(무알림) 확인 시, 건너뛴 버전(영구)/이번 세션 '나중에' 버전이면 조용히 무시
+        if not updater.should_prompt(silent, mandatory, version,
+                                     updater.get_skip_version(),
+                                     self._deferred_versions):
+            updater.log_event(f"prompt: suppressed v={version} (skip/deferred)")
             self._update_in_progress = False
             self._cleanup_worker("_update_worker")
             return
 
         # 자동화 진행 중에는 적용 불가 → 보류
-        if self._automation_active:
+        if self._automation_active or self.parallel_runner.is_running():
+            updater.log_event(f"prompt: deferred v={version} (automation busy)")
             self._update_in_progress = False
             self._cleanup_worker("_update_worker")
             if not silent:
@@ -1014,26 +1037,34 @@ class MainWindow(QMainWindow):
         else:
             box.addButton("나중에", QMessageBox.RejectRole)
             btn_skip = box.addButton("이 버전 건너뛰기", QMessageBox.DestructiveRole)
+        updater.log_event(f"prompt: shown v={version} mandatory={mandatory}")
         box.exec()
         clicked = box.clickedButton()
 
         if clicked == btn_update:
+            updater.log_event(f"prompt: accept v={version}")
             self._start_download(res)
         elif mandatory and clicked == btn_quit:
+            updater.log_event(f"prompt: quit v={version} (mandatory)")
             self._update_in_progress = False
             QApplication.quit()
         elif (not mandatory) and btn_skip is not None and clicked == btn_skip:
+            updater.log_event(f"prompt: skip v={version}")
             updater.set_skip_version(version)
             self._update_in_progress = False
             self._cleanup_worker("_update_worker")
         else:
-            self._update_in_progress = False  # 나중에
+            # 나중에(또는 창 닫기) — 이번 세션 무음 재확인에서는 다시 묻지 않음
+            updater.log_event(f"prompt: later v={version}")
+            self._deferred_versions.add(version)
+            self._update_in_progress = False
             self._cleanup_worker("_update_worker")
 
     def _start_download(self, res: dict):
         size = int(res.get("size", 0) or 0)
         # 다운로드 + 설치 압축해제 여유공간(대략 2배) 확인
         if size and not updater.has_enough_disk(size * 2):
+            updater.log_event(f"download: fail insufficient-disk need={size * 2}")
             self._update_in_progress = False
             QMessageBox.warning(
                 self, "디스크 공간 부족",

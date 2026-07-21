@@ -557,7 +557,7 @@ main() {
         "$RELEASES_OWNER" "$RELEASES_REPO" "$NEW_VERSION"
     printf '  version.json: https://raw.githubusercontent.com/%s/%s/main/version.json\n' \
         "$RELEASES_OWNER" "$RELEASES_REPO"
-    printf '  %s기존 PC는 다음 시작 시(또는 20시간 주기 자동 확인) 업데이트를 감지합니다.%s\n' \
+    printf '  %s기존 PC는 다음 시작 시(또는 1시간 주기 확인, 4시간 스로틀) 업데이트를 감지합니다.%s\n' \
         "$C_DIM" "$C_RESET"
 }
 

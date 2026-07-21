@@ -32,7 +32,7 @@ from src.config import APP_DATA_DIR, APP_NAME
 
 
 # ── 상수 ───────────────────────────────────────────────────────────────
-# 소스 저장소(비공개)와 별개인 '공개' 릴리스 저장소.
+# 소스 저장소와 별개인 릴리스 전용 저장소 (version.json + 설치파일 에셋만 보관).
 RELEASES_OWNER = "cobaetoo"
 RELEASES_REPO = "withholding-tax-releases"
 # version.json 은 공개 저장소 루트에 두고 raw URL로 조회 (API 레이트리밋/구조 결합 회피).
@@ -45,7 +45,15 @@ APP_MUTEX_NAME = "WithholdingTaxAutomation_SingleInstance"
 
 _DOWNLOAD_DIR = os.path.join(APP_DATA_DIR, "downloads")
 _PREFS_PATH = os.path.join(APP_DATA_DIR, "update_prefs.json")
-_CHECK_INTERVAL = timedelta(hours=20)  # 하루 1회 정도 자동 확인
+# 자동 확인 스로틀. 시작 직후 1회 + 1시간 주기 타이머(main_window)가 호출하지만,
+# 실제 네트워크 확인은 이 간격에 한 번만 — 켜둔 채 방치한 PC도 당일 내 수렴.
+_CHECK_INTERVAL = timedelta(hours=4)
+
+# 진단 로그 (update.log) — 무음 자동 확인 경로는 UI 표시가 전혀 없으므로,
+# "왜 업데이트가 안 됐는지"를 사후 진단할 유일한 근거가 이 파일이다.
+_LOG_DIR = os.path.join(APP_DATA_DIR, "logs")
+_LOG_PATH = os.path.join(_LOG_DIR, "update.log")
+_LOG_MAX_BYTES = 512 * 1024  # 초과 시 update.log.1 로 1회 로테이션
 
 # ── 보안 유틸리티 ────────────────────────────────────────────────────────
 _CMD_META = re.compile(r'[&|><^%"!]')
@@ -88,6 +96,22 @@ def _validate_path_for_cmd(path: str, label: str = "") -> str:
 
 def current_version() -> str:
     return __version__
+
+
+def log_event(msg: str) -> None:
+    """update.log 에 타임스탬프 한 줄 기록 — 진단 전용, 절대 raise 안 함."""
+    try:
+        os.makedirs(_LOG_DIR, exist_ok=True)
+        try:
+            if os.path.getsize(_LOG_PATH) > _LOG_MAX_BYTES:
+                os.replace(_LOG_PATH, _LOG_PATH + ".1")
+        except OSError:
+            pass  # 최초 기록(파일 없음) 등 — 로테이션은 최선 노력
+        ts = datetime.now().isoformat(timespec="seconds")
+        with open(_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"{ts} {msg}\n")
+    except Exception:
+        pass
 
 
 # ── 버전 비교 (semver, 관용) ────────────────────────────────────────────
@@ -134,9 +158,12 @@ def fetch_version_info(timeout: int = 6):
             raw = resp.read()
         info = json.loads(raw.decode("utf-8"))
         if not isinstance(info, dict) or "version" not in info:
+            log_event("fetch: fail malformed version.json")
             return None
+        log_event(f"fetch: ok remote={info.get('version')}")
         return info
-    except Exception:
+    except Exception as e:
+        log_event(f"fetch: fail {e!r}")
         return None
 
 
@@ -173,7 +200,29 @@ def decide(info: dict, local: str = None) -> dict:
 
 def check() -> dict:
     """version.json 조회 + 판정을 한 번에. 실패 시 {"action": "none"}."""
-    return decide(fetch_version_info(), __version__)
+    res = decide(fetch_version_info(), __version__)
+    log_event(
+        f"check: local={__version__} remote={res.get('version', '')}"
+        f" action={res.get('action')}"
+    )
+    return res
+
+
+def should_prompt(silent: bool, mandatory: bool, version: str,
+                  skip_version: str = "", deferred=None) -> bool:
+    """확인 결과를 사용자에게 표시할지 판정 (순수 함수, 테스트 가능).
+
+    무음(자동) 확인에서 비필수 버전이 '이 버전 건너뛰기'(영구, prefs) 또는
+    이번 세션 '나중에'(deferred 집합) 대상이면 표시하지 않는다.
+    수동 확인과 필수(mandatory) 업데이트는 항상 표시.
+    """
+    if not silent or mandatory:
+        return True
+    if version and version == skip_version:
+        return False
+    if deferred and version in deferred:
+        return False
+    return True
 
 
 # ── 다운로드 + 검증 ─────────────────────────────────────────────────────
@@ -199,25 +248,32 @@ def _sha256_file(path) -> str:
 
 def validate_installer(path: str, expected_size: int = 0,
                        sha256: str = "", _precomputed_sha: str = None) -> bool:
-    """설치파일 무결성 검증: 크기·PE 매직(MZ)·sha256(필수)."""
+    """설치파일 무결성 검증: 크기·PE 매직(MZ)·sha256(필수). 실패 사유는 update.log 에."""
     if not sha256:
+        log_event("validate: fail no-sha256")
         return False                    # sha256 없으면 검증 불가
     try:
         size = os.path.getsize(path)
     except OSError:
+        log_event("validate: fail stat")
         return False
     if size < 1_000_000:            # 정상 설치파일은 ~200MB; 1MB 미만이면 손상/오류 본문
+        log_event(f"validate: fail too-small size={size}")
         return False
     if expected_size and size != expected_size:
+        log_event(f"validate: fail size-mismatch size={size} expected={expected_size}")
         return False
     try:
         with open(path, "rb") as f:
             if f.read(2) != b"MZ":  # Windows PE 실행 파일 서명
+                log_event("validate: fail not-PE")
                 return False
     except OSError:
+        log_event("validate: fail read")
         return False
     actual = _precomputed_sha or _sha256_file(path)
     if actual.lower() != sha256.lower():
+        log_event("validate: fail sha256-mismatch")
         return False
     return True
 
@@ -231,18 +287,23 @@ def download_installer(url: str, expected_size: int = 0, sha256: str = "",
         cancel_cb:   callable() -> bool — True 반환 시 취소.
     """
     if not url:
+        log_event("download: fail empty-url")
         return None
     # URL 도메인 허용 목록 검증 (GitHub 공식 도메인만 허용)
     try:
         host = urllib.parse.urlparse(url).hostname or ""
         if not any(host == d or host.endswith("." + d) for d in _ALLOWED_DOMAINS):
+            log_event(f"download: fail reject-domain host={host}")
             return None
     except Exception:
+        log_event("download: fail bad-url")
         return None
     try:
         os.makedirs(_DOWNLOAD_DIR, exist_ok=True)
     except Exception:
+        log_event("download: fail mkdir")
         return None
+    log_event(f"download: start url={url}")
 
     final = os.path.join(_DOWNLOAD_DIR, f"{APP_NAME}_설치.exe")
     part = final + ".part"
@@ -268,9 +329,11 @@ def download_installer(url: str, expected_size: int = 0, sha256: str = "",
                 if progress_cb:
                     progress_cb(done, total)
     except _Cancelled:
+        log_event("download: canceled")
         _safe_remove(part)
         return None
-    except Exception:
+    except Exception as e:
+        log_event(f"download: fail {e!r}")
         _safe_remove(part)
         return None
 
@@ -281,9 +344,11 @@ def download_installer(url: str, expected_size: int = 0, sha256: str = "",
     try:
         _safe_remove(final)
         os.replace(part, final)
-    except Exception:
+    except Exception as e:
+        log_event(f"download: fail finalize {e!r}")
         _safe_remove(part)
         return None
+    log_event(f"download: ok bytes={done} path={final}")
     return final
 
 
@@ -337,12 +402,14 @@ def spawn_installer_and_detach(installer_path: str, exe_path: str = None) -> boo
     """
     if exe_path is None:
         exe_path = sys.executable
-    cmd = build_relaunch_command(installer_path, exe_path, _install_log_path())
 
     flags = 0
     if sys.platform == "win32":
         flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
     try:
+        # build_relaunch_command 는 경로에 cmd 메타문자가 있으면 ValueError —
+        # 이 함수의 never-raise 계약을 지키려면 반드시 try 안에서 호출해야 한다.
+        cmd = build_relaunch_command(installer_path, exe_path, _install_log_path())
         subprocess.Popen(
             cmd,
             creationflags=flags,
@@ -351,8 +418,10 @@ def spawn_installer_and_detach(installer_path: str, exe_path: str = None) -> boo
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        log_event(f"spawn: ok installer={installer_path}")
         return True
-    except Exception:
+    except Exception as e:
+        log_event(f"spawn: fail {e!r}")
         return False
 
 
