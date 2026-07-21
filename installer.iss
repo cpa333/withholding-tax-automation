@@ -69,11 +69,20 @@ korean.WelcomeLabel2=원천징수 자동화 프로그램을 설치합니다.%n%n
 [Code]
 function ChromeInstalled: Boolean;
 var
-  ChromePath1, ChromePath2: string;
+  RegPath: string;
 begin
-  ChromePath1 := 'C:\Program Files\Google\Chrome\Application\chrome.exe';
-  ChromePath2 := ExpandConstant('{localappdata}\Google\Chrome\Application\chrome.exe');
-  Result := FileExists(ChromePath1) or FileExists(ChromePath2);
+  { 고정 경로 3종: 64비트 / 32비트(x86) / 사용자 단위 설치.
+    x86 경로 누락 시 해당 PC에서 자동 업데이트 무인 설치(/VERYSILENT)가
+    이 게이트에서 조용히 exit 1 → 앱 재실행 불발로 "업데이트만 조용히 실패"한다. }
+  Result :=
+    FileExists('C:\Program Files\Google\Chrome\Application\chrome.exe') or
+    FileExists('C:\Program Files (x86)\Google\Chrome\Application\chrome.exe') or
+    FileExists(ExpandConstant('{localappdata}\Google\Chrome\Application\chrome.exe'));
+  { 비표준 설치 경로 대비: Windows App Paths 등록값(설치 시 Chrome 이 기록) }
+  if not Result then
+    if RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe', '', RegPath) or
+       RegQueryStringValue(HKCU, 'SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe', '', RegPath) then
+      Result := FileExists(RegPath);
 end;
 
 function InitializeSetup: Boolean;
