@@ -78,6 +78,24 @@ def test_parse_is_newer_basic():
     assert updater.is_newer("", "1.0.5") is False            # 빈 원격 → 무시
 
 
+def test_relaunch_command_is_string_cmd_s_c():
+    """재실행 래퍼는 문자열 `cmd /s /c "..."` 여야 한다 (회귀 고정).
+
+    과거 Popen(["cmd","/c",inner]) 리스트 형태는 list2cmdline 이 내부 따옴표를
+    \\" 로 이스케이프 → cmd.exe 가 해석 불가 → 설치기 경로가 깨져 자동 업데이트가
+    다운로드까지만 되고 설치는 조용히 실패했다 (전 배포 버전 공통 결함).
+    """
+    cmd = updater.build_relaunch_command(
+        r"C:\d\원천징수자동화_설치.exe", r"C:\a\원천징수자동화.exe", r"C:\l\i.log",
+    )
+    assert isinstance(cmd, str)
+    assert cmd.startswith('cmd /s /c "') and cmd.endswith('"')
+    assert '\\"' not in cmd  # 백슬래시-이스케이프 따옴표 금지
+    assert '"C:\\d\\원천징수자동화_설치.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART' in cmd
+    assert '/LOG="C:\\l\\i.log"' in cmd
+    assert 'start "" "C:\\a\\원천징수자동화.exe"' in cmd
+
+
 def test_decide_min_supported_forces_mandatory():
     info = {"version": "1.1.0", "mandatory": False, "min_supported": "1.1.0",
             "url": "u", "size": 1, "sha256": "a", "notes": ""}

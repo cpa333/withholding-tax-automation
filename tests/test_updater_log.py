@@ -72,6 +72,23 @@ def test_validate_installer_logs_reason(log_in_tmp, tmp_path):
     assert "validate: fail too-small size=102" in content
 
 
+def test_spawn_passes_string_to_popen(log_in_tmp, monkeypatch, tmp_path):
+    """spawn 은 Popen 에 반드시 '문자열'을 넘겨야 한다 (리스트면 list2cmdline 재발)."""
+    monkeypatch.setattr(updater, "APP_DATA_DIR", str(tmp_path))
+    captured = {}
+
+    class FakePopen:
+        def __init__(self, cmd, **kwargs):
+            captured["cmd"] = cmd
+
+    monkeypatch.setattr(updater.subprocess, "Popen", FakePopen)
+    ok = updater.spawn_installer_and_detach(r"C:\x\inst.exe", exe_path=r"C:\y\app.exe")
+    assert ok is True
+    assert isinstance(captured["cmd"], str)
+    assert captured["cmd"].startswith('cmd /s /c "')
+    assert "spawn: ok" in _read(log_in_tmp)
+
+
 def test_spawn_installer_bad_path_returns_false(log_in_tmp):
     """cmd 메타문자(&) 경로 → ValueError 가 아니라 False (never-raise 계약).
 

@@ -374,11 +374,18 @@ def _install_log_path() -> str:
 
 
 def build_relaunch_command(installer_path: str, exe_path: str,
-                           log_path: str = "") -> list:
-    """'부모 종료 대기 → 무인설치 → 새 exe 재실행' cmd 래퍼 인자 생성.
+                           log_path: str = "") -> str:
+    """'부모 종료 대기 → 무인설치 → 새 exe 재실행' cmd 래퍼 **문자열** 생성.
 
     ping -n 4 (~3초)로 호출 프로세스가 완전히 종료되어 exe/_internal 파일 잠금이
     풀릴 시간을 준 뒤 설치기를 무인 실행하고, 성공하면 같은 경로의 새 exe를 실행한다.
+
+    ★ 반드시 문자열로 반환해 Popen(문자열)로 실행해야 한다. 과거의
+    Popen(["cmd","/c",inner]) 리스트 형태는 list2cmdline 이 내부 따옴표를 \" 로
+    이스케이프하는데 cmd.exe 는 백슬래시 이스케이프를 해석하지 못해 설치기 경로가
+    깨졌다 — 다운로드·검증까지 끝내고 설치만 조용히 실패하던 자동 업데이트의
+    근본 원인. 문자열은 CreateProcess 에 그대로 전달되고, `cmd /s /c "..."` 규칙
+    (양 끝 따옴표 한 쌍만 제거)으로 내부 따옴표가 보존된다.
     """
     _validate_path_for_cmd(installer_path, "installer_path")
     _validate_path_for_cmd(exe_path, "exe_path")
@@ -391,7 +398,7 @@ def build_relaunch_command(installer_path: str, exe_path: str,
         f' & "{installer_path}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART{log_arg}'
         f' && start "" "{exe_path}"'   # 설치 성공(종료코드 0)한 경우에만 재시작
     )
-    return ["cmd", "/c", inner]
+    return f'cmd /s /c "{inner}"'
 
 
 def spawn_installer_and_detach(installer_path: str, exe_path: str = None) -> bool:
