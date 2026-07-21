@@ -117,7 +117,28 @@ gh api repos/cobaetoo/withholding-tax-releases/contents/version.json -X PUT \
 - **재실행:** 앱이 종료된 뒤 cmd 래퍼가 `/VERYSILENT` 무인설치 후 새 exe 를 재실행.
 - **실패 안전:** 네트워크/서버 장애 시 자동 확인은 조용히 무시되고 앱은 정상 실행된다.
   손상 다운로드는 size+sha256 검증으로 차단.
+- **확인 주기:** 시작 2.5초 후 1회 + **1시간 주기 타이머**(앱을 켜둔 PC도 당일 수렴).
+  실제 네트워크 확인은 **4시간 스로틀**(`updater._CHECK_INTERVAL`)이 게이트.
+  "나중에"는 세션 내 재프롬프트 억제, "이 버전 건너뛰기"는 영구(다음 버전에서 재안내).
+  자동화(단독/병렬) 실행 중에는 확인/프롬프트를 미룬다.
 - **개발 모드:** 소스로 실행(`python gui_main.py`)하면 설치를 진행하지 않는다.
+
+### 업데이트 진단 로그 (update.log)
+
+무음 자동 확인은 UI 에 아무것도 표시하지 않으므로, "왜 업데이트가 안 됐는지"는
+`%LOCALAPPDATA%\원천징수자동화-data\logs\update.log` 로 판독한다
+(개발 모드는 `<repo>/logs/update.log`, 512KB 초과 시 `update.log.1` 로 로테이션).
+
+| 로그 라인 | 의미 |
+|------|------|
+| (라인 없음) | 체크 자체가 안 돎 — dev 모드, 4시간 스로틀, 또는 자동화 실행 중 |
+| `fetch: fail ...` | version.json 조회 실패 (네트워크/프록시/DNS) |
+| `check: ... action=none` | 원격이 같거나 낮음 — 정상 (배포 측 version.json 미반영 의심 시 `gh api` 로 확인) |
+| `prompt: suppressed ...` | 사용자가 이 버전을 건너뛰었거나 세션 내 '나중에' 상태 |
+| `prompt: deferred ... (automation busy)` | 자동화 진행 중이라 보류 — 작업 후 재확인됨 |
+| `prompt: later/skip/accept ...` | 사용자 선택 이력 |
+| `download: fail ...` / `validate: fail ...` | 다운로드/무결성 실패 (사유 명시) |
+| `spawn: ok/fail ...` | 설치기 분리 실행 여부 — ok 후 재실행이 없으면 `logs\install_*.log`(Inno)와 Defender 기록 확인 |
 
 ## 코드 서명 / SmartScreen 현황 (v1.0.3 현재)
 

@@ -76,5 +76,8 @@ simple_read.txt
 .claude/
 .zcode/
 
+# dev 모드 updater 진단 로그 (APP_DATA_DIR=cwd → repo/logs/update.log)
+logs/
+
 # macOS
 .DS_Store
