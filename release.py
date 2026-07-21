@@ -26,6 +26,14 @@ import subprocess
 import sys
 from datetime import date
 
+# cp949 콘솔 자체 방어 — PYTHONUTF8=1 없이 수동 실행해도 "✓"·한글 노트 출력이
+# UnicodeEncodeError 로 릴리스를 중단시키지 않도록 (v1.0.4 가 gh 직전에 죽은 원인).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from src.version import __version__          # noqa: E402
 from src.utils import updater                # noqa: E402
