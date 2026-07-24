@@ -57,12 +57,14 @@ class ParallelCliRunner(QThread):
         )
         # src 패키지 해석 이중 보장: cwd(repo root) + PYTHONPATH(안전망)
         pypath = repo_root + os.pathsep + os.environ.get("PYTHONPATH", "")
-        env_nps = {**os.environ, "WTAX_CDP_PORT": str(nps_port),
-                   "PYTHONUTF8": "1", "PYTHONPATH": pypath}
-        env_nhis = {**os.environ, "WTAX_CDP_PORT": str(nhis_port),
-                    "PYTHONUTF8": "1", "PYTHONPATH": pypath}
-        env_comwel = {**os.environ, "WTAX_CDP_PORT": str(comwel_port),
-                      "PYTHONUTF8": "1", "PYTHONPATH": pypath}
+        # PYTHONUTF8 은 dev(python)에서만 유효(frozen exe 는 무시) — 그래서 frozen 은
+        # gui_main._dispatch_cli_subprocess 가 stdout 을 직접 utf-8 로 재설정한다.
+        # PYTHONIOENCODING/PYTHONUNBUFFERED 는 dev 경로 보강(즉시 flush·utf-8 파이프).
+        _enc_env = {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",
+                    "PYTHONUNBUFFERED": "1", "PYTHONPATH": pypath}
+        env_nps = {**os.environ, "WTAX_CDP_PORT": str(nps_port), **_enc_env}
+        env_nhis = {**os.environ, "WTAX_CDP_PORT": str(nhis_port), **_enc_env}
+        env_comwel = {**os.environ, "WTAX_CDP_PORT": str(comwel_port), **_enc_env}
         self._spawn("nps", "src.automation.nps.nps_auto_cdp", env_nps,
                     repo_root, firms, mgmts, year, month)
         self._spawn("nhis", "src.automation.nhis.nhis_edi_auto_cdp", env_nhis,
@@ -92,6 +94,10 @@ class ParallelCliRunner(QThread):
             args=args, env=env, cwd=cwd,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL, text=True, encoding="utf-8",
+            # errors="replace": 자식이 예기치 못한 비-utf8 바이트를 흘려도 reader 가
+            # UnicodeDecodeError 로 죽지 않게(파이프 미배수→자식 교착 방지). 근본 원인은
+            # gui_main 의 utf-8 강제로 해소하되, reader 사망 자체를 구조적으로 차단하는 2중 방어.
+            errors="replace",
         )
         if sys.platform == "win32":
             kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
@@ -114,8 +120,10 @@ class ParallelCliRunner(QThread):
                     self.result_summary.emit(which, line[len(_RESULT_MARKER):].strip())
                     continue
                 self.log_message.emit(f"{prefix} {line}")
-        except Exception:
-            pass
+        except Exception as e:
+            # reader 가 조용히 죽으면 파이프가 안 비워져 자식이 교착된다(원래 버그의 핵심).
+            # errors="replace" 로 디코드 에러는 안 나지만, 그래도 예외 시 삼키지 말고 노출.
+            self.log_message.emit(f"{prefix} [reader 예외] {e!r}")
 
     def run(self):
         for which, proc in list(self._procs.items()):

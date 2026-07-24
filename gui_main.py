@@ -102,6 +102,21 @@ def _dispatch_cli_subprocess() -> bool:
         os.chdir(os.path.dirname(sys.executable))
     sys.path.insert(0, resource_path("."))
 
+    # ── stdout/stderr 을 utf-8 로 강제 (frozen 병렬 다운로드 교착 근본 차단) ──
+    # frozen exe 는 PYTHONUTF8 을 무시해 파이프 stdout 이 한글 Windows 기본값(cp949)
+    # 으로 열린다. dev 의 `python -m` 은 모듈을 __main__ 로 실행해 각 CLI 파일 하단의
+    # utf-8 재설정 블록이 돌지만, 이 --wtax-cli 는 importlib 로 import 진입이라(__main__
+    # 아님) 그 블록을 건너뛴다. 그러면 부모(parallel_cli_worker)의 utf-8 파이프 reader
+    # 가 첫 한글 줄에서 UnicodeDecodeError 로 죽고 → 파이프 미배수 → 자식이 버퍼가 찬
+    # 시점에 print 에서 블록 → 다운로드가 중간에 교착된다. 자식 진입점인 여기서 강제.
+    import io
+    for _stream_name in ("stdout", "stderr"):
+        _stream = getattr(sys, _stream_name, None)
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, io.UnsupportedOperation):
+            pass
+
     if not module:
         return False
 
